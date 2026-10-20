@@ -135,8 +135,7 @@ static irqreturn_t aac_src_intr_message(int irq, void *dev_id)
 
 	if (mode & AAC_INT_MODE_AIF) {
 		/* handle AIF */
-		if (dev->aif_thread && dev->fsa_dev)
-			aac_intr_normal(dev, 0, 2, 0, NULL);
+		aac_intr_normal(dev, 0, 2, 0, NULL);
 		if (dev->msi_enabled)
 			aac_src_access_devreg(dev, AAC_CLEAR_AIF_BIT);
 		mode = 0;
@@ -414,23 +413,16 @@ static int aac_src_check_health(struct aac_dev *dev)
 	u32 status = src_readl(dev, MUnit.OMR);
 
 	/*
-	 *	Check to see if the board panic'd.
-	 */
-	if (unlikely(status & KERNEL_PANIC))
-		goto err_blink;
-
-	/*
 	 *	Check to see if the board failed any self tests.
 	 */
 	if (unlikely(status & SELF_TEST_FAILED))
-		goto err_out;
+		return -1;
 
 	/*
-	 *	Check to see if the board failed any self tests.
+	 *	Check to see if the board panic'd.
 	 */
-	if (unlikely(status & MONITOR_PANIC))
-		goto err_out;
-
+	if (unlikely(status & KERNEL_PANIC))
+		return (status >> 16) & 0xFF;
 	/*
 	 *	Wait for the adapter to be up and running.
 	 */
@@ -440,12 +432,6 @@ static int aac_src_check_health(struct aac_dev *dev)
 	 *	Everything is OK
 	 */
 	return 0;
-
-err_out:
-	return -1;
-
-err_blink:
-	return (status > 16) & 0xFF;
 }
 
 /**
@@ -626,7 +612,7 @@ static int aac_src_restart_adapter(struct aac_dev *dev, int bled)
  *	@dev: Adapter
  *	@comm: communications method
  */
-static int aac_src_select_comm(struct aac_dev *dev, int comm)
+int aac_src_select_comm(struct aac_dev *dev, int comm)
 {
 	switch (comm) {
 	case AAC_COMM_MESSAGE:

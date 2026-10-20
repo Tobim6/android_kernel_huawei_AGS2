@@ -52,7 +52,6 @@
 #define tDRPTry         90 * 1
 #define tDRPTryWait     600 * 1
 #define tErrorRecovery  30 * 1
-#define tSourceDetach   15*1
 
 #define tDeviceToggle   3 * 1      // Duration in ms to wait before checking other CC pin for the device
 #define tTOG2           30 * 1     //When TOGGLE=1, time at which internal versions of PU_EN1=1 or PU_EN2=1 and PWDN1=PDWN2=0 selected to present externally as a DFP in the DRP toggle
@@ -87,11 +86,6 @@ void InitializeRegisters(void);
 void InitializeTypeCVariables(void);
 void InitializeTypeC(void);
 
-#ifdef FSC_HAVE_CUSTOM_SRC2
-int get_emarker_detect_status(void);
-void set_emarker_detect_status(FSC_BOOL status);
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
-
 void DisableTypeCStateMachine(void);
 void EnableTypeCStateMachine(void);
 
@@ -108,7 +102,7 @@ void StateMachineTryWaitSink(void);
 void StateMachineDebugAccessorySink(void);
 #ifdef FSC_HAVE_CUSTOM_SRC2
 void StateMachineEmarkerCheck(void);
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
+#endif
 #endif // FSC_HAVE_SNK
 
 #if (defined(FSC_HAVE_DRP) || (defined(FSC_HAVE_SNK) && defined(FSC_HAVE_ACCMODE)))
@@ -151,7 +145,7 @@ void SetStateAttachedSink(void);
 void SetStateDebugAccessorySink(void);
 #ifdef FSC_HAVE_CUSTOM_SRC2
 void SetStateEmarkCheck(void);
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
+#endif
 #ifdef FSC_HAVE_DRP
 void RoleSwapToAttachedSink(void);
 #endif // FSC_HAVE_DRP
@@ -217,7 +211,6 @@ FSC_BOOL VbusUnder5V(void);
 
 FSC_BOOL isVSafe5V(void);
 FSC_BOOL isVBUSOverVoltage(FSC_U8 vbusMDAC);
-FSC_BOOL isVBUSRemoved(FSC_U8 vbusMDAC);
 void resetDebounceVariables(void);
 void setDebounceVariables(CCTermType term);
 void setDebounceVariables(CCTermType term);

@@ -143,9 +143,12 @@ config SD_SCHEDULER_CFQ_ONLY
 	  This is an option to change sd io scheduler to cfq when
 	  block io scheduler is row.
 
-config HISI_MMC_CQ_WAKE_IDLE
-	bool "MMC CMDQ thread wake up on idle core"
+config HW_MMC_MAINTENANCE_CMD
+	bool "record emmc cmd sequence"
+	depends on MMC_BLOCK
 	default n
-	help
-	   Give scheduler a hint that mmc cmdq thread should be woken
-	   to idle core to improve performance.
+
+config HW_MMC_MAINTENANCE_DATA
+	bool "record emmc read and write data"
+	depends on MMC_BLOCK
+	default n

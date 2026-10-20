@@ -2,9 +2,9 @@
 
 static RingBuffer *rb;
 
-RingBuffer *Static_RingBuffer_Init(void * ringbufferAddr, int element_size, int element_cnt)
+RingBuffer *Static_RingBuffer_Init(void * ringbufferAddr)
 {
-	rb = RingBuffer_Init(ringbufferAddr, element_size, element_cnt);
+	rb = RingBuffer_Init(ringbufferAddr);
 
 	return rb;
 }
@@ -39,12 +39,12 @@ int Static_RingBuffer_Get(void *element)
 	return RingBuffer_Get(rb, element);
 }
 
-int Static_RingBuffer_Put(const void *element)
+int Static_RingBuffer_Put(void *element)
 {
 	return RingBuffer_Put(rb, element);
 }
 
-int Static_RingBuffer_Compare(const void *element,int compareCount)
+int Static_RingBuffer_Compare(void *element,int compareCount)
 {
 	return RingBuffer_Compare(rb,element,compareCount);
 }

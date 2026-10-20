@@ -29,22 +29,11 @@
 
 #ifndef __ASSEMBLY__
 
-#include <asm/percpu.h>
-
 #include <linux/threads.h>
 #include <linux/cpumask.h>
 #include <linux/thread_info.h>
 
-DECLARE_PER_CPU_READ_MOSTLY(int, cpu_number);
-
-/*
- * We don't use this_cpu_read(cpu_number) as that has implicit writes to
- * preempt_count, and associated (compiler) barriers, that we'd like to avoid
- * the expense of. If we're preemptible, the value can be stale at use anyway.
- * And we can't use this_cpu_ptr() either, as that winds up recursing back
- * here under CONFIG_DEBUG_PREEMPT=y.
- */
-#define raw_smp_processor_id() (*raw_cpu_ptr(&cpu_number))
+#define raw_smp_processor_id() (current_thread_info()->cpu)
 
 struct seq_file;
 
@@ -84,7 +73,6 @@ asmlinkage void secondary_start_kernel(void);
  */
 struct secondary_data {
 	void *stack;
-	struct task_struct *task;
 	long status;
 };
 
@@ -112,28 +100,21 @@ extern void cpu_die_early(void);
 
 static inline void cpu_park_loop(void)
 {
-	for (;;) {
-		wfe();
-		wfi();
-	}
+       for (;;) {
+               wfe();
+               wfi();
+       }
 }
+
+#ifdef CONFIG_HISI_BB
+extern unsigned int g_cpu_in_ipi_stop;
+#endif
 
 static inline void update_cpu_boot_status(int val)
 {
 	WRITE_ONCE(secondary_data.status, val);
 	/* Ensure the visibility of the status update */
 	dsb(ishst);
-}
-
-/*
- * The calling secondary CPU has detected serious configuration mismatch,
- * which calls for a kernel panic. Update the boot status and park the calling
- * CPU.
- */
-static inline void cpu_panic_kernel(void)
-{
-	update_cpu_boot_status(CPU_PANIC_KERNEL);
-	cpu_park_loop();
 }
 
 /*
@@ -148,9 +129,6 @@ static inline void cpu_panic_kernel(void)
  */
 bool cpus_are_stuck_in_kernel(void);
 
-#ifdef CONFIG_HISI_BB
-extern unsigned int g_cpu_in_ipi_stop;
-#endif
 #endif /* ifndef __ASSEMBLY__ */
 
 #endif /* ifndef __ASM_SMP_H */

@@ -8,16 +8,13 @@
 #include <linux/platform_device.h>
 #include <linux/rpmsg.h>
 #include <linux/pinctrl/consumer.h>
-#include <securec.h>
 
-#include "hw_flash.h"
 #include "hwsensor.h"
 #include "sensor_commom.h"
 #include "hw_csi.h"
 //lint -save -e650 -e31
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 
 static char *sensor_dts_name = "IMX214_VENDOR";
 
@@ -308,7 +305,7 @@ imx214_match_id(
 	char *sensor_name [] = { "IMX214_SUNNY", "IMX214_FOXCONN", "IMX214_OFILM" };
 	int rc = 0;
 
-	 loge_if(memset_s(cdata->cfg.name, DEVICE_NAME_SIZE, 0, DEVICE_NAME_SIZE));
+	memset(cdata->cfg.name, 0, DEVICE_NAME_SIZE);
 	if (!strncmp(sensor->board_info->name, sensor_dts_name, strlen(sensor_dts_name))) {
 	    p = devm_pinctrl_get(s_imx214.dev);
 	    if (IS_ERR_OR_NULL(p)) {
@@ -376,25 +373,24 @@ imx214_match_id(
 	    cam_info("%s module_id_0 %d module_id_1 %d .\n",__func__, module_id_0, module_id_1);
 	    if((module_id_0 == 0) && (module_id_1 == 0)){
 	        //sunny module
-	        strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[0], strlen(sensor_name[0])+1);
+	        strncpy(cdata->cfg.name, sensor_name[0], strlen(sensor_name[0])+1);
 	        cdata->data = sensor->board_info->sensor_index;
 	        rc = 0;
 	    }
 	    else if((module_id_0 == 1) && (module_id_1 == 1)){
 	        //foxconn module
-	        strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[1], strlen(sensor_name[1])+1);
+	        strncpy(cdata->cfg.name, sensor_name[1], strlen(sensor_name[1])+1);
 	        cdata->data = sensor->board_info->sensor_index;
 	        rc = 0;
 	    }
 	    else if((module_id_0 == 0) && (module_id_1 == 1)){
 	        //ofilm module
-	        strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[2], strlen(sensor_name[2])+1);
+	        strncpy(cdata->cfg.name, sensor_name[2], strlen(sensor_name[2])+1);
 	        cdata->data = sensor->board_info->sensor_index;
 	        rc = 0;
 	    }
 	    else{
-	        strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor->board_info->name, 
-	            strlen(sensor->board_info->name)+1);
+	        strncpy(cdata->cfg.name, sensor->board_info->name, strlen(sensor->board_info->name)+1);
 	        cdata->data = sensor->board_info->sensor_index;
 	        cam_err("%s failed to get the module id value.\n",__func__);
 	        rc = 0;
@@ -403,7 +399,7 @@ imx214_match_id(
 	    gpio_free(sensor->board_info->gpios[FSIN].gpio);
 	    goto matchID_exit;
 	    } else {
-	        strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor->board_info->name, strlen(sensor->board_info->name)+1);
+	        strncpy(cdata->cfg.name, sensor->board_info->name, strlen(sensor->board_info->name)+1);
 	        cdata->data = sensor->board_info->sensor_index;
 	        rc = 0;
 	        goto matchID_exit;
@@ -537,7 +533,7 @@ static void __exit
 imx214_exit_module(void)
 {
     rpmsg_sensor_unregister((void*)&s_imx214);
-    hwsensor_unregister(Sensor2Pdev(s_imx214));
+    hwsensor_unregister(&s_imx214.intf);
     platform_driver_unregister(&s_imx214_driver);
 }
 

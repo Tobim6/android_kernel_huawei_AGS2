@@ -19,204 +19,185 @@
 #endif /* FSC_HAVE_VDM */
 #include "vendor_info.h"
 #include "callbacks.h"
-#include <huawei_platform/log/hw_log.h>
-#define HWLOG_TAG FUSB3601_TAG
-#define PD_FIXED_POWER_VOL_STEP 50
-HWLOG_REGIST();
-#define IN_FUNCTION hwlog_info("%s ++\n", __func__);
-#define OUT_FUNCTION hwlog_info("%s --\n", __func__);
-#define LINE_FUNCTION hwlog_info("%s%d --\n", __func__,__LINE__);
-static FSC_U32 pd_limit_voltage = PD_09_V;
-
-#define PD_ADAPTER_5V                    5000
-#define PD_ADAPTER_20V                  20000
-
-void FUSB3601_SetPDLimitVoltage(int vol)
-{
-	if (vol < PD_ADAPTER_5V || vol > PD_ADAPTER_20V) {
-		hwlog_info("%s,Set limit voltage over range\n", __func__);
-		return;
-	}
-	pd_limit_voltage = vol / PD_FIXED_POWER_VOL_STEP;
-}
 
 void FUSB3601_USBPDPolicyEngine(struct Port *port)
 {
-	switch (port->policy_state_) {
-	case peDisabled:
-		break;
-	case peErrorRecovery:
-		FUSB3601_PolicyErrorRecovery(port);
-		break;
-	/* ###################### Source States  ##################### */
+	//WritePEState(&port->log_, 205 + port->policy_subindex_, port->policy_state_);
+
+  switch (port->policy_state_) {
+    case peDisabled:
+      break;
+    case peErrorRecovery:
+      FUSB3601_PolicyErrorRecovery(port);
+      break;
+/* ###################### Source States  ##################### */
 #if defined(FSC_HAVE_SRC) || (defined(FSC_HAVE_SNK) && defined (FSC_HAVE_ACC))
-	case peSourceSendHardReset:
-		FUSB3601_PolicySourceSendHardReset(port);
-		break;
-	case peSourceSendSoftReset:
-		FUSB3601_PolicySourceSendSoftReset(port);
-		break;
-	case peSourceSoftReset:
-		FUSB3601_PolicySourceSoftReset(port);
-		break;
-	case peSourceStartup:
-		FUSB3601_PolicySourceStartup(port);
-		break;
-	case peSourceDiscovery:
-		FUSB3601_PolicySourceDiscovery(port);
-		break;
-	case peSourceSendCaps:
-		FUSB3601_PolicySourceSendCaps(port);
-		break;
-	case peSourceDisabled:
-		FUSB3601_PolicySourceDisabled(port);
-		break;
-	case peSourceTransitionDefault:
-		FUSB3601_PolicySourceTransitionDefault(port);
-		break;
-	case peSourceNegotiateCap:
-		FUSB3601_PolicySourceNegotiateCap(port);
-		break;
-	case peSourceCapabilityResponse:
-		FUSB3601_PolicySourceCapabilityResponse(port);
-		break;
-	case peSourceTransitionSupply:
-		FUSB3601_PolicySourceTransitionSupply(port);
-		break;
-	case peSourceReady:
-		FUSB3601_PolicySourceReady(port);
-		break;
-	case peSourceGiveSourceCaps:
-		FUSB3601_PolicySourceGiveSourceCap(port);
-		break;
-	case peSourceGetSinkCaps:
-		FUSB3601_PolicySourceGetSinkCap(port);
-		break;
-	case peSourceSendPing:
-		FUSB3601_PolicySourceSendPing(port);
-		break;
-	case peSourceGotoMin:
-		FUSB3601_PolicySourceGotoMin(port);
-		break;
-	case peSourceGiveSinkCaps:
-		FUSB3601_PolicySourceGiveSinkCap(port);
-		break;
-	case peSourceGetSourceCaps:
-		FUSB3601_PolicySourceGetSourceCap(port);
-		break;
-	case peSourceSendDRSwap:
-		FUSB3601_PolicySourceSendDRSwap(port);
-		break;
-	case peSourceEvaluateDRSwap:
-		FUSB3601_PolicySourceEvaluateDRSwap(port);
-		break;
-	case peSourceSendVCONNSwap:
-		FUSB3601_PolicySourceSendVCONNSwap(port);
-		break;
-	case peSourceSendPRSwap:
-		FUSB3601_PolicySourceSendPRSwap(port);
-		break;
-	case peSourceEvaluatePRSwap:
-		FUSB3601_PolicySourceEvaluatePRSwap(port);
-		break;
-	case peSourceWaitNewCapabilities:
-		FUSB3601_PolicySourceWaitNewCapabilities(port);
-		break;
-	case peSourceEvaluateVCONNSwap:
-		FUSB3601_PolicySourceEvaluateVCONNSwap(port);
-		break;
+    case peSourceSendHardReset:
+      FUSB3601_PolicySourceSendHardReset(port);
+      break;
+    case peSourceSendSoftReset:
+      FUSB3601_PolicySourceSendSoftReset(port);
+      break;
+    case peSourceSoftReset:
+      FUSB3601_PolicySourceSoftReset(port);
+      break;
+    case peSourceStartup:
+      FUSB3601_PolicySourceStartup(port);
+      break;
+    case peSourceDiscovery:
+      FUSB3601_PolicySourceDiscovery(port);
+      break;
+    case peSourceSendCaps:
+      FUSB3601_PolicySourceSendCaps(port);
+      break;
+    case peSourceDisabled:
+      FUSB3601_PolicySourceDisabled(port);
+      break;
+    case peSourceTransitionDefault:
+      FUSB3601_PolicySourceTransitionDefault(port);
+      break;
+    case peSourceNegotiateCap:
+      FUSB3601_PolicySourceNegotiateCap(port);
+      break;
+    case peSourceCapabilityResponse:
+      FUSB3601_PolicySourceCapabilityResponse(port);
+      break;
+    case peSourceTransitionSupply:
+      FUSB3601_PolicySourceTransitionSupply(port);
+      break;
+    case peSourceReady:
+      FUSB3601_PolicySourceReady(port);
+      break;
+    case peSourceGiveSourceCaps:
+      FUSB3601_PolicySourceGiveSourceCap(port);
+      break;
+    case peSourceGetSinkCaps:
+      FUSB3601_PolicySourceGetSinkCap(port);
+      break;
+    case peSourceSendPing:
+      FUSB3601_PolicySourceSendPing(port);
+      break;
+    case peSourceGotoMin:
+      FUSB3601_PolicySourceGotoMin(port);
+      break;
+    case peSourceGiveSinkCaps:
+      FUSB3601_PolicySourceGiveSinkCap(port);
+      break;
+    case peSourceGetSourceCaps:
+      FUSB3601_PolicySourceGetSourceCap(port);
+      break;
+    case peSourceSendDRSwap:
+      FUSB3601_PolicySourceSendDRSwap(port);
+      break;
+    case peSourceEvaluateDRSwap:
+      FUSB3601_PolicySourceEvaluateDRSwap(port);
+      break;
+    case peSourceSendVCONNSwap:
+      FUSB3601_PolicySourceSendVCONNSwap(port);
+      break;
+    case peSourceSendPRSwap:
+      FUSB3601_PolicySourceSendPRSwap(port);
+      break;
+    case peSourceEvaluatePRSwap:
+      FUSB3601_PolicySourceEvaluatePRSwap(port);
+      break;
+    case peSourceWaitNewCapabilities:
+      FUSB3601_PolicySourceWaitNewCapabilities(port);
+      break;
+    case peSourceEvaluateVCONNSwap:
+      FUSB3601_PolicySourceEvaluateVCONNSwap(port);
+      break;
 #endif /* FSC_HAVE_SRC */
 /* ###################### Sink States  ####################### */
 #ifdef FSC_HAVE_SNK
-	case peSinkStartup:
-		FUSB3601_PolicySinkStartup(port);
-		break;
-	case peSinkSendHardReset:
-		FUSB3601_PolicySinkSendHardReset(port);
-		break;
-	case peSinkSoftReset:
-		FUSB3601_PolicySinkSoftReset(port);
-		break;
-	case peSinkSendSoftReset:
-		FUSB3601_PolicySinkSendSoftReset(port);
-		break;
-	case peSinkTransitionDefault:
-		FUSB3601_PolicySinkTransitionDefault(port);
-		break;
-	case peSinkDiscovery:
-		FUSB3601_PolicySinkDiscovery(port);
-		break;
-	case peSinkWaitCaps:
-		FUSB3601_PolicySinkWaitCaps(port);
-		break;
-	case peSinkEvaluateCaps:
-		FUSB3601_PolicySinkEvaluateCaps(port);
-		break;
-	case peSinkSelectCapability:
-		FUSB3601_PolicySinkSelectCapability(port);
-		break;
-	case peSinkTransitionSink:
-		FUSB3601_PolicySinkTransitionSink(port);
-		break;
-	case peSinkReady:
-		FUSB3601_PolicySinkReady(port);
-		break;
-	case peSinkGiveSinkCap:
-		FUSB3601_PolicySinkGiveSinkCap(port);
-		break;
-	case peSinkGetSourceCap:
-		FUSB3601_PolicySinkGetSourceCap(port);
-		break;
-	case peSinkGetSinkCap:
-		FUSB3601_PolicySinkGetSinkCap(port);
-		break;
-	case peSinkGiveSourceCap:
-		FUSB3601_PolicySinkGiveSourceCap(port);
-		break;
-	case peSinkSendDRSwap:
-		FUSB3601_PolicySinkSendDRSwap(port);
-		break;
-	case peSinkEvaluateDRSwap:
-		FUSB3601_PolicySinkEvaluateDRSwap(port);
-		break;
-	case peSinkEvaluateVCONNSwap:
-		FUSB3601_PolicySinkEvaluateVCONNSwap(port);
-		break;
-	case peSinkSendPRSwap:
-		FUSB3601_PolicySinkSendPRSwap(port);
-		break;
-	case peSinkEvaluatePRSwap:
-		FUSB3601_PolicySinkEvaluatePRSwap(port);
-		break;
+    case peSinkStartup:
+      FUSB3601_PolicySinkStartup(port);
+      break;
+    case peSinkSendHardReset:
+      FUSB3601_PolicySinkSendHardReset(port);
+      break;
+    case peSinkSoftReset:
+      FUSB3601_PolicySinkSoftReset(port);
+      break;
+    case peSinkSendSoftReset:
+      FUSB3601_PolicySinkSendSoftReset(port);
+      break;
+    case peSinkTransitionDefault:
+      FUSB3601_PolicySinkTransitionDefault(port);
+      break;
+    case peSinkDiscovery:
+      FUSB3601_PolicySinkDiscovery(port);
+      break;
+    case peSinkWaitCaps:
+      FUSB3601_PolicySinkWaitCaps(port);
+      break;
+    case peSinkEvaluateCaps:
+      FUSB3601_PolicySinkEvaluateCaps(port);
+      break;
+    case peSinkSelectCapability:
+      FUSB3601_PolicySinkSelectCapability(port);
+      break;
+    case peSinkTransitionSink:
+      FUSB3601_PolicySinkTransitionSink(port);
+      break;
+    case peSinkReady:
+      FUSB3601_PolicySinkReady(port);
+      break;
+    case peSinkGiveSinkCap:
+      FUSB3601_PolicySinkGiveSinkCap(port);
+      break;
+    case peSinkGetSourceCap:
+      FUSB3601_PolicySinkGetSourceCap(port);
+      break;
+    case peSinkGetSinkCap:
+      FUSB3601_PolicySinkGetSinkCap(port);
+      break;
+    case peSinkGiveSourceCap:
+      FUSB3601_PolicySinkGiveSourceCap(port);
+      break;
+    case peSinkSendDRSwap:
+      FUSB3601_PolicySinkSendDRSwap(port);
+      break;
+    case peSinkEvaluateDRSwap:
+      FUSB3601_PolicySinkEvaluateDRSwap(port);
+      break;
+    case peSinkEvaluateVCONNSwap:
+      FUSB3601_PolicySinkEvaluateVCONNSwap(port);
+      break;
+    case peSinkSendPRSwap:
+      FUSB3601_PolicySinkSendPRSwap(port);
+      break;
+    case peSinkEvaluatePRSwap:
+      FUSB3601_PolicySinkEvaluatePRSwap(port);
+      break;
 #endif /* FSC_HAVE_SNK */
-	/* ---------- VDM --------------------- */
-	case peDfpCblVdmIdentityRequest:
-		FUSB3601_PolicyDfpCblVdmIdentityRequest(port);
-		break;
-	/* ---------- BIST Receive Mode --------------------- */
-	case PE_BIST_Receive_Mode:      /* Bist Receive Mode */
-		FUSB3601_PolicyBISTReceiveMode(port);
-		break;
-	case PE_BIST_Frame_Received:    /* Test Frame received by Protocol layer */
-		FUSB3601_PolicyBISTFrameReceived(port);
-		break;
-	/* ---------- BIST Carrier Mode and Eye Pattern ----- */
-	case PE_BIST_Carrier_Mode_2:     /* BIST Carrier Mode 2 */
-		FUSB3601_PolicyBISTCarrierMode2(port);
-		break;
-	case PE_BIST_Test_Data:
-		FUSB3601_PolicyBISTTestData(port);
-		break;
-	default:
-		/* invalid state, reset */
-		FUSB3601_PolicyInvalidState(port);
-		break;
-	}
+    /* ---------- BIST Receive Mode --------------------- */
+    case PE_BIST_Receive_Mode:      /* Bist Receive Mode */
+      FUSB3601_PolicyBISTReceiveMode(port);
+      break;
+    case PE_BIST_Frame_Received:    /* Test Frame received by Protocol layer */
+      FUSB3601_PolicyBISTFrameReceived(port);
+      break;
+
+    /* ---------- BIST Carrier Mode and Eye Pattern ----- */
+    case PE_BIST_Carrier_Mode_2:     /* BIST Carrier Mode 2 */
+      FUSB3601_PolicyBISTCarrierMode2(port);
+      break;
+
+    case PE_BIST_Test_Data:
+      FUSB3601_PolicyBISTTestData(port);
+      break;
+
+    default:
+        /* invalid state, reset */
+        FUSB3601_PolicyInvalidState(port);
+      break;
+  }
 }
 
 void FUSB3601_PolicyErrorRecovery(struct Port *port)
 {
-	FUSB3601_SetStateErrorRecovery(port);
+  FUSB3601_SetStateErrorRecovery(port);
 }
 
 #if defined(FSC_HAVE_SRC) || (defined(FSC_HAVE_SNK) && defined(FSC_HAVE_ACC))
@@ -227,46 +208,42 @@ void FUSB3601_PolicySourceSendHardReset(struct Port *port)
 
 void FUSB3601_PolicySourceSendSoftReset(struct Port *port)
 {
-	switch (port->policy_subindex_) {
-	case 0:
-		hwlog_info("%s,send soft reset\n", __func__);
-		FUSB3601_ProtocolSendData(port, CMTSoftReset, 0, 0, ktSenderResponse, peSourceSendHardReset, TRUE, SOP_TYPE_SOP);
-		port->auto_vdm_state_ = AUTO_VDM_INIT;
-		port->policy_subindex_++;
-		break;
-	default:
-		if ((port->pd_tx_status_ == txSuccess) && port->protocol_msg_rx_) {
-			port->protocol_msg_rx_ = FALSE;
-			port->pd_tx_status_ = txIdle;
-			if ((port->policy_rx_header_.NumDataObjects == 0) && (port->policy_rx_header_.MessageType == CMTAccept)) {
-				hwlog_info("%s,soft reset was accepted\n", __func__);
-				FUSB3601_set_policy_state(port, peSourceSendCaps);
-				FUSB3601_TimerDisable(&port->policy_state_timer_);
-				FUSB3601_PolicySourceSendCaps(port);
-			} else {
-				hwlog_info("%s,soft reset was not accepted\n", __func__);
-				FUSB3601_ProtocolSendHardReset(port);
-			}
-		} else if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
-			hwlog_info("%s,soft reset timeout\n", __func__);
-			FUSB3601_ProtocolSendHardReset(port);
-		}
-		break;
-	}
+  switch (port->policy_subindex_) {
+    case 0:
+      FUSB3601_ProtocolSendData(port, CMTSoftReset, 0, 0, ktSenderResponse,
+                            peSourceSendHardReset, TRUE, SOP_TYPE_SOP);
+      port->policy_subindex_++;
+      break;
+    default:
+      if ((port->pd_tx_status_ == txSuccess) && port->protocol_msg_rx_) {
+        port->protocol_msg_rx_ = FALSE;
+        port->pd_tx_status_ = txIdle;
+        if ((port->policy_rx_header_.NumDataObjects == 0) &&
+            (port->policy_rx_header_.MessageType == CMTAccept)) {
+          FUSB3601_set_policy_state(port, peSourceSendCaps);
+          FUSB3601_TimerDisable(&port->policy_state_timer_);
+          FUSB3601_PolicySourceSendCaps(port);
+        }
+        else {
+        	FUSB3601_ProtocolSendHardReset(port);
+        }
+      }
+      else if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
+    	  FUSB3601_ProtocolSendHardReset(port);
+      }
+      break;
+  }
 }
 
 void FUSB3601_PolicySourceSoftReset(struct Port *port)
 {
 	switch(port->policy_subindex_) {
 	case 0:
-		hwlog_info("%s,receive soft reset,send accept cmd\n", __func__);
-		port->auto_vdm_state_ = AUTO_VDM_INIT;
 		FUSB3601_ProtocolSendData(port, CMTAccept, 0, 0, 0, peSourceSendHardReset, TRUE, SOP_TYPE_SOP);
 		port->policy_subindex_++;
 		break;
 	default:
 		if(port->pd_tx_status_ == txSuccess) {
-			hwlog_info("%s,send accept succ\n", __func__);
 			port->pd_tx_status_ = txIdle;
 			FUSB3601_set_policy_state(port, peSourceSendCaps);
 			FUSB3601_PolicySourceSendCaps(port);
@@ -278,77 +255,76 @@ void FUSB3601_PolicySourceSoftReset(struct Port *port)
 void FUSB3601_PolicySourceStartup(struct Port *port)
 {
 #ifdef FSC_HAVE_VDM
-	FSC_U8 i = 0;
+  FSC_U8 i = 0;
 #endif /* FSC_HAVE_VDM */
-   switch(port->policy_subindex_){
 
-     case 0:
-	/* Wait until we reach vSafe5V and delay if coming from PR Swap */
-	if ((FUSB3601_IsVbusOverVoltage(port, FSC_VSAFE5V_L) && ((FUSB3601_TimerExpired(&port->policy_state_timer_))
-		|| FUSB3601_TimerDisabled(&port->policy_state_timer_))) || port->tc_state_ == PoweredAccessory) {
-		port->registers_.AlertMskH.M_VBUS_ALRM_LO = 0;
-		port->registers_.AlertMskL.M_VBUS_ALRM_HI = 0;
-		FUSB3601_WriteRegisters(port, regALERTMSKL, 2);
-		FUSB3601_ClearInterrupt(port, regALERTL, MSK_I_VBUS_ALRM_HI | MSK_I_PORT_PWR);
-		FUSB3601_ClearInterrupt(port, regALERTH, MSK_I_VBUS_ALRM_LO);
-		FUSB3601_TimerDisable(&port->policy_state_timer_);
+      /* Wait until we reach vSafe5V and delay if coming from PR Swap */
+      if ((FUSB3601_IsVbusOverVoltage(port, FSC_VSAFE5V_L) &&
+           ((FUSB3601_TimerExpired(&port->policy_state_timer_)) || FUSB3601_TimerDisabled(&port->policy_state_timer_)))
+           || port->tc_state_ == PoweredAccessory) {
 
-#ifdef FSC_HAVE_VDM
-		port->auto_mode_disc_tracker_ = 0;
-		port->core_svid_info_.num_svids = 0;
-		for (i = 0; i < MAX_NUM_SVIDS; i++) {
+    	  ////writepestate(&port->log_, 205, port->policy_state_);
+
+    	  port->registers_.AlertMskH.M_VBUS_ALRM_LO = 0;
+    	  	port->registers_.AlertMskL.M_VBUS_ALRM_HI = 0;
+    	  	FUSB3601_WriteRegisters(port, regALERTMSKL, 2);
+
+    	  FUSB3601_ClearInterrupt(port, regALERTL, MSK_I_VBUS_ALRM_HI | MSK_I_PORT_PWR);
+    	  	FUSB3601_ClearInterrupt(port, regALERTH, MSK_I_VBUS_ALRM_LO);
+
+		  FUSB3601_TimerDisable(&port->policy_state_timer_);
+		 FUSB3601_set_policy_state(port, peSourceSendCaps);
+
+	#ifdef FSC_HAVE_VDM
+		  port->auto_vdm_state_ = AUTO_VDM_INIT;
+		  port->mode_entered_ = FALSE;
+		  port->auto_mode_disc_tracker_ = 0;
+		  port->core_svid_info_.num_svids = 0;
+		  for (i = 0; i < MAX_NUM_SVIDS; i++) {
 			port->core_svid_info_.svids[i] = 0;
-		}
-#endif /* FSC_HAVE_VDM */
-#ifdef FSC_HAVE_DP
-		port->display_port_data_.AutoModeEntryObjPos = -1;
-#endif /* FSC_HAVE_DP */
-        FUSB3601_TimerStart(&port->policy_state_timer_,ktSourceDetach + ktPDDebounce);
-		port->policy_subindex_++;
-		}
-		break;
-	default :
-	    if(FUSB3601_TimerExpired(&port->policy_state_timer_)){
-		FUSB3601_set_policy_state(port, peDfpCblVdmIdentityRequest);
-		FUSB3601_PolicyDfpCblVdmIdentityRequest(port);
+		  }
+	#endif /* FSC_HAVE_VDM */
+	#ifdef FSC_HAVE_DP
+		  port->display_port_data_.AutoModeEntryObjPos = -1;
+
+		  FUSB3601_resetDp(port);
+	#endif /* FSC_HAVE_DP */
+		  FUSB3601_PolicySourceSendCaps(port);
       }
-	break;
-   }
 }
 
 void FUSB3601_PolicySourceDiscovery(struct Port *port)
 {
-	switch (port->policy_subindex_) {
-	case 0:
-		FUSB3601_TimerStart(&port->policy_state_timer_, ktTypeCSendSourceCap);
-		port->policy_subindex_++;
-		break;
-	default:
-		if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
-			if (port->caps_counter_ > MAX_CAPS_COUNT) {
-				/* No PD sink connected */
-				FUSB3601_set_policy_state(port, peSourceDisabled);
-				FUSB3601_PolicySourceDisabled(port);
-			} else {
-				FUSB3601_set_policy_state(port, peSourceSendCaps);
-				FUSB3601_PolicySourceSendCaps(port);
-			}
-		}
-		break;
-	}
+  switch (port->policy_subindex_) {
+    case 0:
+      FUSB3601_TimerStart(&port->policy_state_timer_, ktTypeCSendSourceCap);
+      port->policy_subindex_++;
+      break;
+    default:
+	if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
+        if (port->caps_counter_ > MAX_CAPS_COUNT) {
+          /* No PD sink connected */
+          FUSB3601_set_policy_state(port, peSourceDisabled);
+          FUSB3601_PolicySourceDisabled(port);
+        }
+        else {
+          FUSB3601_set_policy_state(port, peSourceSendCaps);
+          FUSB3601_PolicySourceSendCaps(port);
+        }
+      }
+      break;
+  }
 }
 
 void FUSB3601_PolicySourceSendCaps(struct Port *port)
 {
     switch (port->policy_subindex_) {
-		case 0:
-			port->expecting_vdm_response_ = FALSE;
-		port->protocol_msg_rx_ = FALSE;
-			FUSB3601_ProtocolSendData(port, DMTSourceCapabilities,
-					   port->caps_header_source_.NumDataObjects,
-					   port->caps_source_, ktSenderResponse, peSourceDiscovery,
-					   TRUE, SOP_TYPE_SOP);
-			port->policy_subindex_++;
+      case 0:
+        FUSB3601_ProtocolSendData(port, DMTSourceCapabilities,
+                           port->caps_header_source_.NumDataObjects,
+                           port->caps_source_, ktSenderResponse, peSourceDiscovery,
+                           TRUE, SOP_TYPE_SOP);
+        port->policy_subindex_++;
         break;
       default:
         if ((port->pd_tx_status_ == txSuccess) && port->protocol_msg_rx_) {
@@ -390,7 +366,7 @@ void FUSB3601_PolicySourceTransitionDefault(struct Port *port)
     case 0:
       if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
 
-	  FUSB3601_platform_notify_pd_contract(FALSE, 0, 0, FALSE);
+    	  FUSB3601_platform_notify_pd_contract(FALSE, 0, 0, FALSE);
 
         port->is_hard_reset_ = TRUE;
         port->policy_has_contract_ = FALSE;
@@ -411,16 +387,12 @@ void FUSB3601_PolicySourceTransitionDefault(struct Port *port)
 
         /* Set first stage discharge */
         FUSB3601_start_vbus_discharge(port);
-		
-		FUSB3601_TimerStart(&port->policy_state_timer_, ktPSHardReset);
-		
+
         port->policy_subindex_++;
       }
       break;
     case 1:
-      if (port->registers_.AlertH.I_VBUS_ALRM_LO
-    		  || (FUSB3601_TimerExpired(&port->policy_state_timer_)
-    		  && !FUSB3601_IsVbusOverVoltage(port, FSC_VSAFE_DISCH))) {
+      if (port->registers_.AlertH.I_VBUS_ALRM_LO) {
     	  FUSB3601_SetVBusAlarm(port, FSC_VSAFE0V, FSC_VSAFE_DISCH);
     	  FUSB3601_ClearInterrupt(port, regALERTH, MSK_I_VBUS_ALRM_LO);
 
@@ -429,9 +401,6 @@ void FUSB3601_PolicySourceTransitionDefault(struct Port *port)
         FUSB3601_TimerStart(&port->policy_state_timer_, ktPDDebounce);
 
         port->policy_subindex_++;
-      }
-	  else if(FUSB3601_TimerExpired(&port->policy_state_timer_)) {
-    	  FUSB3601_TimerStart(&port->policy_state_timer_, ktPSHardReset);
       }
       break;
     case 2:
@@ -442,9 +411,9 @@ void FUSB3601_PolicySourceTransitionDefault(struct Port *port)
         port->registers_.PwrCtrl.FORCE_DISCH = 0;
         FUSB3601_WriteRegister(port, regPWRCTRL);
 
-	port->registers_.AlertMskL.M_VBUS_ALRM_HI = 0;
-	port->registers_.AlertMskH.M_VBUS_ALRM_LO = 0;
-	FUSB3601_WriteRegisters(port, regALERTMSKL, 2);
+    	port->registers_.AlertMskL.M_VBUS_ALRM_HI = 0;
+    	port->registers_.AlertMskH.M_VBUS_ALRM_LO = 0;
+    	FUSB3601_WriteRegisters(port, regALERTMSKL, 2);
 
         FUSB3601_TimerStart(&port->policy_state_timer_, ktSrcRecover);
 
@@ -453,15 +422,15 @@ void FUSB3601_PolicySourceTransitionDefault(struct Port *port)
       break;
     default:
       if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
-	  /* Set up to wait for vSafe5V for PD */
-		FUSB3601_SetVBusAlarm(port, 0, FSC_VSAFE5V_L);
+    	  /* Set up to wait for vSafe5V for PD */
+    		FUSB3601_SetVBusAlarm(port, 0, FSC_VSAFE5V_L);
 
-		FUSB3601_ClearInterrupt(port, regALERTL, MSK_I_VBUS_ALRM_HI | MSK_I_PORT_PWR);
-		FUSB3601_ClearInterrupt(port, regALERTH, MSK_I_VBUS_ALRM_LO);
+    		FUSB3601_ClearInterrupt(port, regALERTL, MSK_I_VBUS_ALRM_HI | MSK_I_PORT_PWR);
+    		FUSB3601_ClearInterrupt(port, regALERTH, MSK_I_VBUS_ALRM_LO);
 
-		port->registers_.AlertMskH.M_VBUS_ALRM_LO = 0;
-		port->registers_.AlertMskL.M_VBUS_ALRM_HI = 1;
-		FUSB3601_WriteRegisters(port, regALERTMSKL, 2);
+    		port->registers_.AlertMskH.M_VBUS_ALRM_LO = 0;
+    		port->registers_.AlertMskL.M_VBUS_ALRM_HI = 1;
+    		FUSB3601_WriteRegisters(port, regALERTMSKL, 2);
 
         FUSB3601_SendCommand(port, SourceVbusDefaultV);
         FUSB3601_SetVBusSource5V(port, TRUE);
@@ -550,7 +519,7 @@ void FUSB3601_PolicySourceTransitionSupply(struct Port *port)
     case 1:
       if ((port->pd_tx_status_ == txSuccess) && FUSB3601_TimerExpired(&port->policy_state_timer_))
       {
-	  port->pd_tx_status_ = txIdle;
+    	  port->pd_tx_status_ = txIdle;
 
           port->policy_has_contract_ = TRUE;
           port->usb_pd_contract_.object = port->policy_rx_data_obj_[0].object;
@@ -574,20 +543,16 @@ void FUSB3601_PolicySourceTransitionSupply(struct Port *port)
           port->policy_subindex_++;
       }
       break;
-    case 3:
+    default:
     	if(port->pd_tx_status_ == txSuccess) {
     		port->pd_tx_status_ = txIdle;
-                FUSB3601_SetRpValue(port, utcc3p0A);
+            FUSB3601_SetRpValue(port, utcc3p0A);
     		FUSB3601_platform_notify_pd_contract(TRUE, port->caps_source_[port->usb_pd_contract_.FVRDO.ObjectPosition -1].FPDOSupply.Voltage,
     				port->usb_pd_contract_.FVRDO.OpCurrent, port->caps_source_[0].FPDOSupply.ExternallyPowered);
-			FUSB3601_set_policy_state(port, peSourceReady);
-			FUSB3601_PolicySourceReady(port);
+    		FUSB3601_set_policy_state(port, peSourceReady);
+    		FUSB3601_PolicySourceReady(port);
     	}
     	break;
-	default:
-		FUSB3601_set_policy_state(port, peSourceReady);
-    		FUSB3601_PolicySourceReady(port);
-		break;
   }
 }
 
@@ -642,7 +607,7 @@ void FUSB3601_PolicySourceReady(struct Port *port)
           break;
 #ifdef FSC_HAVE_VDM
         case DMTVendorDefined:
-		FUSB3601_ProcessVdmMessage(port);
+        	FUSB3601_ProcessVdmMessage(port);
           break;
 #endif /* FSC_HAVE_VDM */
         case DMTBIST:
@@ -655,7 +620,6 @@ void FUSB3601_PolicySourceReady(struct Port *port)
     }
   }
   else if (port->pd_tx_flag_) {
-	port->pd_tx_flag_ = FALSE;
     if (port->pd_transmit_header_.NumDataObjects == 0) {
       switch (port->pd_transmit_header_.MessageType) {
         case CMTGetSinkCap:
@@ -711,6 +675,7 @@ void FUSB3601_PolicySourceReady(struct Port *port)
           break;
       }
     }
+    port->pd_tx_flag_ = FALSE;
   }
   else if (port->partner_caps_.object == 0) {
     FUSB3601_set_policy_state(port, peSourceGetSinkCaps);
@@ -719,8 +684,7 @@ void FUSB3601_PolicySourceReady(struct Port *port)
 #ifdef FSC_HAVE_VDM
   else if((port->policy_is_dfp_ == TRUE) &&
           (port->auto_vdm_state_ != AUTO_VDM_DONE) &&
-          !port->expecting_vdm_response_ &&
-		  FUSB3601_TimerExpired(&port->policy_state_timer_))
+          !port->expecting_vdm_response_)
   {
     FUSB3601_AutoVdmDiscovery(port);
   }
@@ -761,32 +725,25 @@ void FUSB3601_PolicySourceGetSinkCap(struct Port *port)
                             ktSenderResponse, peSourceSendSoftReset, FALSE, SOP_TYPE_SOP);
       port->policy_subindex_++;
       break;
-    case 1:
+    default:
       if ((port->pd_tx_status_ == txSuccess) && port->protocol_msg_rx_) {
         port->protocol_msg_rx_ = FALSE;
         port->pd_tx_status_ = txIdle;
         if ((port->policy_rx_header_.NumDataObjects > 0) &&
             (port->policy_rx_header_.MessageType == DMTSinkCapabilities)) {
-			FUSB3601_UpdateCapabilitiesRx(port, FALSE);
-			FUSB3601_TimerStart(&port->policy_state_timer_, ktVDMWait);
-			FUSB3601_set_policy_state(port, peSourceReady);
-			FUSB3601_PolicySourceReady(port);
+          FUSB3601_UpdateCapabilitiesRx(port, FALSE);
+          FUSB3601_set_policy_state(port, peSourceReady);
+          FUSB3601_PolicySourceReady(port);
         }
         else {
           /* No valid sink caps message */
-        	FUSB3601_PolicySourceReady(port);
+        	FUSB3601_ProtocolSendHardReset(port);
         }
       }
       else if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
-    	  FUSB3601_PolicySourceReady(port);
+    	  FUSB3601_ProtocolSendHardReset(port);
       }
       break;
-	default:
-	    if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
-			FUSB3601_set_policy_state(port, peSourceReady);
-    		FUSB3601_PolicySourceReady(port);
-		}
-	  break;
   }
 }
 
@@ -840,7 +797,7 @@ void FUSB3601_PolicySourceGotoMin(struct Port *port)
         break;
       case 1:
         if ((port->pd_tx_status_ == txSuccess) && FUSB3601_TimerExpired(&port->policy_state_timer_)) {
-		port->pd_tx_status_= txIdle;
+        	port->pd_tx_status_= txIdle;
           port->policy_subindex_++;
         }
         break;
@@ -857,11 +814,11 @@ void FUSB3601_PolicySourceGotoMin(struct Port *port)
         port->policy_subindex_++;
         break;
       default:
-	  if(port->pd_tx_status_ == txSuccess) {
-		  port->pd_tx_status_= txIdle;
-		  FUSB3601_set_policy_state(port, peSourceReady);
-	  }
-	  break;
+    	  if(port->pd_tx_status_ == txSuccess) {
+    		  port->pd_tx_status_= txIdle;
+    		  FUSB3601_set_policy_state(port, peSourceReady);
+    	  }
+    	  break;
     }
   }
 }
@@ -926,7 +883,6 @@ void FUSB3601_PolicySourceSendDRSwap(struct Port *port)
             case CMTAccept:
               port->policy_is_dfp_ = (port->policy_is_dfp_ == TRUE)?FALSE:TRUE;
               port->registers_.MsgHeadr.DATA_ROLE = port->policy_is_dfp_;
-	      port->auto_vdm_state_ = AUTO_VDM_INIT;
               FUSB3601_WriteRegister(port, regMSGHEADR);
               FUSB3601_set_policy_state(port, peSourceReady);
               FUSB3601_PolicySourceReady(port);
@@ -972,7 +928,6 @@ void FUSB3601_PolicySourceEvaluateDRSwap(struct Port *port)
 		  if (port->protocol_msg_rx_sop_ == SOP_TYPE_SOP) {
 			FUSB3601_ProtocolSendData(port, CMTAccept, 0, 0,
 									   0, peErrorRecovery, FALSE, SOP_TYPE_SOP);
-			port->auto_vdm_state_ = AUTO_VDM_INIT;
 		  }
 		  else {
 			FUSB3601_ProtocolSendData(port, CMTReject, 0, 0,
@@ -1077,11 +1032,11 @@ void FUSB3601_PolicySourceSendVCONNSwap(struct Port *port)
       }
       break;
     default:
-	if(port->pd_tx_status_ == txSuccess) {
-		port->pd_tx_status_ = txIdle;
-		FUSB3601_set_policy_state(port, peSourceReady);
-	}
-	break;
+    	if(port->pd_tx_status_ == txSuccess) {
+    		port->pd_tx_status_ = txIdle;
+    		FUSB3601_set_policy_state(port, peSourceReady);
+    	}
+    	break;
   }
 }
 
@@ -1228,32 +1183,33 @@ void FUSB3601_PolicySourceEvaluatePRSwap(struct Port *port)
     case 0:
       /* Sending accept or reject */
       if (port->protocol_msg_rx_sop_ != SOP_TYPE_SOP ||
-          port->caps_source_[0].FPDOSupply.DualRolePower == FALSE) {
+          port->caps_source_[0].FPDOSupply.DualRolePower == FALSE ||
+          port->partner_caps_.FPDOSink.DualRolePower == FALSE) {
         /* Send the reject if we are not a DRP */
         FUSB3601_ProtocolSendData(port, CMTReject, 0, 0,
                           0, peSourceSendSoftReset, TRUE, port->protocol_msg_rx_sop_);
         port->policy_subindex_ = 1;
       }
       else {
-	  FUSB3601_ProtocolSendData(port, CMTAccept, 0, 0,
+    	  FUSB3601_ProtocolSendData(port, CMTAccept, 0, 0,
                          ktSrcTransition, peSourceSendSoftReset, TRUE, port->protocol_msg_rx_sop_);
-	        port->policy_subindex_ = 2;
+    	        port->policy_subindex_ = 2;
       }
       break;
     case 1:
-	if(port->pd_tx_status_ == txSuccess) {
-		port->pd_tx_status_ = txIdle;
-		FUSB3601_set_policy_state(port, peSourceReady);
-		FUSB3601_PolicySourceReady(port);
-	}
+    	if(port->pd_tx_status_ == txSuccess) {
+    		port->pd_tx_status_ = txIdle;
+    		FUSB3601_set_policy_state(port, peSourceReady);
+    		FUSB3601_PolicySourceReady(port);
+    	}
     case 2:
       if ((port->pd_tx_status_ == txSuccess) && FUSB3601_TimerExpired(&port->policy_state_timer_)) {
 
-	  FUSB3601_platform_notify_pd_contract(FALSE, 0, 0, FALSE);
+    	  FUSB3601_platform_notify_pd_contract(FALSE, 0, 0, FALSE);
 
         /* Disable VBUS, set alarm (vSafe0V), and force discharge */
-	  port->pd_tx_status_= txIdle;
-	  port->is_pr_swap_ = TRUE;
+    	  port->pd_tx_status_= txIdle;
+    	  port->is_pr_swap_ = TRUE;
         port->policy_has_contract_ = FALSE;
         port->registers_.PwrCtrl.AUTO_DISCH = 0;
         port->registers_.PwrCtrl.DIS_VBUS_MON = 0;
@@ -1267,7 +1223,7 @@ void FUSB3601_PolicySourceEvaluatePRSwap(struct Port *port)
       break;
     case 3:
       if (port->registers_.AlertH.I_VBUS_ALRM_LO) {
-	  FUSB3601_SetVBusAlarm(port, FSC_VSAFE0V, FSC_VSAFE_DISCH);
+    	  FUSB3601_SetVBusAlarm(port, FSC_VSAFE0V, FSC_VSAFE_DISCH);
 		  FUSB3601_ClearInterrupt(port, regALERTH, MSK_I_VBUS_ALRM_LO);
 
 		  FUSB3601_set_force_discharge(port);
@@ -1276,7 +1232,7 @@ void FUSB3601_PolicySourceEvaluatePRSwap(struct Port *port)
 
         port->policy_subindex_++;
       }
-	break;
+    	break;
     case 4:
       if (FUSB3601_IsVbusVSafe0V(port)) {
         /* We've reached vSafe0V */
@@ -1331,8 +1287,8 @@ void FUSB3601_PolicySourceEvaluatePRSwap(struct Port *port)
               FUSB3601_PolicySinkStartup(port);
               break;
             default:
-		FUSB3601_set_policy_state(port, peErrorRecovery);
-		FUSB3601_PolicyErrorRecovery(port);
+            	FUSB3601_set_policy_state(port, peErrorRecovery);
+            	FUSB3601_PolicyErrorRecovery(port);
               break;
           }
         }
@@ -1383,8 +1339,8 @@ void FUSB3601_PolicySourceEvaluateVCONNSwap(struct Port *port)
       }
       break;
     case 1:
-	if(port->pd_tx_status_ == txSuccess) {
-		port->pd_tx_status_ = txIdle;
+    	if(port->pd_tx_status_ == txSuccess) {
+    		port->pd_tx_status_ = txIdle;
 		  if (port->is_vconn_source_) {
 			FUSB3601_TimerStart(&port->policy_state_timer_, ktVCONNSourceOn);
 			port->policy_subindex_++;
@@ -1398,7 +1354,7 @@ void FUSB3601_PolicySourceEvaluateVCONNSwap(struct Port *port)
 			FUSB3601_TimerStart(&port->policy_state_timer_, ktVCONNOnDelay);
 			port->policy_subindex_ = 3;
 		  }
-	}
+    	}
       break;
     case 2:
       if (port->protocol_msg_rx_) {
@@ -1417,7 +1373,7 @@ void FUSB3601_PolicySourceEvaluateVCONNSwap(struct Port *port)
               FUSB3601_PolicySourceReady(port);
               break;
             default:
-		FUSB3601_ProtocolSendHardReset(port);
+            	FUSB3601_ProtocolSendHardReset(port);
               break;
           }
         }
@@ -1435,12 +1391,12 @@ void FUSB3601_PolicySourceEvaluateVCONNSwap(struct Port *port)
       }
       break;
     default:
-	if(port->pd_tx_status_ == txSuccess) {
-		port->pd_tx_status_ = txIdle;
-		FUSB3601_set_policy_state(port, peSourceReady);
-		FUSB3601_PolicySourceReady(port);
-	}
-	break;
+    	if(port->pd_tx_status_ == txSuccess) {
+    		port->pd_tx_status_ = txIdle;
+    		FUSB3601_set_policy_state(port, peSourceReady);
+    		FUSB3601_PolicySourceReady(port);
+    	}
+    	break;
   }
 }
 #endif /* FSC_HAVE_SRC */
@@ -1453,6 +1409,7 @@ void FUSB3601_PolicySinkStartup(struct Port *port)
   FSC_U8 i = 0;
 #endif /* FSC_HAVE_VDM */
 
+  FUSB3601_ResetProtocolLayer(port);
 
   /* Enable Masks */
   port->registers_.AlertMskL.M_PORT_PWR = 1;
@@ -1480,13 +1437,11 @@ void FUSB3601_PolicySinkStartup(struct Port *port)
   port->registers_.MsgHeadr.POWER_ROLE = port->policy_is_source_;
   port->registers_.MsgHeadr.DATA_ROLE = port->policy_is_dfp_;
   FUSB3601_WriteRegister(port, regMSGHEADR);
-  FUSB3601_ResetProtocolLayer(port);
 
   /* If coming out of a hard reset, this will signal the Type-C state
    * machine to re-check the VBus level.
    */
   port->registers_.AlertL.I_PORT_PWR = 1;
-  port->pd_tx_flag_ = FALSE;
 
   port->caps_counter_ = 0;
   port->collision_counter_ = 0;
@@ -1494,7 +1449,9 @@ void FUSB3601_PolicySinkStartup(struct Port *port)
   FUSB3601_set_policy_state(port, peSinkDiscovery);
 
 #ifdef FSC_HAVE_VDM
+  port->auto_vdm_state_ = AUTO_VDM_INIT;
   port->auto_mode_disc_tracker_ = 0;
+  port->mode_entered_ = FALSE;
   port->core_svid_info_.num_svids = 0;
   for (i = 0; i < MAX_NUM_SVIDS; i++) {
     port->core_svid_info_.svids[i] = 0;
@@ -1503,6 +1460,7 @@ void FUSB3601_PolicySinkStartup(struct Port *port)
 #ifdef FSC_HAVE_DP
   port->display_port_data_.AutoModeEntryObjPos = -1;
 
+  FUSB3601_resetDp(port);
 #endif /* FSC_HAVE_DP */
 
 //  port->registers_.PwrCtrl.DIS_VBUS_MON = 0;
@@ -1531,7 +1489,6 @@ void FUSB3601_PolicySinkSoftReset(struct Port *port)
 	case 0:
 		FUSB3601_ProtocolSendData(port, CMTAccept, 0, 0, ktSinkWaitCap, peSinkSendHardReset, TRUE, SOP_TYPE_SOP);
 		port->policy_subindex_++;
-		port->auto_vdm_state_ = AUTO_VDM_INIT;
 		break;
 	default:
 		if(port->pd_tx_status_ == txSuccess) {
@@ -1550,7 +1507,6 @@ void FUSB3601_PolicySinkSendSoftReset(struct Port *port)
       FUSB3601_ProtocolSendData(port, CMTSoftReset, 0, 0,
                             ktSenderResponse, peSinkSendHardReset, TRUE, SOP_TYPE_SOP);
       port->policy_subindex_++;
-      port->auto_vdm_state_ = AUTO_VDM_INIT;
       break;
     default:
       if ((port->pd_tx_status_ == txSuccess) && port->protocol_msg_rx_) {
@@ -1563,11 +1519,11 @@ void FUSB3601_PolicySinkSendSoftReset(struct Port *port)
           FUSB3601_PolicySinkWaitCaps(port);
         }
         else {
-		FUSB3601_ProtocolSendHardReset(port);
+        	FUSB3601_ProtocolSendHardReset(port);
         }
       }
       else if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
-	  FUSB3601_ProtocolSendHardReset(port);
+    	  FUSB3601_ProtocolSendHardReset(port);
       }
       break;
   }
@@ -1575,54 +1531,52 @@ void FUSB3601_PolicySinkSendSoftReset(struct Port *port)
 
 void FUSB3601_PolicySinkTransitionDefault(struct Port *port)
 {
-	switch (port->policy_subindex_) {
-	case 0:
-		FUSB3601_LogPEState(port);
-		FUSB3601_enable_vbus_adc(port);
-		port->hard_reset_counter_++;
-		port->is_hard_reset_ = TRUE;
-		port->policy_has_contract_ = FALSE;
+	  switch (port->policy_subindex_) {
+	    case 0:
+	    	FUSB3601_LogPEState(port);
+	    	FUSB3601_enable_vbus_adc(port);
+	    	port->hard_reset_counter_++;
+	      port->is_hard_reset_ = TRUE;
+	      port->policy_has_contract_ = FALSE;
 
-		/* Disable auto-discharge state machine and enable VAlarm */
-		port->registers_.PwrCtrl.AUTO_DISCH = 0;
-		port->registers_.PwrCtrl.DIS_VALARM = 0;
-		port->registers_.PwrCtrl.DIS_VBUS_MON = 0;
+	      /* Disable auto-discharge state machine and enable VAlarm */
+	      port->registers_.PwrCtrl.AUTO_DISCH = 0;
+	      port->registers_.PwrCtrl.DIS_VALARM = 0;
+	      port->registers_.PwrCtrl.DIS_VBUS_MON = 0;
 
-		/* Disable VConn source */
-		if (port->is_vconn_source_) {
-			port->registers_.PwrCtrl.EN_VCONN = 0;
-			port->is_vconn_source_ = FALSE;
-		}
+	      /* Disable VConn source */
+	      if (port->is_vconn_source_) {
+	        port->registers_.PwrCtrl.EN_VCONN = 0;
+	        port->is_vconn_source_ = FALSE;
+	      }
 
-		FUSB3601_WriteRegister(port, regPWRCTRL);
+	      FUSB3601_WriteRegister(port, regPWRCTRL);
 
-		/* Slow Rp-Rp Cable - Assumes RoleCtrl is DRP:0, CC1/CC2: Rd */
-		FUSB3601_SendCommand(port, DisableSinkVbus);
-		port->registers_.RoleCtrl.RP_VAL = 1;
-		FUSB3601_WriteRegister(port, regROLECTRL);
-		port->registers_.RoleCtrl.RP_VAL = 0;
-		FUSB3601_WriteRegister(port, regROLECTRL);
-		FUSB3601_SendCommand(port, SinkVbus);
-		FUSB3601_TimerStart(&port->policy_state_timer_, ktPSHardResetMax + ktSafe0V);
-		if (port->policy_is_dfp_) {
-			port->policy_is_dfp_ = FALSE;
-			port->registers_.MsgHeadr.DATA_ROLE = port->policy_is_dfp_;
-			FUSB3601_WriteRegister(port, regMSGHEADR);
-		}
-		/* Disable VBus sinking during the reset */
-		//SendCommand(port, DisableSinkVbus);
+	      FUSB3601_TimerStart(&port->policy_state_timer_, ktPSHardResetMax + ktSafe0V);
 
-		/* Set up alert to wait for vSafe0V */
-		FUSB3601_SetVBusAlarm(port, FSC_VSAFE0V, FSC_VBUS_LVL_HIGHEST);
-		FUSB3601_ClearInterrupt(port, regALERTL, MSK_I_ALARM_LO_ALL);
-		FUSB3601_ClearInterrupt(port, regALERTH, MSK_I_ALARM_HI_ALL);
-		port->registers_.AlertMskH.M_VBUS_ALRM_LO = 1;
-		FUSB3601_WriteRegister(port, regALERTMSKH);
-		port->policy_subindex_++;
-		break;
+	      if (port->policy_is_dfp_) {
+	        port->policy_is_dfp_ = FALSE;
+	        port->registers_.MsgHeadr.DATA_ROLE = port->policy_is_dfp_;
+	        FUSB3601_WriteRegister(port, regMSGHEADR);
+	      }
+
+	      /* Disable VBus sinking during the reset */
+	      //SendCommand(port, DisableSinkVbus);
+
+	      /* Set up alert to wait for vSafe0V */
+	      FUSB3601_SetVBusAlarm(port, FSC_VSAFE0V, FSC_VBUS_LVL_HIGHEST);
+
+	      FUSB3601_ClearInterrupt(port, regALERTL, MSK_I_ALARM_LO_ALL);
+	      FUSB3601_ClearInterrupt(port, regALERTH, MSK_I_ALARM_HI_ALL);
+
+	      port->registers_.AlertMskH.M_VBUS_ALRM_LO = 1;
+	      FUSB3601_WriteRegister(port, regALERTMSKH);
+
+	      port->policy_subindex_++;
+	      break;
 	    case 1:
-	      if (port->registers_.AlertH.I_VBUS_ALRM_LO || !FUSB3601_IsVbusOverVoltage(port, FSC_VSAFE0V)) {
-		  FUSB3601_LogPEState(port);
+	      if (port->registers_.AlertH.I_VBUS_ALRM_LO) {
+	    	  FUSB3601_LogPEState(port);
 	        /* We've reached vSafe0V */
 	        FUSB3601_ClearInterrupt(port, regALERTH, MSK_I_VBUS_ALRM_LO | MSK_I_VBUS_SNK_DISC);
 
@@ -1641,20 +1595,20 @@ void FUSB3601_PolicySinkTransitionDefault(struct Port *port)
 	        port->policy_subindex_++;
 	      }
 	      else if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
-		  ////writepestate(&port->log_, 220, port->policy_state_);
+	    	  ////writepestate(&port->log_, 220, port->policy_state_);
 	        /* TODO - check handling if we don't see VBUS change correctly */
-		  port->registers_.PwrCtrl.AUTO_DISCH = 1;
-		          port->registers_.PwrCtrl.DIS_VALARM = 1;
-		          port->registers_.PwrCtrl.DIS_VBUS_MON = 1;
-		          FUSB3601_WriteRegister(port, regPWRCTRL);
-		          //SendCommand(port, SinkVbus);
-		          FUSB3601_set_policy_state(port, peSinkStartup);
-		          FUSB3601_PolicySinkStartup(port);
+	    	  port->registers_.PwrCtrl.AUTO_DISCH = 1;
+	    	          port->registers_.PwrCtrl.DIS_VALARM = 1;
+	    	          port->registers_.PwrCtrl.DIS_VBUS_MON = 1;
+	    	          FUSB3601_WriteRegister(port, regPWRCTRL);
+	    	          //SendCommand(port, SinkVbus);
+	    	          FUSB3601_set_policy_state(port, peSinkStartup);
+	    	          FUSB3601_PolicySinkStartup(port);
 	      }
 	      break;
 	    case 2:
-	      if (port->registers_.AlertL.I_VBUS_ALRM_HI || (FUSB3601_IsVbusOverVoltage(port, FSC_VSAFE5V_L))) {
-		  //LogPEState(port);
+	      if (port->registers_.AlertL.I_VBUS_ALRM_HI) {
+	    	  //LogPEState(port);
 	        /* We've reached vSafe5V */
 	        FUSB3601_ClearInterrupt(port, regALERTL, MSK_I_PORT_PWR | MSK_I_VBUS_ALRM_HI);
 
@@ -1675,7 +1629,7 @@ void FUSB3601_PolicySinkTransitionDefault(struct Port *port)
 
 	      }
 	      else if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
-		  //writepestate(&port->log_, 221, port->policy_state_);
+	    	  //writepestate(&port->log_, 221, port->policy_state_);
 	        /* TODO - check handling if we don't see VBUS change correctly */
 	        FUSB3601_set_policy_state(port, peErrorRecovery);
 	        FUSB3601_TimerDisable(&port->policy_state_timer_);
@@ -1683,7 +1637,7 @@ void FUSB3601_PolicySinkTransitionDefault(struct Port *port)
 	      }
 	      break;
 	    default:
-		//writepestate(&port->log_, 222, port->policy_state_);
+	    	//writepestate(&port->log_, 222, port->policy_state_);
 	      FUSB3601_set_policy_state(port, peErrorRecovery);
 	      FUSB3601_PolicyErrorRecovery(port);
 	      break;
@@ -1723,20 +1677,8 @@ void FUSB3601_PolicySinkWaitCaps(struct Port *port)
   else if ((port->policy_has_contract_ == FALSE) &&
            FUSB3601_TimerExpired(&port->policy_state_timer_) &&
            (port->hard_reset_counter_ > HARD_RESET_COUNT)) {
-		if(FUSB3601_TimerExpired(&port->policy_state_timer_) &&
-				(port->hard_reset_counter_ < 10)) {
-			/* Slow Rp-Rp Cable - Assumes RoleCtrl is DRP:0, CC1/CC2: Rd */
-			FUSB3601_SendCommand(port, DisableSinkVbus);
-			port->registers_.RoleCtrl.RP_VAL = 1;
-			FUSB3601_WriteRegister(port, regROLECTRL);
-			port->registers_.RoleCtrl.RP_VAL = 0;
-			FUSB3601_WriteRegister(port, regROLECTRL);
-			FUSB3601_SendCommand(port, SinkVbus);
-
-			FUSB3601_TimerStart(&port->policy_state_timer_, ktSinkWaitCap);
-			port->hard_reset_counter_++;
-		}
-	}
+	  //Wait for Caps
+  }
 }
 
 void FUSB3601_PolicySinkEvaluateCaps(struct Port *port)
@@ -1749,10 +1691,21 @@ void FUSB3601_PolicySinkEvaluateCaps(struct Port *port)
   FSC_U32 max_power = 0;
   FSC_U32 obj_power = 0;
   FSC_U32 req_current = 0;
-  FSC_U32 optional_max_power = 0;
 
   FUSB3601_TimerDisable(&port->policy_state_timer_);
   port->hard_reset_counter_ = 0;
+
+  /* Check for Factory Mode Caps */
+  if((port->caps_received_[0].PDO.SupplyType == pdoTypeFixed)
+		  && (port->caps_received_[0].FPDOSupply.Voltage == PD_05_V)
+		  && (port->caps_received_[0].FPDOSupply.MaxCurrent == PD_1_36_A)
+		  && (port->caps_received_[1].object == 0xC06EC5E0)) {
+	  FUSB3601_set_policy_state(port, peDisabled);
+	  port->factory_mode_ = TRUE;
+	  FUSB3601_WriteTCState(&port->log_, 499, port->tc_state_);
+	  FUSB3601_platform_delay(10 * 1000);
+	  return;
+  }
 
   /* Select the highest power object that we are compatible with */
   for (i = 0; i < port->caps_header_received_.NumDataObjects; i++) {
@@ -1784,13 +1737,6 @@ void FUSB3601_PolicySinkEvaluateCaps(struct Port *port)
         /* Ignore undefined/unsupported supply types */
         obj_power = 0;
         break;
-    }
-
-    if (obj_power > optional_max_power) {
-        optional_max_power = obj_power;
-    }
-    if (obj_voltage > pd_limit_voltage) {
-        continue;
     }
 
     /* Track object with highest power */
@@ -1848,13 +1794,6 @@ void FUSB3601_PolicySinkEvaluateCaps(struct Port *port)
         port->sink_request_.FVRDO.CapabilityMismatch = FALSE;
       }
     }
-
-    if (optional_max_power >= PD_18_W) {
-	 pd_dpm_set_optional_max_power_status(true);
-    } else {
-        pd_dpm_set_optional_max_power_status(false);
-    }
-
     FUSB3601_set_policy_state(port, peSinkSelectCapability);
     FUSB3601_PolicySinkSelectCapability(port);
   }
@@ -1875,9 +1814,9 @@ void FUSB3601_PolicySinkSelectCapability(struct Port *port)
 {
   switch (port->policy_subindex_) {
     case 0:
-	FUSB3601_ProtocolSendData(port, DMTRequest, 1, &port->sink_request_,
-			ktSenderResponse, peSinkSendSoftReset, TRUE, SOP_TYPE_SOP);
-	port->policy_subindex_++;
+    	FUSB3601_ProtocolSendData(port, DMTRequest, 1, &port->sink_request_,
+    			ktSenderResponse, peSinkSendSoftReset, TRUE, SOP_TYPE_SOP);
+    	port->policy_subindex_++;
       break;
     case 1:
       if ((port->pd_tx_status_ = txSuccess) && port->protocol_msg_rx_) {
@@ -1935,7 +1874,7 @@ void FUSB3601_PolicySinkSelectCapability(struct Port *port)
         }
       }
       else if (FUSB3601_TimerExpired(&port->policy_state_timer_)) {
-	  FUSB3601_ProtocolSendHardReset(port);
+    	  FUSB3601_ProtocolSendHardReset(port);
       }
       break;
   }
@@ -1948,11 +1887,17 @@ void FUSB3601_PolicySinkTransitionSink(struct Port *port)
     if (port->policy_rx_header_.NumDataObjects == 0) {
       switch (port->policy_rx_header_.MessageType) {
         case CMTPS_RDY:
-          FUSB3601_ReadRegister(port, regSCP_ENABLE1);
-          port->registers_.SCPEnable1.ENABLE_SCP = 0;
-          FUSB3601_WriteRegister(port, regSCP_ENABLE1);
+          /* Set up the new disconnect level */
+          /* FPDO Option only for now! */
+          FUSB3601_SetVBusSnkDisc(port,
+          FSC_VBUS_LVL_PD_DISC(port->sink_selected_voltage_) * 2);
+          FUSB3601_SetVBusStopDisc(port, FSC_VSAFE0V_DISCH);
+
+          port->registers_.AlertMskH.M_VBUS_SNK_DISC = 1;
+          FUSB3601_WriteRegisters(port, regALERTMSKH, 1);
+
           FUSB3601_platform_notify_pd_contract(TRUE, port->sink_selected_voltage_,
-			  port->sink_request_.FVRDO.OpCurrent, port->caps_received_[0].FPDOSupply.ExternallyPowered);
+        		  port->sink_request_.FVRDO.OpCurrent, port->caps_received_[0].FPDOSupply.ExternallyPowered);
 
           FUSB3601_set_policy_state(port, peSinkReady);
           FUSB3601_PolicySinkReady(port);
@@ -2044,7 +1989,7 @@ void FUSB3601_PolicySinkReady(struct Port *port)
           break;
 #ifdef FSC_HAVE_VDM
         case DMTVendorDefined:
-		FUSB3601_ProcessVdmMessage(port);
+        	FUSB3601_ProcessVdmMessage(port);
           break;
 #endif /* FSC_HAVE_VDM */
         case DMTBIST:
@@ -2057,7 +2002,6 @@ void FUSB3601_PolicySinkReady(struct Port *port)
     }
   }
   else if (port->pd_tx_flag_) {
-	port->pd_tx_flag_ = FALSE;
     if (port->pd_transmit_header_.NumDataObjects == 0) {
       switch (port->pd_transmit_header_.MessageType) {
         case CMTGetSourceCap:
@@ -2102,6 +2046,7 @@ void FUSB3601_PolicySinkReady(struct Port *port)
           break;
       }
     }
+    port->pd_tx_flag_ = FALSE;
   }
 #ifdef FSC_HAVE_VDM
   else if (port->policy_is_dfp_ && port->auto_vdm_state_ != AUTO_VDM_DONE
@@ -2126,12 +2071,12 @@ void FUSB3601_PolicySinkGiveSinkCap(struct Port *port)
 		  port->policy_subindex_++;
 		  break;
 	    case 1:
-		if(port->pd_tx_status_ == txSuccess) {
-			port->pd_tx_status_ = txIdle;
-			FUSB3601_set_policy_state(port, peSinkReady);
-			FUSB3601_PolicySinkReady(port);
-		}
-		break;
+	    	if(port->pd_tx_status_ == txSuccess) {
+	    		port->pd_tx_status_ = txIdle;
+	    		FUSB3601_set_policy_state(port, peSinkReady);
+	    		FUSB3601_PolicySinkReady(port);
+	    	}
+	    	break;
 	  }
 }
 
@@ -2145,12 +2090,12 @@ void FUSB3601_PolicySinkGetSourceCap(struct Port *port)
 	  port->policy_subindex_++;
 	  break;
     case 1:
-	if(port->pd_tx_status_ == txSuccess) {
-		port->pd_tx_status_ = txIdle;
-		FUSB3601_set_policy_state(port, peSinkReady);
-		FUSB3601_PolicySinkReady(port);
-	}
-	break;
+    	if(port->pd_tx_status_ == txSuccess) {
+    		port->pd_tx_status_ = txIdle;
+    		FUSB3601_set_policy_state(port, peSinkReady);
+    		FUSB3601_PolicySinkReady(port);
+    	}
+    	break;
   }
 }
 
@@ -2162,12 +2107,12 @@ void FUSB3601_PolicySinkGetSinkCap(struct Port *port)
 	  port->policy_subindex_++;
 	  break;
     case 1:
-	if(port->pd_tx_status_ == txSuccess) {
-		port->pd_tx_status_ = txIdle;
-		FUSB3601_set_policy_state(port, peSinkReady);
-		FUSB3601_PolicySinkReady(port);
-	}
-	break;
+    	if(port->pd_tx_status_ == txSuccess) {
+    		port->pd_tx_status_ = txIdle;
+    		FUSB3601_set_policy_state(port, peSinkReady);
+    		FUSB3601_PolicySinkReady(port);
+    	}
+    	break;
   }
 }
 
@@ -2187,12 +2132,12 @@ void FUSB3601_PolicySinkGiveSourceCap(struct Port *port)
 	  port->policy_subindex_++;
 	  break;
     case 1:
-	if(port->pd_tx_status_ == txSuccess) {
-		port->pd_tx_status_ = txIdle;
-		FUSB3601_set_policy_state(port, peSinkReady);
-		FUSB3601_PolicySinkReady(port);
-	}
-	break;
+    	if(port->pd_tx_status_ == txSuccess) {
+    		port->pd_tx_status_ = txIdle;
+    		FUSB3601_set_policy_state(port, peSinkReady);
+    		FUSB3601_PolicySinkReady(port);
+    	}
+    	break;
   }
 }
 
@@ -2216,7 +2161,6 @@ void FUSB3601_PolicySinkSendDRSwap(struct Port *port)
               FUSB3601_WriteRegister(port, regMSGHEADR);
               FUSB3601_set_policy_state(port, peSinkReady);
               FUSB3601_PolicySinkReady(port);
-	      port->auto_vdm_state_ = AUTO_VDM_INIT;
               break;
             case CMTSoftReset:
               FUSB3601_set_policy_state(port, peSinkSoftReset);
@@ -2251,22 +2195,20 @@ void FUSB3601_PolicySinkEvaluateDRSwap(struct Port *port)
 			return;
 		  }
 		#endif /* FSC_HAVE_VDM */
-	FUSB3601_ProtocolSendData(port, CMTAccept, 0, 0,
-	                             0, peErrorRecovery, FALSE, SOP_TYPE_SOP);
+    	FUSB3601_ProtocolSendData(port, CMTAccept, 0, 0,
+    	                             0, peErrorRecovery, FALSE, SOP_TYPE_SOP);
 	  port->policy_subindex_++;
 	  break;
     case 1:
-	if(port->pd_tx_status_ == txSuccess) {
-		port->pd_tx_status_ = txIdle;
-	    port->policy_is_dfp_ = (port->policy_is_dfp_ == TRUE) ? FALSE : TRUE;
-	    port->registers_.MsgHeadr.DATA_ROLE = port->policy_is_dfp_;
-	    FUSB3601_WriteRegister(port, regMSGHEADR);
-		FUSB3601_set_policy_state(port, peSinkReady);
-		FUSB3601_PolicySinkReady(port);
-		port->auto_vdm_state_ = AUTO_VDM_INIT;
-		FUSB3601_platform_notify_data_role(port->policy_is_dfp_);
-	}
-	break;
+    	if(port->pd_tx_status_ == txSuccess) {
+    		port->pd_tx_status_ = txIdle;
+    	    port->policy_is_dfp_ = (port->policy_is_dfp_ == TRUE) ? FALSE : TRUE;
+    	    port->registers_.MsgHeadr.DATA_ROLE = port->policy_is_dfp_;
+    	    FUSB3601_WriteRegister(port, regMSGHEADR);
+    		FUSB3601_set_policy_state(port, peSinkReady);
+    		FUSB3601_PolicySinkReady(port);
+    	}
+    	break;
   }
 }
 
@@ -2294,7 +2236,7 @@ void FUSB3601_PolicySinkEvaluateVCONNSwap(struct Port *port)
 				FUSB3601_TimerStart(&port->policy_state_timer_, ktVCONNOnDelay);
 				port->policy_subindex_ = 3;
 			  }
-	}
+    	}
       break;
     case 2:
       if (port->protocol_msg_rx_) {
@@ -2421,12 +2363,12 @@ void FUSB3601_PolicySinkSendPRSwap(struct Port *port)
         }
       break;
   default:
-	if(port->pd_tx_status_ == txSuccess) {
-		port->pd_tx_status_ = txIdle;
-		FUSB3601_set_policy_state(port, peSourceStartup);
-		FUSB3601_PolicySourceStartupHelper(port);
-		FUSB3601_PolicySourceStartup(port);
-	}
+  	if(port->pd_tx_status_ == txSuccess) {
+  		port->pd_tx_status_ = txIdle;
+  		FUSB3601_set_policy_state(port, peSourceStartup);
+  		FUSB3601_PolicySourceStartupHelper(port);
+  		FUSB3601_PolicySourceStartup(port);
+  	}
 	  break;
   }
 #endif /* FSC_HAVE_DRP */
@@ -2444,9 +2386,9 @@ void FUSB3601_PolicySinkEvaluatePRSwap(struct Port *port)
         FUSB3601_set_policy_state(port, peSinkReady);
       }
       else {
-	  FUSB3601_ProtocolSendData(port, CMTAccept, 0, 0,
+    	  FUSB3601_ProtocolSendData(port, CMTAccept, 0, 0,
                                  ktPSSourceOff, peSinkSendSoftReset, TRUE, SOP_TYPE_SOP);
-	  FUSB3601_enable_vbus_adc(port);
+    	  FUSB3601_enable_vbus_adc(port);
         port->is_pr_swap_ = TRUE;
         port->policy_has_contract_ = FALSE;
 
@@ -2454,7 +2396,6 @@ void FUSB3601_PolicySinkEvaluatePRSwap(struct Port *port)
         FUSB3601_WriteRegister(port, regPWRCTRL);
 
         FUSB3601_SendCommand(port, DisableSinkVbus);
-        FUSB3601_platform_set_vbus_output(FALSE);
         port->policy_subindex_++;
       }
       break;
@@ -2468,14 +2409,14 @@ void FUSB3601_PolicySinkEvaluatePRSwap(struct Port *port)
               port->policy_is_source_ = TRUE;
 
               /* Set up to wait for vSafe5V for PD */
-		FUSB3601_SetVBusAlarm(port, 0, FSC_VSAFE5V_L);
+             	FUSB3601_SetVBusAlarm(port, 0, FSC_VSAFE5V_L);
 
-		FUSB3601_ClearInterrupt(port, regALERTL, MSK_I_VBUS_ALRM_HI | MSK_I_PORT_PWR);
-		FUSB3601_ClearInterrupt(port, regALERTH, MSK_I_VBUS_ALRM_LO);
+             	FUSB3601_ClearInterrupt(port, regALERTL, MSK_I_VBUS_ALRM_HI | MSK_I_PORT_PWR);
+             	FUSB3601_ClearInterrupt(port, regALERTH, MSK_I_VBUS_ALRM_LO);
 
-		port->registers_.AlertMskH.M_VBUS_ALRM_LO = 0;
-		port->registers_.AlertMskL.M_VBUS_ALRM_HI = 1;
-		FUSB3601_WriteRegisters(port, regALERTMSKL, 2);
+             	port->registers_.AlertMskH.M_VBUS_ALRM_LO = 0;
+             	port->registers_.AlertMskL.M_VBUS_ALRM_HI = 1;
+             	FUSB3601_WriteRegisters(port, regALERTMSKL, 2);
 
               FUSB3601_RoleSwapToAttachedSource(port);
 
@@ -2500,10 +2441,10 @@ void FUSB3601_PolicySinkEvaluatePRSwap(struct Port *port)
     case 2:
       if (FUSB3601_IsVbusOverVoltage(port, FSC_VSAFE5V_L)) {
 
-	 FUSB3601_ReadRegister(port, regCCSTAT);
-	 FUSB3601_DetectCCPin(port);
+    	 FUSB3601_ReadRegister(port, regCCSTAT);
+    	 FUSB3601_DetectCCPin(port);
 
-	  port->registers_.AlertMskH.M_VBUS_ALRM_LO = 0;
+    	  port->registers_.AlertMskH.M_VBUS_ALRM_LO = 0;
 			port->registers_.AlertMskL.M_VBUS_ALRM_HI = 0;
 			FUSB3601_WriteRegisters(port, regALERTMSKL, 2);
 
@@ -2522,20 +2463,20 @@ void FUSB3601_PolicySinkEvaluatePRSwap(struct Port *port)
       }
       break;
     default:
-	if(port->pd_tx_status_ == txSuccess) {
-		port->pd_tx_status_ = txIdle;
+      	if(port->pd_tx_status_ == txSuccess) {
+      		port->pd_tx_status_ = txIdle;
 
-		port->is_pr_swap_ = FALSE;
+      		port->is_pr_swap_ = FALSE;
 
 //			  port->registers_.PwrCtrl.AUTO_DISCH = 1;
 //			  WriteRegister(port, regPWRCTRL);
 //			  port->registers_.PwrCtrl.AUTO_DISCH = 0;
 //			  WriteRegister(port, regPWRCTRL);
-		FUSB3601_set_policy_state(port, peSourceStartup);
-		FUSB3601_PolicySourceStartupHelper(port);
-		FUSB3601_PolicySourceStartup(port);
-	}
-	break;
+      		FUSB3601_set_policy_state(port, peSourceStartup);
+      		FUSB3601_PolicySourceStartupHelper(port);
+      		FUSB3601_PolicySourceStartup(port);
+      	}
+    	break;
   }
 }
 
@@ -2559,36 +2500,6 @@ void FUSB3601_UpdateCapabilitiesRx(struct Port *port, FSC_BOOL is_source_cap_upd
     port->caps_received_[i].object = 0;
   }
   port->partner_caps_.object = port->caps_received_[0].object;
-}
-
-/* ---------------- VDM ---------------- */
-void FUSB3601_PolicyDfpCblVdmIdentityRequest(struct Port *port)
-{
-	switch (port->policy_subindex_) {
-		case 0:
-			FUSB3601_platform_log(port->port_id_, "FUSB DiscID SOP' SubState: ", 0);
-			FUSB3601_PolicySendVDM(port, DISCOVER_IDENTITY, 0xFF00, SOP_TYPE_SOP1, 0);
-			port->policy_subindex_++;
-			break;
-		default:
-		if((port->pd_tx_status_== txSuccess)&&(port->protocol_msg_rx_||FUSB3601_TimerExpired(&port->policy_state_timer_))){
-				FUSB3601_platform_log(port->port_id_, "FUSB DiscID SOP' SubState 1 TxSuccess: ", port->protocol_msg_rx_);
-				port->protocol_msg_rx_ = FALSE;
-				port->pd_tx_status_ = txIdle;
-				FUSB3601_TimerDisable(&port->vdm_timer_);
-
-				FUSB3601_set_policy_state(port, peSourceSendCaps);
-				FUSB3601_PolicySourceSendCaps(port);
-			}
-			/*
-			else if((port->pd_tx_status_ == txIdle)) {
-				FUSB3601_platform_log(port->port_id_, "FUSB DiscID SOP' SubState 1 TxFail: ", -1);
-				FUSB3601_set_policy_state(port, peSourceSendCaps);
-				FUSB3601_PolicySourceSendCaps(port);
-			}
-			*/
-			break;
-	}
 }
 
 /* ---------------- BIST Functionality ---------------- */
@@ -2637,7 +2548,6 @@ void FUSB3601_PolicyBISTCarrierMode2(struct Port *port)
       port->registers_.Transmit.TX_SOP = TRANSMIT_BIST_CM2;
       FUSB3601_WriteRegister(port, regTRANSMIT);
       FUSB3601_TimerStart(&port->policy_state_timer_, ktBISTContMode);
-      FUSB3601_SendCommand(port, DisableSinkVbus);
       port->policy_subindex_=2;
       break;
     case 1:
@@ -2656,7 +2566,6 @@ void FUSB3601_PolicyBISTCarrierMode2(struct Port *port)
         }
         else {
 #ifdef FSC_HAVE_SNK
-          FUSB3601_SendCommand(port, SinkVbus);
           FUSB3601_set_policy_state(port, peSinkReady);
 #endif /* FSC_HAVE_SNK */
         }
@@ -2675,3 +2584,5 @@ void FUSB3601_PolicyInvalidState(struct Port *port)
   /* reset if we get to an invalid state */
 	FUSB3601_ProtocolSendHardReset(port);
 }
+
+

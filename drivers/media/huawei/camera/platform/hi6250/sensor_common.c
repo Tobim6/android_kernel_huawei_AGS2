@@ -723,6 +723,184 @@ int hw_sensor_power_off(void *psensor)
 }
 EXPORT_SYMBOL(hw_sensor_power_off);
 
+#if 0
+int hw_sensor_i2c_read(sensor_t *s_ctrl, void *data)
+{
+    struct sensor_cfg_data *cdata = (struct sensor_cfg_data *)data;
+    long   rc = 0;
+    unsigned int reg, *val;
+
+    cam_debug("%s: address=0x%x\n", __func__, cdata->cfg.reg.subaddr);
+
+    /* parse the I2C parameters */
+    reg = cdata->cfg.reg.subaddr;
+    val = &cdata->cfg.reg.value;
+
+    rc = hw_isp_read_sensor_byte(&s_ctrl->board_info->i2c_config, reg, (u16 *)val);
+
+    return rc;
+}
+
+int hw_sensor_i2c_write(sensor_t *s_ctrl, void *data)
+{
+    struct sensor_cfg_data *cdata = (struct sensor_cfg_data *)data;
+    long   rc = 0;
+    unsigned int reg, val, mask;
+
+    cam_debug("%s enter.\n", __func__);
+
+    cam_debug("%s: address=0x%x, value=0x%x\n", __func__,
+        cdata->cfg.reg.subaddr, cdata->cfg.reg.value);
+
+    /* parse the I2C parameters */
+    reg = cdata->cfg.reg.subaddr;
+    val = cdata->cfg.reg.value;
+    mask = cdata->cfg.reg.mask;
+
+    rc = hw_isp_write_sensor_byte(&s_ctrl->board_info->i2c_config, reg, val, mask);
+
+    return rc;
+}
+
+int hw_sensor_i2c_read_seq(sensor_t *s_ctrl, void *data)
+{
+    struct sensor_i2c_setting setting;
+    struct sensor_cfg_data *cdata = NULL;
+    long rc = 0;
+    int size = 0;
+    if (NULL == data || NULL == s_ctrl) {
+        cam_err("%s data or s_ctrl is null.\n", __func__);
+        return -EFAULT;
+    }
+    cdata = (struct sensor_cfg_data *)data;
+    size = sizeof(struct sensor_i2c_reg)*cdata->cfg.setting.size;
+
+    cam_debug("%s: enter.\n", __func__);
+
+    setting.setting = (struct sensor_i2c_reg*)kzalloc(size, GFP_KERNEL);
+    if (IS_ERR_OR_NULL(setting.setting)) {
+        cam_err("%s kmalloc error.\n", __func__);
+        return -ENOMEM;
+    }
+
+    if (copy_from_user(setting.setting,
+        (void __user *)cdata->cfg.setting.setting, size)) {
+        cam_err("%s copy_from_user error.\n", __func__);
+        rc = -EFAULT;
+        goto fail;
+    }
+
+    /* test
+    {
+        int i=0;
+        for(i=0; i<cdata->cfg.setting.size; i++) {
+            cam_debug("%s subaddr=0x%x.\n",
+                __func__,
+                setting.setting[i].subaddr);
+                setting.setting[i].value = i;
+        }
+    }
+    */
+    {
+        int i=0;
+        struct sensor_cfg_data temp;
+        memset(&temp,0,sizeof(struct sensor_cfg_data));
+        for(i=0; i<cdata->cfg.setting.size; i++) {
+            temp.cfg.reg.subaddr = setting.setting[i].subaddr;
+            temp.cfg.reg.mask = setting.setting[i].mask;
+            hw_sensor_i2c_read(s_ctrl,&temp);
+            setting.setting[i].value = temp.cfg.reg.value;
+        }
+    }
+
+    if (copy_to_user((void __user *)cdata->cfg.setting.setting,
+        setting.setting, size)) {
+        cam_err("%s copy_to_user error.\n", __func__);
+        rc = -EFAULT;
+        goto fail;
+    }
+
+fail:
+    kfree(setting.setting);
+    return rc;
+}
+
+int hw_sensor_i2c_write_seq( sensor_t *s_ctrl, void *data)
+{
+    struct sensor_i2c_setting setting;
+    struct sensor_cfg_data *cdata = NULL;
+    long rc = 0;
+    int data_length = 0;
+    if (NULL == data || NULL == s_ctrl) {
+        cam_err("%s data or s_ctrl is null.\n", __func__);
+        return -EFAULT;
+    }
+    cdata = (struct sensor_cfg_data *)data;
+    data_length = sizeof(struct sensor_i2c_reg)*cdata->cfg.setting.size;
+
+    cam_info("%s: enter setting=%pK size=%d.\n", __func__,
+            cdata->cfg.setting.setting,
+            (unsigned int)cdata->cfg.setting.size);
+
+    if (data_length <= 0) {
+        cam_err("%s data_length(%d).\n", __func__, data_length);
+        return -EFAULT;
+    }
+
+    setting.setting = (struct sensor_i2c_reg*)kzalloc(data_length, GFP_KERNEL);
+    if (NULL == setting.setting) {
+        cam_err("%s kmalloc error.\n", __func__);
+        return -ENOMEM;
+    }
+
+    if (copy_from_user(setting.setting,
+        (void __user *)cdata->cfg.setting.setting, data_length)) {
+        cam_err("%s copy_from_user error.\n", __func__);
+        rc = -EFAULT;
+        goto out;
+    }
+
+    rc = hw_isp_write_sensor_seq(&s_ctrl->board_info->i2c_config, setting.setting, cdata->cfg.setting.size);
+out:
+    kfree(setting.setting);
+    return rc;
+}
+
+int hisi_sensor_apply_expo_gain(struct hisi_sensor_ctrl_t *s_ctrl, void *data)
+{
+    struct sensor_cfg_data *cdata = (struct sensor_cfg_data *)data;
+    struct expo_gain_seq me_seq = cdata->cfg.me_seq;
+    struct hisi_sensor_t *sensor = s_ctrl->sensor;
+    int i;
+
+    cam_debug("seq_size[%d]", me_seq.seq_size);
+    for(i = 0; i < me_seq.seq_size; i++) {
+        cam_debug("expo[0x%04x], gain[0x%02x]", me_seq.expo[i], me_seq.gain[i]);
+    }
+    cam_debug("eof trigger[%d]\n", me_seq.eof_trigger);
+
+    if(sensor->sensor_info->sensor_type == 1) {/*ov sensor*/
+        memmove(me_seq.gain + 1, me_seq.gain, sizeof(u32) * me_seq.seq_size);
+        me_seq.expo[me_seq.seq_size] = me_seq.expo[me_seq.seq_size - 1];
+        me_seq.seq_size++;
+    }
+
+    for(i = 0; i < me_seq.seq_size; i++) {
+        cam_debug("expo[0x%04x], gain[0x%02x], hts[0x%02x], vts[0x%02x]",
+            me_seq.expo[i], me_seq.gain[i], me_seq.hts, me_seq.vts);
+    }
+
+    return hw_setup_eof_tasklet(sensor, &me_seq);
+
+}
+
+int hisi_sensor_suspend_eg_task(struct hisi_sensor_ctrl_t *s_ctrl)
+{
+    cam_debug("enter %s", __func__);
+
+    return hw_destory_eof_tasklet();
+}
+#endif
 
 int hwsensor_writefile(int index, const char *sensor_name)
 {
@@ -737,7 +915,7 @@ int hwsensor_writefile(int index, const char *sensor_name)
         return -1;
     cam_info("%s index=%d,sensor_name=%s.\n", __func__, index, sensor_name);
 
-    snprintf(file_name, FILE_NAME_LEN, "/data/vendor/camera/hisi_sensor%d", index);
+    snprintf(file_name, FILE_NAME_LEN, "/data/camera/hisi_sensor%d", index);
 
     filp = filp_open(file_name, O_CREAT|O_WRONLY, 0666);
     if (IS_ERR_OR_NULL(filp)) {
@@ -920,6 +1098,13 @@ int hw_sensor_get_dt_data(struct platform_device *pdev,
             goto fail;
         }
     }
+#if 0
+    rc = devm_regulator_bulk_get(&(pdev->dev), sensor_info->ldo_num, sensor_info->ldo);
+    if (rc < 0) {
+        cam_err("%s failed %d\n", __func__, __LINE__);
+        goto fail;
+    }
+#endif
 
     sensor_info->gpio_num = of_gpio_count(dev_node);
     if(sensor_info->gpio_num < 0 ) {

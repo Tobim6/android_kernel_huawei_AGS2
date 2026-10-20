@@ -21,7 +21,7 @@
 #include "tui.h"
 #endif
 #include "../../huawei_ts_kit.h"
-#include "../../../lcdkit/lcdkit1.0/include/lcdkit_panel.h"
+#include "../../../lcdkit/include/lcdkit_panel.h"
 
 #define SYNAPTICS_CHIP_INFO  "synaptics-"
 #define SYNAPTICS_VENDER_NAME  "synaptics"
@@ -85,7 +85,7 @@
 #define SYNAPTIC_DEFAULT_I2C_ADDR 0x70
 #define MULTI_PROTOCAL_1 1
 #define MULTI_PROTOCAL_2 2
-#define SIZE_OF_QUERY8 3 
+#define SIZE_OF_QUERY8 3
 
 #ifndef SYNA_UPP
 #define SYNA_UPP
@@ -271,11 +271,10 @@ __attribute__((weak)) void preread_fingersense_data(void)
 #define TRX_SHORT_CIRCUIT "huawei,short_circuit_array"
 #define SUPPORT_SHORT_TEST "huawei,support_s3320_short_test"
 #define SUPPORT_EXT_TREX_SHORT_TEST "huawei,support_ext_trex_short_test"
+#define BLANC501100_TIANMA_FLAG "huawei,blac501100_tianma_flag"
 #define NOT_DELAY_ACT "delay_for_fw_update"
 #define CRC_ERR_DO_RESET "crc_err_do_reset"
 #define SUPPORT_CRC_ERR_DO_RESET 1
-#define RAWDATA_NEWFOR_MAT "rawdata_newformatflag"
-
 
 #define SYNAPTICS_MAX_REGDATA_NUM 32
 static char synaptics_reg_status[SYNAPTICS_MAX_REGDATA_NUM] = { 0 };
@@ -828,7 +827,7 @@ static int synaptics_chip_check_status(void){
 		}
 		if(frequency_selection_reg != value) {
 			frequency_selection_reg = value;
-			TS_LOG_INFO("%s: frequency_selection reg value change: %d\n", __func__,frequency_selection_reg);
+			TS_LOG_INFO("frequency_selection reg value change: %d\n", __func__,frequency_selection_reg);
 		}
 	}
 
@@ -1320,7 +1319,7 @@ static int synaptics_reconstruct_barcode(struct ts_oem_info_param *info)
 	len = info->buff[offset1*16 + 1];
 	if ((type == 0x00 && len == 0x00) ||(type == 0xFF && len == 0xFF)) {
 		 memcpy(&(info->buff[offset1*16]), tp_type_cmd, tp_type_cmd[1]*16);
-		 TS_LOG_INFO("Will write the data to info_buff, offset is %d", offset1);
+		 TS_LOG_INFO("Will write the data to info_buff, offset is %s", offset1);
 		 return retval;
 	 }
 
@@ -1328,7 +1327,7 @@ static int synaptics_reconstruct_barcode(struct ts_oem_info_param *info)
 	len = info->buff[offset2*16 + 1];
 	if ((type == 0x00 && len == 0x00) ||(type == 0xFF && len == 0xFF)) {
 		 memcpy(&(info->buff[offset2*16]), tp_type_cmd, tp_type_cmd[1]*16);
-		 TS_LOG_INFO("Will write the data to info_buff, offset is %d\n", offset2);
+		 TS_LOG_INFO("Will write the data to info_buff, offset is %s", offset2);
 		 return retval;
 	 }
 
@@ -1352,7 +1351,7 @@ static int synaptics_reconstruct_brightness(struct ts_oem_info_param *info)
 	len = info->buff[offset1*16 + 1];
 	if ((type == 0x00 && len == 0x00) ||(type == 0xFF && len == 0xFF)) {
 		 memcpy(&(info->buff[offset1*16]), tp_type_cmd, tp_type_cmd[1]*16);
-		 TS_LOG_INFO("Will write the data to info_buff, offset is %d", offset1);
+		 TS_LOG_INFO("Will write the data to info_buff, offset is %s", offset1);
 		 return retval;
 	}
 
@@ -1360,7 +1359,7 @@ static int synaptics_reconstruct_brightness(struct ts_oem_info_param *info)
 	len = info->buff[offset2*16 + 1];
 	if ((type == 0x00 && len == 0x00) ||(type == 0xFF && len == 0xFF)) {
 		 memcpy(&(info->buff[offset2*16]), tp_type_cmd, tp_type_cmd[1]*16);
-		 TS_LOG_INFO("Will write the data to info_buff, offset is %d", offset2);
+		 TS_LOG_INFO("Will write the data to info_buff, offset is %s", offset2);
 		 return retval;
 	 }
 
@@ -1384,7 +1383,7 @@ static int synaptics_reconstruct_whitepoint(struct ts_oem_info_param *info)
 	len = info->buff[offset1*16 + 1];
 	if ((type == 0x00 && len == 0x00) ||(type == 0xFF && len == 0xFF)) {
 		memcpy(&(info->buff[offset1*16]), tp_type_cmd, tp_type_cmd[1]*16);
-		TS_LOG_INFO("Will write the data to info_buff, offset is %d\n", offset1);
+		TS_LOG_INFO("Will write the data to info_buff, offset is %s", offset1);
 		return retval;
 	}
 
@@ -1392,7 +1391,7 @@ static int synaptics_reconstruct_whitepoint(struct ts_oem_info_param *info)
 	len = info->buff[offset2*16 + 1];
 	if ((type == 0x00 && len == 0x00) ||(type == 0xFF && len == 0xFF)) {
 		memcpy(&(info->buff[offset2*16]), tp_type_cmd, tp_type_cmd[1]*16);
-		TS_LOG_INFO("Will write the data to info_buff, offset is %d\n", offset2);
+		TS_LOG_INFO("Will write the data to info_buff, offset is %s", offset2);
 		return retval;
 	}
 
@@ -1425,7 +1424,7 @@ static int synaptics_reconstruct_repair_recode(struct ts_oem_info_param *info)
 
 		if ((type == 0x00 && len == 0x00) ||(type == 0xFF && len == 0xFF)) {
 			memcpy(&(info->buff[offset*16]), tp_type_cmd, tp_type_cmd[1]*16);
-			TS_LOG_INFO("Will write the data to info_buff, offset is %d", offset);
+			TS_LOG_INFO("Will write the data to info_buff, offset is %s", offset);
 			break;
 		} else if( offset == TS_NV_STRUCTURE_REPAIR_OFFSET5 ) {
 			TS_LOG_INFO("%s repaire recode is full, could not write into the data\n", __func__);
@@ -1737,7 +1736,6 @@ static int synaptics_get_oem_info(struct ts_oem_info_param *info)
 	int latest_index = 0;
 	int i;
 	int count = 0;
-	int infolength = 0;
 	
 	TS_LOG_INFO("%s called\n", __func__);
 	memset(info->data, 0x0, TS_CHIP_TYPE_MAX_SIZE);
@@ -1789,8 +1787,7 @@ static int synaptics_get_oem_info(struct ts_oem_info_param *info)
 
 		if (latest_index) {
 			TS_LOG_INFO("%s type data find. len = %d\n", __func__, info->length);
-			infolength = min(TS_CHIP_TYPE_MAX_SIZE,info->length*16+1);
-			memcpy(info->data, &(info->buff[latest_index*16]), infolength-1);
+			memcpy(info->data, &(info->buff[latest_index*16]), info->length*16 );
 		} else {
 			info->data[0] = 0x1;
 			TS_LOG_INFO("%s No type data find. info->data[0] = %2x\n", __func__, info->data[0]);
@@ -1810,8 +1807,7 @@ static int synaptics_get_oem_info(struct ts_oem_info_param *info)
 
 		if (latest_index) {
 			TS_LOG_INFO("%s type data find. len = %d\n", __func__, info->buff[latest_index*16+1]*16);
-			infolength = min(TS_CHIP_TYPE_MAX_SIZE,info->buff[latest_index*16+1]*16+1);
-			memcpy(info->data, &(info->buff[latest_index*16]), infolength-1);
+			memcpy(info->data, &(info->buff[latest_index*16]), info->buff[latest_index*16+1]*16 );
 		} else {
 			info->data[0] = 0x1;
 			TS_LOG_INFO("%s No type data find. info->data[0] = %2x\n", __func__, info->data[0]);
@@ -1882,13 +1878,12 @@ static int synaptics_chip_get_info(struct ts_chip_info_param *info)
 				&& SYNAPTICS_TD4322 != rmi4_data->synaptics_chip_data->ic_type
 				&& SYNAPTICS_TD4310 != rmi4_data->synaptics_chip_data->ic_type
 				&& SYNAPTICS_S3706 != rmi4_data->synaptics_chip_data->ic_type){
-				retval = synap_fw_configid(rmi4_data, buf, sizeof(buf));
+				retval =
+				    synap_fw_configid(rmi4_data, buf,
+							  sizeof(buf));
 				if (retval < 0)
 					TS_LOG_ERR("failed to get configid\n");
-				retval = synap_fw_data_init(rmi4_data);
-				if (retval < 0) {
-					TS_LOG_ERR("synap_fw_data_init error.\n");
-				}
+				synap_fw_data_init(rmi4_data);
 				synap_fw_data_release();
 			} else {
 				retval =
@@ -1896,10 +1891,7 @@ static int synaptics_chip_get_info(struct ts_chip_info_param *info)
 								sizeof(buf));
 				if (retval < 0)
 					TS_LOG_ERR("failed to get configid\n");
-				retval = synap_fw_data_s3718_init(rmi4_data);
-				if (retval) {
-					TS_LOG_ERR("%s, failed\n", __func__);
-				}
+				synap_fw_data_s3718_init(rmi4_data);
 				synap_fw_data_s3718_release();
 				synaptics_rmi4_status_resume(rmi4_data);
 			}
@@ -2076,11 +2068,6 @@ static void synap_parse_chip_tddi_specific_dts(struct ts_kit_device_data *chip_d
 		chip_data->tddi_ee_short_test_parttwo_limit = 0;
 	} else {
 		TS_LOG_INFO("tddi_ee_short_test_parttwo_limit = %d\n", chip_data->tddi_ee_short_test_parttwo_limit);
-	}
-	retval = of_property_read_u32(device, RAWDATA_NEWFOR_MAT,&chip_data->rawdata_newformatflag);
-	if (retval) {
-		chip_data->rawdata_newformatflag = 0; /* 0 old format */
-		TS_LOG_INFO("%s: Use default raw data newformat\n", __func__);
 	}
 
 	retval = of_property_read_u32(device, "aft_data_addr", &read_val);
@@ -2521,6 +2508,12 @@ static void synap_parse_touch_switch_reg(struct ts_kit_device_data *chip_data, s
 		TS_LOG_INFO("get device self_cap_test:%02x\n", chip_data->self_cap_test);
 	}
 
+	retval = of_property_read_u32(device,BLANC501100_TIANMA_FLAG, &chip_data->blanc501100_tianma_flag);
+	if (retval) {
+		TS_LOG_ERR("blanc501100_tianma_flag not exit,use default value 0");
+		chip_data->blanc501100_tianma_flag = 0;
+		retval = 0;
+	}
 	retval = of_property_read_u32(device, SUPPORT_EXT_TREX_SHORT_TEST, &chip_data->support_ext_trex_short_test);
 	if (retval) {
 		TS_LOG_ERR("%s: support_ext_trex_short_test has NOT been set\n", __func__);
@@ -2528,28 +2521,13 @@ static void synap_parse_touch_switch_reg(struct ts_kit_device_data *chip_data, s
 	}
 	TS_LOG_INFO("%s: support_ext_trex_short_test = %d\n", __func__, chip_data->support_ext_trex_short_test);
 
+
 	TS_LOG_INFO("chip_data->should_check_tp_calibration_info=%d\n", chip_data->should_check_tp_calibration_info);
 
 	synap_parse_touch_switch_reg(chip_data, device);
 	synap_parse_chip_tddi_specific_dts(chip_data, device);
 	synap_parse_chip_hybrid_specific_dts(chip_data, device);
 	synap_parse_crc_err_reset(chip_data, device);
-}
-
-static int synaptics_parse_LDO29_dts(struct device_node *device,
-			       struct ts_kit_device_data *chip_data)
-{
-	int retval = NO_ERR;
-	int value = 0;
-	retval = of_property_read_u32(device, LDO29_980_DEFAULT_ON_FLAG, &value);
-	if (retval) {
-		chip_data->LDO29_980_default_on_flag= 0;
-		TS_LOG_ERR("Not define  device LDO29_980_default_on_flag in Dts, use fault value\n");
-	}else{
-		chip_data->LDO29_980_default_on_flag = value;
-		TS_LOG_INFO("get device LDO29_980_default_on_flag =%d,\n",chip_data->LDO29_980_default_on_flag );
-	}
-	return NO_ERR;
 }
 
 /*  query the configure from dts and store in prv_data */
@@ -2570,26 +2548,6 @@ static int synaptics_parse_dts(struct device_node *device,
 	if (!gpio_is_valid(chip_data->reset_gpio)) {
 		TS_LOG_ERR("reset gpio is not valid\n");
 	}*/
-
-	retval = of_property_read_u32(device, SYNA_3718_FW_UPDATA_FLAG, &value);
-	if (retval) {
-		chip_data->synaptics3718_fw_updata_flag= 0;
-		TS_LOG_ERR("Not define synaptics3718_fw_updata_flag in Dts, use fault value\n");
-	}else{
-		chip_data->synaptics3718_fw_updata_flag = value;
-		TS_LOG_INFO("get device synaptics3718_fw_updata_flag =%d,\n",chip_data->synaptics3718_fw_updata_flag );
-	}
-
-	retval = of_property_read_u32(device, SYNA_3718_TP_PRESSURE_FLAG, &value);
-	if (retval) {
-		chip_data->synaptics3718_Tp_Pressure_flag= 0;
-		TS_LOG_ERR("Not define synaptics3718_Tp_Pressure_flag in Dts, use fault value\n");
-	}else{
-		chip_data->synaptics3718_Tp_Pressure_flag = value;
-		TS_LOG_INFO("get device synaptics3718_Tp_Pressure_flag =%d,\n",chip_data->synaptics3718_Tp_Pressure_flag );
-	}
-	synaptics_parse_LDO29_dts(device,chip_data);
-
 	retval =
 	    of_property_read_u32(device, SYNAPTCS_IRQ_CFG,
 				 &chip_data->irq_config);
@@ -2878,7 +2836,7 @@ static int synaptics_parse_dts(struct device_node *device,
 		TS_LOG_INFO("can not get chip rawdata limit time, use default\n");
 		chip_data->rawdata_get_timeout = 0;
 	}
-
+	
 	retval = of_property_read_u32(device, "use_new_oem_structure", &value);
 	if (retval) {
 		chip_data->is_new_oem_structure = false;
@@ -2916,17 +2874,6 @@ static int synaptics_parse_dts(struct device_node *device,
 
 	TS_LOG_INFO("%s:use_lcdkit_power_notify = %d\n", __func__,
 				chip_data->use_lcdkit_power_notify);
-
-	//fp_tp_report_touch_minor_event
-	retval = of_property_read_u32(device, FP_TP_REPORT_MINOR_FLAG, &value);
-	if (retval) {
-		chip_data->fp_tp_report_touch_minor_event = 0;
-		TS_LOG_ERR("get device fp_tp_report_touch_minor_event failed\n");
-	}else{
-		chip_data->fp_tp_report_touch_minor_event = value;
-		TS_LOG_INFO("get device fp_tp_report_touch_minor_event =%d,\n",chip_data->fp_tp_report_touch_minor_event );
-	}
-
 	TS_LOG_INFO
 	    ("irq_config = %d, algo_id = %d, ic_type = %d, x_max = %d, y_max = %d, x_mt = %d,y_mt = %d, bootloader_update_enable = %d\n",
 	     chip_data->irq_config,
@@ -2940,8 +2887,7 @@ static int synaptics_parse_dts(struct device_node *device,
 static void synaptics_power_on_gpio_set(void)
 {
 	synaptics_pinctrl_select_normal();
-	if (gpio_direction_input(rmi4_data->synaptics_chip_data->ts_platform_data->irq_gpio))
-		TS_LOG_ERR("%s:gpio_direction_input fail\n", __func__);
+	gpio_direction_input(rmi4_data->synaptics_chip_data->ts_platform_data->irq_gpio);
 	if (SYNAPTICS_S3207 != rmi4_data->synaptics_chip_data->ic_type
 		&& rmi4_data->synaptics_chip_data->ts_platform_data->reset_gpio)
 		gpio_direction_output(rmi4_data->synaptics_chip_data->ts_platform_data->reset_gpio, 1);
@@ -3035,7 +2981,7 @@ static void synaptics_power_on(void)
 	TS_LOG_INFO("synaptics_power_on called\n");
 
 	TS_LOG_INFO("g_tskit_ic_type = %d\n", g_tskit_ic_type);
-	
+
 	if(g_tskit_ic_type < TDDI || g_tskit_ic_type == AMOLED)
 	{
 		synaptics_vci_on();
@@ -3054,16 +3000,14 @@ static void synaptics_power_off_gpio_set(void)
 		|| SYNAPTICS_TD4310== rmi4_data->synaptics_chip_data->ic_type
 		|| SYNAPTICS_S3706== rmi4_data->synaptics_chip_data->ic_type)
 		&& rmi4_data->synaptics_chip_data->ts_platform_data->reset_gpio)
-		if (gpio_direction_output(rmi4_data->synaptics_chip_data->ts_platform_data->reset_gpio, 0))
-			TS_LOG_ERR("%s gpio_direction_input fail L\n", __func__);
+		gpio_direction_output(rmi4_data->synaptics_chip_data->ts_platform_data->reset_gpio, 0);
 	synaptics_pinctrl_select_lowpower();
 	if (SYNAPTICS_S3718 != rmi4_data->synaptics_chip_data->ic_type
 		&& SYNAPTICS_TD4322 != rmi4_data->synaptics_chip_data->ic_type
 		&& SYNAPTICS_TD4310 != rmi4_data->synaptics_chip_data->ic_type
 		&& SYNAPTICS_S3706  != rmi4_data->synaptics_chip_data->ic_type
 		&& rmi4_data->synaptics_chip_data->ts_platform_data->reset_gpio)
-		if (gpio_direction_input(rmi4_data->synaptics_chip_data->ts_platform_data->reset_gpio))
-			TS_LOG_ERR("%s gpio_direction_input fail L\n", __func__);
+		gpio_direction_input(rmi4_data->synaptics_chip_data->ts_platform_data->reset_gpio);
 	mdelay(1);
 }
 
@@ -3296,7 +3240,6 @@ static int synaptics_chip_detect(struct ts_kit_platform_data *data)
             TS_LOG_ERR("synaptics_pinctrl_get_init error %d \n",retval);
 	     goto pinctrl_get_err;
 	}
-
 
 	/*power up the chip */
 	synaptics_power_on();
@@ -3735,10 +3678,11 @@ static int synaptics_regs_operate(struct ts_regs_info *info)
 				goto out;
 			}
 
-			if (value_tmp == 0)
-				value[0] &= ~(1 << (uint32_t)info->bit);
-			else if (value_tmp == 1)
-				value[0] |= (1 << (uint32_t)info->bit);
+			if (0 == value_tmp) {
+				value[0] &= ~(1 << info->bit);
+			} else if (1 == value_tmp) {
+				value[0] |= (1 << info->bit);
+			}
 		}
 
 		retval =
@@ -3762,9 +3706,9 @@ static int synaptics_regs_operate(struct ts_regs_info *info)
 			goto out;
 		}
 
-		if ((info->num == 1) && (info->bit < 8) && (info->bit > 0)) {
+		if ((1 == info->num) && (8 > info->bit)) {
 			rmi4_data->synaptics_chip_data->reg_values[0] =
-				(value[0] >> (uint32_t)info->bit) & 0x01;
+			    (value[0] >> info->bit) & 0x01;
 		} else {
 			for (i = 0; i < info->num; i++) {
 				rmi4_data->synaptics_chip_data->reg_values[i] =
@@ -3784,9 +3728,9 @@ out:
 static int synaptics_set_wakeup_gesture_enable_switch(u8 enable)
 {
 	int retval = NO_ERR;
-	u8 holster_temp_value = 0;
-	unsigned short holster_enable_addr = 0;
-	unsigned char holster_bit_num = 0;
+	u8 holster_temp_value;
+	unsigned short holster_enable_addr;
+	unsigned char holster_bit_num;
 
 	holster_enable_addr =
 	    rmi4_data->synaptics_chip_data->ts_platform_data->feature_info.holster_info.holster_switch_addr;
@@ -3830,9 +3774,9 @@ out:
 static int synaptics_set_charger_switch(u8 charger_switch)
 {
 	int retval = NO_ERR;
-	u8 charger_temp_value = 0;
-	unsigned short charger_enable_addr = 0;
-	unsigned char charger_bit_num = 0;
+	u8 charger_temp_value;
+	unsigned short charger_enable_addr;
+	unsigned char charger_bit_num;
 
 	charger_enable_addr =
 	    rmi4_data->synaptics_chip_data->ts_platform_data->feature_info.charger_info.charger_switch_addr;
@@ -3906,7 +3850,7 @@ static int synaptics_charger_switch(struct ts_charger_info *info)
 static int synaptics_set_holster_switch(u8 holster_switch)
 {
 	int retval = NO_ERR;
-	int holster_temp_value = 0;
+	int holster_temp_value;
 	unsigned short holster_enable_addr;
 	unsigned char holster_bit_num;
 
@@ -3985,10 +3929,9 @@ static int synaptics_holster_switch(struct ts_holster_info *info)
 static int synaptics_set_roi_switch(u8 roi_switch)
 {
 	int retval = NO_ERR;
-	int i = 0;
+	int i;
 	unsigned short roi_ctrl_addr = 0;
-	u8 roi_control_bit = 0;
-	u8 temp_roi_switch = 0;
+	u8 roi_control_bit, temp_roi_switch;
 
 #ifdef ROI
 	if (!f51found)
@@ -4044,8 +3987,7 @@ static int synaptics_read_roi_switch(void)
 {
 	int retval = NO_ERR;
 	unsigned short roi_ctrl_addr = 0;
-	u8 roi_control_bit = 0;
-	u8 roi_switch = 0;
+	u8 roi_control_bit, roi_switch;
 #ifdef ROI
 	if (!f51found)
 		return -ENODEV;
@@ -4132,7 +4074,6 @@ static unsigned char *synaptics_roi_rawdata(void)
 static int synaptics_do_calibrate(unsigned char write_value, int count)
 {
 	int ret = NO_ERR;
-	int retval = 0;
 	u8 value = 1;
 	int delay_time = 200;
 	unsigned short addr;
@@ -4156,15 +4097,10 @@ static int synaptics_do_calibrate(unsigned char write_value, int count)
 		goto out;
 	}
 
-	ret = synaptics_rmi4_i2c_write(rmi4_data, addr, &write_value, 1);
-	if (ret < 0) {
-		TS_LOG_ERR("%s: syna i2c write fail\n", __func__);
-	}
+	synaptics_rmi4_i2c_write(rmi4_data, addr, &write_value, 1);
 	do {
 		count--;
-		retval = synaptics_rmi4_i2c_read(rmi4_data, addr, &value, sizeof(value));
-		if (retval < 0)
-			TS_LOG_ERR("%s: read i2c failed.\n", __func__);
+		synaptics_rmi4_i2c_read(rmi4_data, addr, &value, sizeof(value));
 		TS_LOG_INFO("remain count = %d, value is 0x%04x\n", count,
 			    value);
 		if (!value) {
@@ -4264,9 +4200,9 @@ out:
 static int synaptics_set_glove_switch(u8 glove_switch)
 {
 	int retval = NO_ERR;
-	int glove_temp_value = 0;
-	unsigned short glove_enable_addr = 0;
-	unsigned char glove_bit_num = 0;
+	int glove_temp_value;
+	unsigned short glove_enable_addr;
+	unsigned char glove_bit_num;
 
 	TS_LOG_INFO("synaptics_set_glove_switch called\n");
 
@@ -4530,8 +4466,8 @@ static int synaptics_before_suspend(void)
 
 static void synaptics_put_device_into_easy_wakeup(void)
 {
-	int retval = 0;
-	unsigned char device_ctrl = 0;
+	int retval;
+	unsigned char device_ctrl;
 	unsigned char device_ctrl_data[4] = { 0 };
 	unsigned short f12_ctrl_base = 0;
 	unsigned char gusture_ctrl_offset = 0;
@@ -4784,7 +4720,7 @@ static void synaptics_put_device_outof_easy_wakeup(struct synaptics_rmi4_data
 static void synaptics_sensor_sleep(struct synaptics_rmi4_data *rmi4_data)
 {
 	int retval;
-	unsigned char device_ctrl = 0;
+	unsigned char device_ctrl;
 
 	retval = synaptics_rmi4_i2c_read(rmi4_data,
 					 rmi4_data->rmi4_feature.
@@ -4842,8 +4778,8 @@ static int synatpics_sleep_mode_in(struct synaptics_rmi4_data *rmi4_data)
  */
 static void synaptics_sleep_mode_out(struct synaptics_rmi4_data *rmi4_data)
 {
-	int retval = 0;
-	unsigned char device_ctrl = 0;
+	int retval;
+	unsigned char device_ctrl;
 
 	TS_LOG_INFO("synaptics_sleep_mode_out\n");
 	retval = synaptics_rmi4_i2c_read(rmi4_data,
@@ -4879,24 +4815,20 @@ static int synaptics_suspend(void)
 {
 	int retval = NO_ERR;
 
-	TS_LOG_INFO ("in last time wake mode synaptics_interrupt_num = %d interrupts\n",
+	TS_LOG_INFO
+	    ("in last time wake mode synaptics_interrupt_num = %d interrupts\n",
 	     synaptics_interrupt_num);
 	synaptics_interrupt_num = 0;
 	TS_LOG_INFO("suspend +\n");
 	switch (rmi4_data->synaptics_chip_data->easy_wakeup_info.sleep_mode) {
 	case TS_POWER_OFF_MODE:
 		/*for in_cell, tp will power off in suspend. */
-		if (g_tskit_ic_type != ONCELL)
+		if (g_tskit_ic_type != ONCELL) 
 		{
-			if(!rmi4_data->synaptics_chip_data->ts_platform_data->udfp_enable_flag){
-				if (!g_tskit_pt_station_flag)
-					synaptics_power_off();
-				else
-					synatpics_sleep_mode_in(rmi4_data);	/*goto sleep mode*/
-			}
-			else{
-				TS_LOG_INFO("synaptics_suspend:udfp_enable_flag == 1.\n");
-			}
+			if (!g_tskit_pt_station_flag)
+				synaptics_power_off();
+			else
+				synatpics_sleep_mode_in(rmi4_data);	/*goto sleep mode*/
 		}
 		break;
 		/*for gesture wake up mode suspend. */
@@ -4934,17 +4866,13 @@ static int synaptics_resume(void)
 	switch (rmi4_data->synaptics_chip_data->easy_wakeup_info.sleep_mode) {
 	case TS_POWER_OFF_MODE:
 		/*for in_cell, tp should power on in resume. */
-		if (g_tskit_ic_type != ONCELL)
+		if (g_tskit_ic_type != ONCELL) 
 		{
-			if(!rmi4_data->synaptics_chip_data->ts_platform_data->udfp_enable_flag){
-				if (!g_tskit_pt_station_flag)
-					synaptics_power_on();
-				else
-					synaptics_sleep_mode_out(rmi4_data);	/*exit sleep mode*/
-			}
-			else{
-				TS_LOG_INFO("synaptics_suspend:udfp_enable_flag == 1.\n");
-			}
+			if (!g_tskit_pt_station_flag)
+				synaptics_power_on();
+			else
+				synaptics_sleep_mode_out(rmi4_data);	/*exit sleep mode*/
+			
 			if (SYNAPTICS_TD4322 != rmi4_data->synaptics_chip_data->ic_type
 			&&SYNAPTICS_TD4310 != rmi4_data->synaptics_chip_data->ic_type) {
 				synaptics_gpio_reset();
@@ -5224,13 +5152,15 @@ static int synaptics_rmi4_status_resume(struct synaptics_rmi4_data *rmi4_data)
 
 
 #define FORCE_TOUCH_I2C 0x2C
+#define SYN_I2C_RETRY_TIMES 0
 
 static int synaptics_rmi4_set_page_f35(struct synaptics_rmi4_data *rmi4_data,unsigned short addr)
 {
 
 	int retval =0;
+	unsigned char retry;
 	unsigned char buf[PAGE_SELECT_LEN];
-	unsigned char page = 0;
+	unsigned char page;
 	struct i2c_client *i2c = to_i2c_client(rmi4_data->synaptics_dev->dev.parent);
 	struct i2c_msg msg[1];
 
@@ -5243,16 +5173,25 @@ static int synaptics_rmi4_set_page_f35(struct synaptics_rmi4_data *rmi4_data,uns
 	buf[0] = MASK_8BIT;
 	buf[1] = page;
 
+	for (retry = 0; retry < SYN_I2C_RETRY_TIMES; retry++) {
+		if (i2c_transfer(rmi4_data->i2c_client->adapter, msg, 1) == 1) {
+			retval = PAGE_SELECT_LEN;
+			break;
+		}
+		msleep(20);
+	}
+
 	return retval;
 }
 
 static int synaptics_rmi4_i2c_read_f35(struct synaptics_rmi4_data *rmi4_data,unsigned short addr, unsigned char *data, unsigned short length)
 {
-	int retval = 0;
-	unsigned char buf = 0;
+	int retval;
+	unsigned char retry;
+	unsigned char buf;
 	unsigned char rd_msgs = 1;
 	unsigned char index = 0;
-	unsigned char xfer_msgs = 0;
+	unsigned char xfer_msgs;
 	unsigned char remaining_msgs;
 	unsigned short data_offset = 0;
 	unsigned short remaining_length = length;
@@ -5282,10 +5221,30 @@ static int synaptics_rmi4_i2c_read_f35(struct synaptics_rmi4_data *rmi4_data,uns
 
 	while (remaining_msgs) {
 		xfer_msgs = remaining_msgs;
+
+		for (retry = 0; retry < SYN_I2C_RETRY_TIMES; retry++) {
+			retval = i2c_transfer(adap, &msg[index], xfer_msgs);
+			if (retval == xfer_msgs)
+				break;
+
+			TS_LOG_ERR("%s: I2C retry %d\n",
+					__func__, retry + 1);
+			msleep(20);
+		}
+
+		if (retry == SYN_I2C_RETRY_TIMES) {
+			TS_LOG_ERR("%s: I2C read over retry limit\n",
+					__func__);
+			retval = -EIO;
+			goto exit;
+		}
+
 		remaining_msgs -= xfer_msgs;
 		index += xfer_msgs;
 	}
+
 	retval = length;
+
 exit:
 	return retval;
 
@@ -5293,9 +5252,10 @@ exit:
 
 static int synaptics_rmi4_i2c_write_f35(struct synaptics_rmi4_data *rmi4_data,unsigned short addr, unsigned char *data, unsigned short length)
 {
-	int retval = 0;
-	unsigned char *buf = NULL;
-	unsigned char page = 0;
+	int retval;
+	unsigned char retry;
+	unsigned char *buf;
+	unsigned char page;
 	struct i2c_client *i2c = to_i2c_client(rmi4_data->synaptics_dev->dev.parent);
 	struct i2c_msg msg[1];
 
@@ -5325,6 +5285,16 @@ static int synaptics_rmi4_i2c_write_f35(struct synaptics_rmi4_data *rmi4_data,un
 	msg[0].flags = 0;
 	msg[0].len = length + 1;
 	msg[0].buf = buf;
+
+	for (retry = 0; retry < SYN_I2C_RETRY_TIMES; retry++) {
+		if (i2c_transfer(rmi4_data->i2c_client->adapter, msg, 1) == 1) {
+			retval = length;
+			break;
+		}
+		msleep(20);
+	}
+	if (retry == SYN_I2C_RETRY_TIMES)
+		retval = -EIO;
 
 	kfree(buf);
 exit:
@@ -6115,22 +6085,22 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 				   struct synaptics_rmi4_fn_desc *fd,
 				   unsigned int intr_count)
 {
-	int retval = NO_ERR;
-	unsigned char ii = 0;
-	unsigned char intr_offset = 0;
-	unsigned char size_of_2d_data = 0;
+	int retval;
+	unsigned char ii;
+	unsigned char intr_offset;
+	unsigned char size_of_2d_data;
 	unsigned char size_of_query8 = 0;
-	unsigned char ctrl_8_offset = 0;
-	unsigned char ctrl_23_offset = 0;
-	unsigned char ctrl_28_offset = 0;
-	unsigned char ctrl_26_offset = 0;
-	unsigned char num_of_fingers = 0;
-	unsigned char ctrl_20_offset = 0;
-	unsigned char ctrl_22_offset = 0;
-	unsigned char data_04_offset = 0;
+	unsigned char ctrl_8_offset;
+	unsigned char ctrl_23_offset;
+	unsigned char ctrl_28_offset;
+	unsigned char ctrl_26_offset;
+	unsigned char num_of_fingers;
+	unsigned char ctrl_20_offset;
+	unsigned char ctrl_22_offset;
+	unsigned char data_04_offset;
 	unsigned char f12_2d_data[F12_2D_CTRL_LEN] = { 0 };
-	struct synaptics_rmi4_f12_extra_data *extra_data = NULL;
-	struct synaptics_rmi4_f12_eratio_data *eratio_data = NULL;
+	struct synaptics_rmi4_f12_extra_data *extra_data;
+	struct synaptics_rmi4_f12_eratio_data *eratio_data;
 	struct synaptics_rmi4_f12_query_5 query_5;
 	struct synaptics_rmi4_f12_query_8 query_8;
 	struct synaptics_rmi4_f12_ctrl_8 ctrl_8;
@@ -6145,7 +6115,7 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 		retval = -ENOMEM;
 		return retval;
 	}
-	fhandler->eratio_data = kzalloc((sizeof(*eratio_data) * F12_FINGERS_TO_SUPPORT), GFP_KERNEL);
+	fhandler->eratio_data = kmalloc(sizeof(*eratio_data), GFP_KERNEL);
 	if (fhandler->eratio_data == NULL) {
 		TS_LOG_ERR("Failed to alloc memory for fhandler->eratio_data\n");
 		retval = -ENOMEM;
@@ -6318,47 +6288,6 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 		    query_8.data32_is_present +
 		    query_8.data33_is_present +
 		    query_8.data34_is_present + query_8.data35_is_present;
-	}
-
-	if(rmi4_data->synaptics_chip_data->synaptics3718_Tp_Pressure_flag == 1){
-		if ((size_of_query8 >= 5) && (query_8.data29_is_present)) {
-			TS_LOG_INFO("f12_data29_is_present\n");
-			extra_data->data29_offset = query_8.data0_is_present +
-			    query_8.data1_is_present +
-			    query_8.data2_is_present +
-			    query_8.data3_is_present +
-			    query_8.data4_is_present +
-			    query_8.data5_is_present +
-			    query_8.data6_is_present +
-			    query_8.data7_is_present +
-			    query_8.data8_is_present +
-			    query_8.data9_is_present +
-			    query_8.data10_is_present +
-			    query_8.data11_is_present +
-			    query_8.data12_is_present +
-			    query_8.data13_is_present +
-			    query_8.data14_is_present +
-			    query_8.data15_is_present +
-			    query_8.data16_is_present +
-			    query_8.data17_is_present +
-			    query_8.data18_is_present +
-			    query_8.data19_is_present +
-			    query_8.data20_is_present +
-			    query_8.data21_is_present +
-			    query_8.data22_is_present +
-			    query_8.data23_is_present +
-			    query_8.data24_is_present +
-			    query_8.data25_is_present +
-			    query_8.data26_is_present +
-			    query_8.data27_is_present +
-			    query_8.data28_is_present;
-
-			extra_data->data29_size = 2;
-		}
-		else {
-			extra_data->data29_offset = 0;
-			extra_data->data29_size = 0;
-		}
 	}
 
 	data_04_offset = query_8.data0_is_present +
@@ -6678,11 +6607,6 @@ static int synaptics_input_config(struct input_dev *input_dev)
 #ifdef REPORT_2D_W
 	input_set_abs_params(input_dev, ABS_MT_TOUCH_MAJOR, 0,
 			     MAX_ABS_MT_TOUCH_MAJOR, 0, 0);
-	if(rmi4_data->synaptics_chip_data->fp_tp_report_touch_minor_event)
-	{
-		input_set_abs_params(input_dev, ABS_MT_TOUCH_MINOR, 0,
-			     MAX_ABS_MT_TOUCH_MAJOR, 0, 0);
-	}
 #endif
 
 #ifdef TYPE_B_PROTOCOL
@@ -6710,15 +6634,12 @@ static int easy_wakeup_gesture_report_coordinate(struct synaptics_rmi4_data
 						 struct ts_fingers *info)
 {
 	int retval = 0;
-	unsigned char get_custom_data[LOCUS_DATA_NUM * F12_FINGERS_TO_SUPPORT+4] = { 0 };
+	unsigned char get_custom_data[LOCUS_DATA_NUM] = { 0 };
 	int x = 0;
 	int y = 0;
 	int i = 0;
 	unsigned short f51_data_base = 0;
-	if(reprot_gesture_point_num > F12_FINGERS_TO_SUPPORT){
-		TS_LOG_ERR("%s:reprot_gesture_point_num = %d out range ",__func__,reprot_gesture_point_num);
-		reprot_gesture_point_num = F12_FINGERS_TO_SUPPORT;
-	}
+
 	if (reprot_gesture_point_num != 0) {
 		f51_data_base = rmi4_data->rmi4_feature.f51_data_base_addr;
 		retval = synaptics_rmi4_i2c_read(rmi4_data,
@@ -6769,14 +6690,14 @@ static int easy_wakeup_gesture_report_coordinate(struct synaptics_rmi4_data
 					     y);
 				}
 			}
-			if (i < MAX_POSITON_NUMS) {
-				TS_LOG_INFO("%s: Gesture Repot Point %d:\n", __func__, i);
-				rmi4_data->synaptics_chip_data->easy_wakeup_info.
-				    easywake_position[i] = x << 16 | y;
-				TS_LOG_INFO("easywake_position[%d] = 0x%04x\n", i,
-					    rmi4_data->synaptics_chip_data->
-					    easy_wakeup_info.easywake_position[i]);
-			}
+
+			TS_LOG_INFO("%s: Gesture Repot Point %d:\n"
+				    "x = %d\n" "y = %d\n", __func__, i, x, y);
+			rmi4_data->synaptics_chip_data->easy_wakeup_info.
+			    easywake_position[i] = x << 16 | y;
+			TS_LOG_INFO("easywake_position[%d] = 0x%04x\n", i,
+				    rmi4_data->synaptics_chip_data->
+				    easy_wakeup_info.easywake_position[i]);
 		}
 	}
 
@@ -7235,9 +7156,11 @@ static void synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 
 			TS_LOG_DEBUG("Finger %d:\n"
 				     "status = 0x%02x\n"
+				     "x = %d\n"
+				     "y = %d\n"
 				     "wx = %d\n"
 				     "wy = %d\n",
-				     finger, finger_status, wx, wy);
+				     finger, finger_status, x, y, wx, wy);
 
 			info->fingers[finger].x = x;
 			info->fingers[finger].y = y;
@@ -7370,10 +7293,7 @@ static void synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 		return;
 	}
 #endif
-	if(fingers_to_process > F12_FINGERS_TO_SUPPORT){
-		TS_LOG_ERR("fingers to process = %d.\n",fingers_to_process);
-		fingers_to_process = F12_FINGERS_TO_SUPPORT;
-	}
+
 	retval = synaptics_rmi4_i2c_read(rmi4_data,
 					 data_addr + extra_data->data1_offset,
 					 (unsigned char *)fhandler->data,
@@ -7463,7 +7383,7 @@ static void synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 #ifdef REPORT_2D_W
 			/* syna_wx_wy */
 
-			if (rmi4_data->synaptics_chip_data->ts_platform_data->chip_data->is_multi_protocal == MULTI_PROTOCAL_1
+			if ((rmi4_data->synaptics_chip_data->ts_platform_data->chip_data->is_multi_protocal == MULTI_PROTOCAL_1)\
 				&& rmi4_data->new_wx_wy) {
 				temp_wx = ((finger_data->wx) & MASK_4BIT);
 				temp_wy = ((finger_data->wx >> 4) & MASK_4BIT);/*get hight 4bit number*/
@@ -7491,20 +7411,22 @@ static void synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 			z = finger_data->z;
 #endif
 #ifdef SYNA_FORCE
-		if (rmi4_data->synaptics_chip_data->support_3d_func) {
-			TS_LOG_DEBUG("Read force value for press\n");
-			retval = synaptics_rmi4_i2c_read(rmi4_data,
-							 0x041a, /*Press force register addr*/
-							 &force_level,
-							 1);
-			if (retval < 0) {
-				TS_LOG_ERR ("Failed to read data status: %d\n", retval);
-				force_level = 1;
+			if (rmi4_data->synaptics_chip_data->support_3d_func) {
+				TS_LOG_DEBUG("Read force value for press\n");
+				retval = synaptics_rmi4_i2c_read(rmi4_data,
+								 0x041a, /*Press force register addr*/
+								 &force_level,
+								 1);
+				if (retval < 0) {
+					TS_LOG_ERR
+					    ("Failed to read data status: %d\n",
+					     retval);
+					force_level = 1;
+				}
+				z = force_level;
+				if (!force_level)
+					z = 1;
 			}
-			z = force_level;
-			if (!force_level)
-				z = 1;
-		}
 #endif
 
 			if (!rmi4_data->flip_x)
@@ -7521,11 +7443,13 @@ static void synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 
 			TS_LOG_DEBUG("Finger %d:\n"
 				     "status = 0x%02x\n"
+				     "x = %d\n"
+				     "y = %d\n"
 				     "wx = %d\n"
 				     "wy = %d\n"
 				     "sg = %d\n"
 				     "z = %d\n",
-				     finger, finger_status,wx, wy, sg, z);
+				     finger, finger_status, x, y, wx, wy, sg, z);
 
 			info->fingers[finger].status = finger_status;
 			info->fingers[finger].x = x;
@@ -7554,11 +7478,6 @@ static void synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 					info->fingers[finger].ewy = ewy;
 					info->fingers[finger].wx = wx;
 					info->fingers[finger].wy = wy;
-					if(rmi4_data->synaptics_chip_data->fp_tp_report_touch_minor_event)
-					{
-						info->fingers[finger].major = 1;
-						info->fingers[finger].minor = 1;
-					}
 					TS_LOG_DEBUG("xer = %d|yer = %d|ewx = %d|ewy = %d|wx = %d|wy= %d\n",
 										 info->fingers[finger].xer,
 										info->fingers[finger].yer,
@@ -7611,9 +7530,9 @@ static void synaptics_rmi4_f51_report(struct synaptics_rmi4_data *rmi4_data,
 	unsigned short ctrl_base_addr = 0;
 	unsigned short data_addr = 0;
 	unsigned short touchplus_offset = 0;
-	unsigned char touchplus_data = 0;
-	unsigned char button_number = 0;
-	unsigned char button_flag = 0;
+	unsigned char touchplus_data;
+	unsigned char button_number;
+	unsigned char button_flag;
 
 	ctrl_base_addr = rmi4_data->rmi4_feature.f51_ctrl_base_addr;
 	if (!strncmp

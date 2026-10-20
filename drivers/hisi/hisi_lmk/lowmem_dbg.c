@@ -19,8 +19,6 @@
 #include <linux/hisi/hisi_ion.h>
 #include <linux/version.h>
 #include <linux/hisi/page_tracker.h>
-#include <log/log_usertype.h>
-#include <linux/slub_def.h>
 
 #include "lowmem_killer.h"
 
@@ -32,21 +30,20 @@
 
 static unsigned long long last_jiffs;
 
+static const char state_to_char[] = TASK_STATE_TO_CHAR_STR;
+
 static void lowmem_dump(struct work_struct *work);
 
 static DEFINE_MUTEX(lowmem_dump_mutex);
 static DECLARE_WORK(lowmem_dbg_wk, lowmem_dump);
 static DECLARE_WORK(lowmem_dbg_verbose_wk, lowmem_dump);
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
-static const char state_to_char[] = TASK_STATE_TO_CHAR_STR;
-static char task_state_char(unsigned long state)
+static int task_state_char(unsigned long state)
 {
 	int bit = state ? __ffs(state) + 1 : 0;
 
 	return bit < sizeof(state_to_char) - 1 ? state_to_char[bit] : '?'; /*lint !e574 */
 }
-#endif
 
 static void dump_tasks(bool verbose)
 {
@@ -54,7 +51,6 @@ static void dump_tasks(bool verbose)
 	struct task_struct *task;
 	short tsk_oom_adj = 0;
 	unsigned long tsk_nr_ptes = 0;
-	char task_state = 0;
 	char frozen_mark = ' ';
 
 	pr_info("[ pid ]   uid  tgid total_vm    rss nptes  swap   adj s name\n");
@@ -74,16 +70,15 @@ static void dump_tasks(bool verbose)
 		tsk_oom_adj = task->signal->oom_score_adj;
 		if (!verbose && tsk_oom_adj &&
 		    (tsk_oom_adj <= LMK_SERVICE_ADJ) &&
-		    (get_mm_rss(task->mm) + get_mm_counter(task->mm, MM_SWAPENTS) < LMK_PRT_TSK_RSS)) {
+		    (get_mm_rss(task->mm) < LMK_PRT_TSK_RSS)) {
 			task_unlock(task);
 			continue;
 		}
 
-		tsk_nr_ptes = (unsigned long)atomic_long_read(&task->mm->nr_ptes);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-		task_state = task_state_to_char(task);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 12, 0)
+		tsk_nr_ptes = (unsigned long)task->mm->nr_ptes;
 #else
-		task_state = task_state_char(task->state);
+		tsk_nr_ptes = (unsigned long)atomic_long_read(&task->mm->nr_ptes);
 #endif
 		frozen_mark = frozen(task) ? '*' : ' ';
 
@@ -93,7 +88,7 @@ static void dump_tasks(bool verbose)
 			tsk_nr_ptes,
 			get_mm_counter(task->mm, MM_SWAPENTS),
 			tsk_oom_adj,
-			task_state,
+			task_state_char(task->state),
 			task->comm,
 			frozen_mark); /*lint !e1058*/
 		task_unlock(task);
@@ -103,27 +98,13 @@ static void dump_tasks(bool verbose)
 
 static void lowmem_dump(struct work_struct *work)
 {
-	bool verbose;
-	int logusertype = get_logusertype_flag();
-
-	/*
-	* for internal debug, we hope print more lowmemory info.
-	*/
-	if (logusertype == BETA_USER || logusertype == OVERSEA_USER)
-		verbose = true;
-	else
-		verbose = (work == &lowmem_dbg_verbose_wk) ? true : false;
+	bool verbose = (work == &lowmem_dbg_verbose_wk) ? true : false;
 
 	mutex_lock(&lowmem_dump_mutex);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-        show_mem(SHOW_MEM_FILTER_NODES, NULL);
-#else
 	show_mem(SHOW_MEM_FILTER_NODES);
-#endif
 	dump_tasks(verbose);
 	ksm_show_stats();
 	hisi_ion_memory_info(verbose);
-	show_slab(verbose);
 	if (verbose)
 		page_tracker_wake_up();
 	mutex_unlock(&lowmem_dump_mutex);

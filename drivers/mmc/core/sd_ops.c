@@ -46,18 +46,17 @@ int mmc_app_cmd(struct mmc_host *host, struct mmc_card *card)
 	err = mmc_wait_for_cmd(host, &cmd, 0);
 
 #ifdef CONFIG_HUAWEI_SDCARD_DSM
-	if(!strcmp(mmc_hostname(host), "mmc1"))
+	if(!strncmp(mmc_hostname(host), "mmc1",sizeof("mmc1")))
 		 dsm_sdcard_cmd_logs[DSM_SDCARD_CMD55].value = cmd.resp[0];
 
 	if (err) {
 		if (-ENOMEDIUM != err && -ETIMEDOUT != err
-			&& !strcmp(mmc_hostname(host), "mmc1")) {
+			&& !strncmp(mmc_hostname(host), "mmc1",sizeof("mmc1")))
 			dsm_sdcard_report(DSM_SDCARD_CMD55, DSM_SDCARD_CMD55_RESP_ERR);
-			printk(KERN_ERR "%s:send cmd55 fail ,err=%d !!!!\n",mmc_hostname(host),err);
-		}
+
 		return err;
 	}
-#else
+#else 
 	if (err)
 		return err;
 #endif
@@ -138,6 +137,7 @@ EXPORT_SYMBOL(mmc_wait_for_app_cmd);
 
 int mmc_app_set_bus_width(struct mmc_card *card, int width)
 {
+	int err;
 	struct mmc_command cmd = {0};
 
 	BUG_ON(!card);
@@ -157,7 +157,11 @@ int mmc_app_set_bus_width(struct mmc_card *card, int width)
 		return -EINVAL;
 	}
 
-	return mmc_wait_for_app_cmd(card->host, card, &cmd, MMC_CMD_RETRIES);
+	err = mmc_wait_for_app_cmd(card->host, card, &cmd, MMC_CMD_RETRIES);
+	if (err)
+		return err;
+
+	return 0;
 }
 
 int mmc_send_app_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
@@ -207,7 +211,7 @@ int mmc_send_app_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
 
 		err = -ETIMEDOUT;
 
-		mmc_delay(10);
+		mmc_delay(18);
 	}
 
 	if (!i)
@@ -243,12 +247,12 @@ int mmc_send_if_cond(struct mmc_host *host, u32 ocr)
 	err = mmc_wait_for_cmd(host, &cmd, 0);
 
 #ifdef CONFIG_HUAWEI_SDCARD_DSM
-	if (!strcmp(mmc_hostname(host), "mmc1"))
+	if (!strncmp(mmc_hostname(host), "mmc1",sizeof("mmc1")))
 		dsm_sdcard_cmd_logs[DSM_SDCARD_CMD8].value = cmd.resp[0];
 
 	if (err) {
 		if (-ENOMEDIUM != err && -ETIMEDOUT != err
-				&& !strcmp(mmc_hostname(host), "mmc1"))
+				&& !strncmp(mmc_hostname(host), "mmc1",sizeof("mmc1")))
 			dsm_sdcard_report(DSM_SDCARD_CMD8, DSM_SDCARD_CMD8_RESP_ERR);
 
 		return err;
@@ -283,12 +287,12 @@ int mmc_send_relative_addr(struct mmc_host *host, unsigned int *rca)
 
 	err = mmc_wait_for_cmd(host, &cmd, MMC_CMD_RETRIES);
 #ifdef CONFIG_HUAWEI_SDCARD_DSM
-	if (!strcmp(mmc_hostname(host), "mmc1"))
+	if (!strncmp(mmc_hostname(host), "mmc1",sizeof("mmc1")))
 		dsm_sdcard_cmd_logs[DSM_SDCARD_CMD3].value = cmd.resp[0];
 
 	if (err) {
 		if (-ENOMEDIUM != err && -ETIMEDOUT != err
-				&& !strcmp(mmc_hostname(host), "mmc1"))
+				&& !strncmp(mmc_hostname(host), "mmc1",sizeof("mmc1")))
 			dsm_sdcard_report(DSM_SDCARD_CMD3, DSM_SDCARD_CMD3_RESP_ERR);
 
 		return err;
@@ -351,16 +355,6 @@ int mmc_app_send_scr(struct mmc_card *card, u32 *scr)
 	memcpy(scr, data_buf, sizeof(card->raw_scr));
 	kfree(data_buf);
 
-#ifdef CONFIG_HUAWEI_SDCARD_DSM
-	if (!strcmp(mmc_hostname(card->host), "mmc1")) {
-		dsm_sdcard_cmd_logs[DSM_SDCARD_ACMD51_CMDERR].value = cmd.error;
-		dsm_sdcard_cmd_logs[DSM_SDCARD_ACMD51_DATAERR].value = data.error;
-
-		if (cmd.error || data.error)
-			dsm_sdcard_report(DSM_SDCARD_ACMD51_DATAERR, DSM_SDCARD_ACMD51_RESP_ERR);
-	}
-#endif
-
 	if (cmd.error)
 		return cmd.error;
 	if (data.error)
@@ -410,7 +404,7 @@ int mmc_sd_switch(struct mmc_card *card, int mode, int group,
 	mmc_wait_for_req(card->host, &mrq);
 
 #ifdef CONFIG_HUAWEI_SDCARD_DSM
-	if (!strcmp(mmc_hostname(card->host), "mmc1")) {
+	if (!strncmp(mmc_hostname(card->host), "mmc1",sizeof("mmc1"))) {
 		dsm_sdcard_cmd_logs[DSM_SDCARD_CMD6_CMDERR].value = cmd.error;
 		dsm_sdcard_cmd_logs[DSM_SDCARD_CMD6_DATERR].value = data.error;
 
@@ -464,15 +458,6 @@ int mmc_app_sd_status(struct mmc_card *card, void *ssr)
 
 	mmc_wait_for_req(card->host, &mrq);
 
-#ifdef CONFIG_HUAWEI_SDCARD_DSM
-	if (!strcmp(mmc_hostname(card->host), "mmc1")) {
-		dsm_sdcard_cmd_logs[DSM_SDCARD_CMD13_CMDERR].value = cmd.error;
-		dsm_sdcard_cmd_logs[DSM_SDCARD_CMD13_DATAERR].value = data.error;
-
-		if (cmd.error || data.error)
-			dsm_sdcard_report(DSM_SDCARD_CMD13_DATAERR, DSM_SDCARD_CMD13_RESP_ERR);
-	}
-#endif
 	if (cmd.error)
 		return cmd.error;
 	if (data.error)

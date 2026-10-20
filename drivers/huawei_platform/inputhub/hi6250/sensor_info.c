@@ -131,7 +131,7 @@ enum PHONE_TYPE {
 	FLORIDA, /*37*/
 	BACH2,/*38*/
 	HANDEL,/*39*/
-	LELANDPLUS,/*40*/
+	LELANDPLUS = 40,/*40*/
 };
 enum PHONE_VERSION {
 	V3 = 10,		/*decimal base*/
@@ -243,7 +243,7 @@ static int gsensor_offset[15];	/*g-sensor calibrate data*/
 static int gyro_sensor_offset[15];
 static int ps_sensor_offset[3];
 static int ps_switch_mode = 0;
-int ps_support_mode;
+int ps_support_mode = 0;
 struct ps_external_ir_param ps_external_ir_param = {
        .external_ir = 0,
        .internal_ir_min_proximity_value = 750,
@@ -254,11 +254,11 @@ struct ps_external_ir_param ps_external_ir_param = {
        .external_ir_pwave_value = 55,
        .internal_ir_threshold_value = 35,
        .external_ir_threshold_value = 60,
-	.external_ir_calibrate_noise = 30,
+       .external_ir_calibrate_noise = 30,
        .external_ir_enable_gpio = 67,
-	.external_ir_powermode = 0,
-	.external_ir_pwindows_ratio = 1000,
-	.external_ir_pwave_ratio = 1000,
+       .external_ir_powermode = 0,
+       .external_ir_pwindows_ratio = 1000,
+       .external_ir_pwave_ratio = 1000,
 };
 struct ps_extend_platform_data ps_extend_platform_data = {
 	.external_ir_mode_flag = 0,
@@ -279,9 +279,9 @@ struct ps_extend_platform_data ps_extend_platform_data = {
 	.threshold_value = 20,
 	.calibrate_noise = 30,
 };
-#define PS_EXT_IR_VBUS	"sensor-external-ir"
+#define PS_EXT_IR_VBUS  "sensor-external-ir"
 
-struct regulator *ps_external_ir_vdd;
+struct regulator *ps_external_ir_vdd = NULL;
 static uint16_t als_offset[6];
 static uint8_t hp_offset[24];
 static uint8_t cap_prox_calibrate_data[CAP_PROX_CALIDATA_NV_SIZE]={0};
@@ -803,8 +803,8 @@ BH1745_ALS_PARA_TABLE als_para_diff_tp_color_table[] = {
 
 	{HAYDN, V3, DEFAULT_TPLCD, WHITE,
 	 {171, 223, 134, 803, 788, 171, 285, 589, 100, -4269, 5377, -3052,
-	  5306, 2466, 1227, 2116, 1229, 4741, 6598, 3360, 683, 4103, 7330, 5000,
-	  200} },
+	  5306, 2466, 1227, 2116, 1229, 4741, 6598, 3360, 683, 4103, 7330, 3200,
+	  300} },
     {HANDEL, V3, DEFAULT_TPLCD, WHITE,
         {207, 481, 212, 1786, 1780, 207, 336, 673, 100, -3310, 6364, -3364,
          6256, 1818, 1232, 2833, 1239, 3507, 3663, 1390, 441, 4407, 6192,6000,
@@ -1412,7 +1412,7 @@ APDS9251_ALS_PARA_TABLE apds_als_para_diff_tp_color_table[] = {
          {12572, -350, 1023, 1011, 911, 1625, 1001, 1742, 181, 130, 43,
           3354, 4873, 2131, 115, 2770, 7637, 5000, 200, 1, 38,0,0} },
     {HANDEL, V3, DEFAULT_TPLCD, WHITE,
-         {6924, 1068, 1880, 1774, 1879, 1022, 998, 960, 568, 266, 93,
+         {6924, 1068, 1880, 1774, 1879, 1022, 1038, 960, 568, 266, 93,
           2168, 3474, 1336, 116, 3628, 5334, 6000, 200, 1, 38,0,0} },
 	{NATASHA, V3, DEFAULT_TPLCD, BLACK,
 	 {4016, 2116, 533, 512, 445, 930, 1237, 827, 479, 317, 139,
@@ -3105,10 +3105,6 @@ int combo_bus_trans(struct sensor_combo_cfg *p_cfg, uint8_t *tx, uint32_t tx_len
 		return -1;
 	}
 
-	if (tx_len >= (uint32_t)0xFFFF - sizeof(*pkt_combo_trans)){
-		hwlog_err("%s: tx_len %x too big\n", __func__, tx_len);
-		return -1;
-	}
 	cmd_wd_len = tx_len + sizeof(*pkt_combo_trans);
 	pkt_combo_trans = kzalloc((size_t)cmd_wd_len, GFP_KERNEL);
 	if (!pkt_combo_trans) {
@@ -4793,7 +4789,7 @@ static int ps_calibrate_save(const void *buf, int length)
 	{
 	    ps_external_ir_param.external_ir_pwindows_value = temp_buf[2] - temp_buf[1];
 	    ps_external_ir_param.external_ir_pwave_value = temp_buf[1] - temp_buf[0];
-		ps_external_ir_param.external_ir_calibrate_noise = temp_buf[0];
+	    ps_external_ir_param.external_ir_calibrate_noise = temp_buf[0];
 	    hwlog_info("%s:set nv ltr578 offset ps_data[0]:%d,ps_data[1]:%d,ps_data[2]:%d,pwindows:%d,pwave:%d\n",
 	                __func__,temp_buf[0],temp_buf[1],temp_buf[2],\
 	                ps_external_ir_param.external_ir_pwindows_value,ps_external_ir_param.external_ir_pwave_value);
@@ -4906,26 +4902,24 @@ static ssize_t attr_ps_switch_mode_store(struct device *dev,
 	if(ps_external_ir_param.external_ir == 1) {
 		if (strict_strtoul(buf, 10, &val))
 			return -EINVAL;
-		if ((val < PS_MODE_MIN) || (val > PS_MODE_MAX)) {
+		if((val < PS_MODE_MIN)||(val > PS_MODE_MAX)){
 			hwlog_err("set ps switch mode val invalid,val=%lu\n", val);
 			return count;
 		}
-		if (val == MID_PS) {
+		if(val == MID_PS){
 			ps_extend_platform_data.external_ir_mode_flag  = 1;
 			ps_extend_platform_data.min_proximity_value = ps_external_ir_param.external_ir_min_proximity_value;
 			ps_extend_platform_data.pwindows_value = ps_external_ir_param.external_ir_pwindows_value;
 			ps_extend_platform_data.pwave_value = ps_external_ir_param.external_ir_pwave_value;
 			ps_extend_platform_data.threshold_value  = ps_external_ir_param.external_ir_threshold_value;
-			ps_extend_platform_data.calibrate_noise = ps_external_ir_param.external_ir_calibrate_noise;
-		} else if (val == NEAR_PS) {
+			ps_extend_platform_data.calibrate_noise  = ps_external_ir_param.external_ir_calibrate_noise;
+		} else if (val == NEAR_PS){
 			ps_extend_platform_data.external_ir_mode_flag  = 1;
 			ps_extend_platform_data.min_proximity_value = ps_external_ir_param.external_ir_min_proximity_value;
-			ps_extend_platform_data.pwindows_value = ps_external_ir_param.external_ir_pwindows_value *
-						ps_external_ir_param.external_ir_pwindows_ratio / PS_RATIO;
-			ps_extend_platform_data.pwave_value = ps_external_ir_param.external_ir_pwave_value *
-						ps_external_ir_param.external_ir_pwave_ratio / PS_RATIO;
-			ps_extend_platform_data.threshold_value = ps_external_ir_param.external_ir_threshold_value;
-			ps_extend_platform_data.calibrate_noise = ps_external_ir_param.external_ir_calibrate_noise;
+			ps_extend_platform_data.pwindows_value = ps_external_ir_param.external_ir_pwindows_value *ps_external_ir_param.external_ir_pwindows_ratio/PS_RATIO;
+			ps_extend_platform_data.pwave_value = ps_external_ir_param.external_ir_pwave_value *ps_external_ir_param.external_ir_pwave_ratio/PS_RATIO;
+			ps_extend_platform_data.threshold_value  = ps_external_ir_param.external_ir_threshold_value;
+			ps_extend_platform_data.calibrate_noise  = ps_external_ir_param.external_ir_calibrate_noise;
 		} else {
 			ps_extend_platform_data.external_ir_mode_flag  = 0;
 			ps_extend_platform_data.min_proximity_value = ps_external_ir_param.internal_ir_min_proximity_value;
@@ -4960,13 +4954,16 @@ static ssize_t attr_ps_switch_mode_store(struct device *dev,
 		else
 		{
 			ps_switch_mode=val;
-			if (ps_external_ir_param.external_ir_powermode == 0) {
-				if ((val == MID_PS) || (val == NEAR_PS))
+			if(ps_external_ir_param.external_ir_powermode == 0) {
+				if((val == MID_PS)||(val == NEAR_PS)) {
 					gpio_direction_output(ps_external_ir_param.external_ir_enable_gpio, 1);
-				else
+				}
+				else {
 					gpio_direction_output(ps_external_ir_param.external_ir_enable_gpio, 0);
-			} else {
-				if ((val == MID_PS) || (val == NEAR_PS)) {
+				}
+			}
+			else {
+				if((val == MID_PS)||(val == NEAR_PS)) {
 					if (!regulator_is_enabled(ps_external_ir_vdd)) {
 						hwlog_info("ps switch enable vdd\n");
 						ret = regulator_enable(ps_external_ir_vdd);
@@ -4975,17 +4972,20 @@ static ssize_t attr_ps_switch_mode_store(struct device *dev,
 					} else {
 						hwlog_info("ps IR power has enable already, no need enable again\n");
 					}
-				} else {
+				}
+				else {
 					if (regulator_is_enabled(ps_external_ir_vdd)) {
 						hwlog_info("ps switch disable vdd\n");
 						ret = regulator_disable(ps_external_ir_vdd);
-						if (ret < 0)
+						if (ret< 0) {
 							hwlog_err("failed to disable regulator ps_external_ir_vdd\n");
+						}
 					} else {
 						hwlog_info("ps IR power has disable already, no need disable again\n");
 					}
 				}
 			}
+
 			hwlog_info("ps switch mode  success, data len=%d\n", pkg_mcu.data_length);
 		}
 	}else {
@@ -4997,14 +4997,14 @@ static DEVICE_ATTR(ps_switch_mode, 0664, attr_ps_switch_mode_show,
 		   attr_ps_switch_mode_store);
 
 static ssize_t attr_ps_support_mode_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
+				      struct device_attribute *attr, char *buf)
 {
 	int val = ps_support_mode;
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", val);
+	return snprintf(buf, PAGE_SIZE, "%d\n",val);
 }
 
-static DEVICE_ATTR(ps_support_mode, 0664, attr_ps_support_mode_show, NULL);
+static DEVICE_ATTR(ps_support_mode, 0664, attr_ps_support_mode_show,
+		   NULL);
 
 static ssize_t attr_als_calibrate_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
@@ -5033,7 +5033,7 @@ static int rgb_cal_result_write_file(char *filename, char *param)
 	if (IS_ERR_OR_NULL(fop)) {
 		set_fs(old_fs);
 		hwlog_err
-		    ("Create file error!! Path = %s IS_ERR_OR_NULL(fop) = %d fop = %pK\n",
+		    ("Create file error!! Path = %s IS_ERR_OR_NULL(fop) = %d fop = %Kp\n",
 		     filename, IS_ERR_OR_NULL(fop), fop);
 		return -1;
 	}
@@ -5369,28 +5369,6 @@ static void cap_prox_calibrate_work_func(struct work_struct *work)
 	}
 	hwlog_info("cap_prox calibrate work enter --\n");
 }
-
-static void attr_abova_calibrate_write(int calibrate_index, uint16_t abovb_data)
-{
-	switch (calibrate_index) {
-	case CALIBRATE_DIFF:
-		sar_calibrate_datas.abovb_cali_data.diff = abovb_data;
-		break;
-	case CALIBRATE_OFFSET:
-		sar_calibrate_datas.abovb_cali_data.offset = abovb_data;
-		break;
-	default:
-		hwlog_err("abovb sar calibrate err\n");
-		break;
-	}
-	hwlog_info("abovb_data %u\n", abovb_data);
-	hwlog_info("abovb_data offset:%d, diff:%d\n",
-			sar_calibrate_datas.abovb_cali_data.offset,
-			sar_calibrate_datas.abovb_cali_data.diff);
-	memset(cap_prox_calibrate_data, 0, cap_prox_calibrate_len);
-	memcpy(cap_prox_calibrate_data, &sar_calibrate_datas, cap_prox_calibrate_len);
-}
-
 static ssize_t attr_cap_prox_calibrate_write(struct device *dev,
 					     struct device_attribute *attr,
 					     const char *buf, size_t count)
@@ -5398,7 +5376,6 @@ static ssize_t attr_cap_prox_calibrate_write(struct device *dev,
 	unsigned long val = 0;
 	int ret = 0;
 	int calibrate_index = 0;
-	uint16_t abovb_data = 0;
 	write_info_t pkg_ap;
 	read_info_t pkg_mcu;
 
@@ -5496,11 +5473,6 @@ static ssize_t attr_cap_prox_calibrate_write(struct device *dev,
 			cap_prox_calibrate_len = pkg_mcu.data_length;
 			memset(cap_prox_calibrate_data, 0, cap_prox_calibrate_len);
 			memcpy(cap_prox_calibrate_data, &sar_calibrate_datas, cap_prox_calibrate_len);
-			} else if (!strncmp(sensor_chip_info[CAP_PROX], "huawei,abovb-a96t3x6",
-					strlen("huawei,abovb-a96t3x6"))) {
-				cap_prox_calibrate_len = pkg_mcu.data_length;
-				memcpy(&abovb_data, pkg_mcu.data, sizeof(abovb_data));
-				attr_abova_calibrate_write(calibrate_index, abovb_data);
 		    } else {
 				cap_prox_calibrate_len = pkg_mcu.data_length;
 				memcpy(cap_prox_calibrate_data, pkg_mcu.data, sizeof(cap_prox_calibrate_data));
@@ -7342,11 +7314,6 @@ static ssize_t show_sar_data(struct device *dev,
 			sar_calibrate_datas.semtech_cali_data.offset,
 			sar_calibrate_datas.semtech_cali_data.diff);
 	}
-	if (!strncmp(sensor_chip_info[CAP_PROX], "huawei,abovb-a96t3x6",
-			strlen("huawei,abovb-a96t3x6")))
-		return snprintf(buf, MAX_STR_SIZE, "offset:%d diff:%d\n",
-				sar_calibrate_datas.abovb_cali_data.offset,
-				sar_calibrate_datas.abovb_cali_data.diff);
 
 	return -1;
 }
@@ -7891,8 +7858,9 @@ static int sensorhub_io_driver_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 	ps_external_ir_vdd = devm_regulator_get(&pdev->dev, PS_EXT_IR_VBUS);
-	if (IS_ERR(ps_external_ir_vdd))
+	if (IS_ERR(ps_external_ir_vdd)) {
 		hwlog_err("%s: ps_external_ir_vdd regulator_get fail!\n", __func__);
+	}
 
 	ret = regulator_enable(sensorhub_vddio);
 	if (ret < 0)

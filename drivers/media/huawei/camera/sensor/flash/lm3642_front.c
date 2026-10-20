@@ -45,7 +45,7 @@
 #define LM3642_FRONT_OVER_VOLTAGE_PROTECT               0x08
 #define LM3642_FRONT_LED_VOUT_SHORT                     0x04
 #define LM3642_FRONT_OVER_TEMP_PROTECT                  0x02
-#define CHIP_ID_MASK                                    0x07
+
 typedef enum {
     MODE_INDICATOR = 0x01, //from spec
     MODE_TORCH = 0x02, //from spec
@@ -95,6 +95,21 @@ DEFINE_HISI_FLASH_MUTEX(lm3642_front);
 extern int register_camerafs_attr(struct device_attribute *attr);
 #endif
 /* Function define */
+#if 0
+static int lm3642_front_set_strobe(struct hw_flash_ctrl_t *flash_ctrl,
+    unsigned int state)
+{
+    if (NULL == flash_ctrl) {
+        cam_err("%s flash_ctrl is NULL.", __func__);
+        return -EINVAL;
+    }
+
+    cam_debug("%s strobe0=%d, state=%d.", __func__,
+        flash_ctrl->flash_info.strobe0, state);
+    gpio_direction_output(flash_ctrl->flash_info.strobe0, state);
+    return 0;
+}
+#endif
 
 static int hw_lm3642_front_clear_error_and_notify_dmd(struct hw_flash_ctrl_t *flash_ctrl)
 {
@@ -260,7 +275,7 @@ static int hw_lm3642_front_flash_mode(struct hw_flash_ctrl_t *flash_ctrl,
     struct hw_flash_i2c_client *i2c_client;
     struct hw_flash_i2c_fn_t *i2c_func;
     struct hw_lm3642_front_private_data_t *pdata;
-    unsigned char val = 0;
+    unsigned char val;
     int current_level = 0;
     int rc = 0;
 
@@ -437,6 +452,16 @@ static int hw_lm3642_front_get_dt_data(struct hw_flash_ctrl_t *flash_ctrl)
 
     pdata = (struct hw_lm3642_front_private_data_t *)flash_ctrl->pdata;
     of_node = flash_ctrl->dev->of_node;
+#if 0
+    rc = of_property_read_u32(of_node, "huawei,flash-pin",
+        &pdata->strobe);
+    cam_info("%s hisi,flash-pin %d, rc %d", __func__,
+        pdata->strobe, rc);
+    if (rc < 0) {
+        cam_err("%s failed %d", __func__, __LINE__);
+        /* return rc; */
+    }
+#endif
 
     rc = of_property_read_u32(of_node, "huawei,flash_current",
         &pdata->flash_current);
@@ -445,6 +470,7 @@ static int hw_lm3642_front_get_dt_data(struct hw_flash_ctrl_t *flash_ctrl)
     if (rc < 0) {
         cam_info("%s failed %d", __func__, __LINE__);
         pdata->flash_current = FLASH_LED_LEVEL_INVALID;
+        //return rc;
     }
 
     rc = of_property_read_u32(of_node, "huawei,torch_current",
@@ -454,7 +480,54 @@ static int hw_lm3642_front_get_dt_data(struct hw_flash_ctrl_t *flash_ctrl)
     if (rc < 0) {
         cam_err("%s failed %d", __func__, __LINE__);
         pdata->torch_current = FLASH_LED_LEVEL_INVALID;
+        //TO FIX
+        //return rc;
     }
+#if 0
+    rc = of_property_read_u32(of_node, "huawei,flash_led_num",
+        &pdata->flash_led_num);
+    cam_info("%s hisi,flash_led_num %d, rc %d", __func__,
+        pdata->flash_led_num, rc);
+    if (rc < 0) {
+        cam_err("%s failed %d", __func__, __LINE__);
+        return rc;
+    }
+
+    rc = of_property_read_u32(of_node, "huawei,torch_led_num",
+        &pdata->torch_led_num);
+    cam_info("%s hisi,torch_led_num %d, rc %d", __func__,
+        pdata->torch_led_num, rc);
+    if (rc < 0) {
+        cam_err("%s failed %d", __func__, __LINE__);
+        return rc;
+    }
+
+    rc = of_property_read_u8_array(of_node, "huawei,flash_led",
+        pdata->flash_led, pdata->flash_led_num);
+    if (rc < 0) {
+        cam_err("%s failed line %d", __func__, __LINE__);
+        //TO FIX
+        /* return rc; */
+    } else {
+        for (i=0; i< pdata->flash_led_num; i++) {
+            cam_debug("%s flash_led[%d]=%d.", __func__, i,
+                pdata->flash_led[i]);
+        }
+    }
+
+    rc = of_property_read_u8_array(of_node, "huawei,torch_led",
+        pdata->torch_led, pdata->torch_led_num);
+    if (rc < 0) {
+        cam_err("%s failed line %d", __func__, __LINE__);
+        //TO FIX
+        /* return rc; */
+    } else {
+        for (i=0; i< pdata->torch_led_num; i++) {
+            cam_debug("%s torch_led[%d]=%d.", __func__, i,
+                pdata->torch_led[i]);
+        }
+    }
+#endif
     rc = of_property_read_u32(of_node, "huawei,flash-chipid",
         &pdata->chipid);
     cam_info("%s hisi,chipid 0x%x, rc %d", __func__,
@@ -581,8 +654,8 @@ static ssize_t hw_lm3642_front_flash_mask_show(struct device *dev,
         cam_err("%s invalid param.", __func__);
         return -EINVAL;
     }
-    snprintf_s(buf, MAX_ATTRIBUTE_BUFFER_SIZE, MAX_ATTRIBUTE_BUFFER_SIZE-1, "flash_mask_disabled=%d.",
-        hw_lm3642_front_ctrl.flash_mask_enable);
+    snprintf(buf, MAX_ATTRIBUTE_BUFFER_SIZE, "flash_mask_disabled=%d.",
+    hw_lm3642_front_ctrl.flash_mask_enable);
     rc = strlen(buf)+1;
     return rc;
 }
@@ -709,10 +782,9 @@ static int hw_lm3642_front_match(struct hw_flash_ctrl_t *flash_ctrl)
 
     loge_if_ret(i2c_func->i2c_read(i2c_client, REG_CHIP_ID, &id) < 0);
     cam_info("%s id=0x%x.\n", __func__, id);
-	id = id & CHIP_ID_MASK;
     if (id != pdata->chipid) {
         cam_err("%s match error, id(0x%x) != 0x%x.",
-            __func__, id, pdata->chipid);
+            __func__, (id&0x7), pdata->chipid);
         return -EINVAL;
     }
     loge_if_ret(i2c_func->i2c_write(i2c_client, REG_ENABLE, IVFM_EN) < 0);  //enable IVFM

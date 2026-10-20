@@ -31,7 +31,6 @@
 #include <linux/console.h>
 #include <linux/wakelock.h>
 #include <soc_crgperiph_interface.h>
-#include <soc_acpu_baseaddr_interface.h>
 #include <soc_uart_interface.h>
 #include <soc_sctrl_interface.h>
 #include "hisi_lpregs.h"
@@ -49,8 +48,9 @@
 
 #pragma GCC diagnostic pop
 
+#include <huawei_platform/power/hw_power_monitor.h>
 
-#include <chipset_common/dubai/dubai.h>
+#include <huawei_platform/log/hwlog_kernel.h>
 
 #define PM_BUFFER_SIZE						(256)
 
@@ -86,9 +86,6 @@
 #define PROCESSOR_IOMCU_LENGTH  5
 #define IPC_MBXDATA_MIN			0
 #define IPC_MBXDATA_MAX			8
-#define IPC_MBXDATA_TAG			2
-#define GET_SHAREMEM_DATA(m)			(((m) & 0xFFFF))
-#define GET_SHAREMEM_SOURCE(m)			(((m) & 0xFF))
 #define IPC_MBX_SOURCE_OFFSET(m)		((m) << 6)
 #define IPC_MBX_DSTATUS_OFFSET(m)		(0x0C + ((m) << 6))
 #define IPC_MBXDATA_OFFSET(m, idex)		(0x20 + 4 * (idex) + ((m) << 6))
@@ -149,7 +146,6 @@ unsigned int g_lp_pmu_num;
 unsigned int g_pmu_addr_end;
 unsigned int g_lp_clk_num;
 const char **g_lpmcu_irq_name;
-
 
 char *processor_name[IPC_PROCESSOR_MAX] = {
 	"gic1",
@@ -530,7 +526,7 @@ unsigned int proc_mask_to_id(unsigned int mask)
 	return i;
 }
 
-void ipc_mbx_irq_show(struct seq_file *s, const void __iomem *base, unsigned int mbx)
+void ipc_mbx_irq_show(struct seq_file *s, void __iomem *base, unsigned int mbx)
 {
 	unsigned int ipc_source = 0;
 	unsigned int ipc_dest = 0;
@@ -538,8 +534,6 @@ void ipc_mbx_irq_show(struct seq_file *s, const void __iomem *base, unsigned int
 	unsigned int src_id = 0;
 	unsigned int dest_id = 0;
 	unsigned int i = 0;
-	unsigned int source = 0;
-	unsigned int mem = 0;
 
 	ipc_source = readl(base + IPC_MBX_SOURCE_OFFSET(mbx));
 	src_id = proc_mask_to_id(ipc_source);
@@ -564,15 +558,9 @@ void ipc_mbx_irq_show(struct seq_file *s, const void __iomem *base, unsigned int
 	/*if ((g_usavedcfg & DEBG_SUSPEND_IPC_DATA_SHOW) > 0) {*/
 	for (i = 0; i < IPC_MBXDATA_MAX; i++) {
 		ipc_data = readl(base + IPC_MBXDATA_OFFSET(mbx, i));
-		if ((src_id < IPC_PROCESSOR_MAX) &&
-			(strncmp(processor_name[src_id], "iomcu", PROCESSOR_IOMCU_LENGTH) == 0)) {
-			if (i == IPC_MBXDATA_MIN) {
-				mem = GET_SHAREMEM_DATA(ipc_data);
-			}
-			if (i == IPC_MBXDATA_TAG) {
-				source = GET_SHAREMEM_SOURCE(ipc_data);
-				dubai_update_wakeup_info("DUBAI_TAG_SENSORHUB_WAKEUP", "mem=%u source=%u", mem, source);
-			}
+		if ((i == IPC_MBXDATA_MIN) && (src_id < IPC_PROCESSOR_MAX)) {
+			if (strncmp(processor_name[src_id], "iomcu", PROCESSOR_IOMCU_LENGTH) == 0)
+				HWDUBAI_LOGE("DUBAI_TAG_SENSORHUB_WAKE", "data=%u", ipc_data);
 		}
 		LOWPM_MSG(s, "SR:[MBXDATA%u]:0x%x\n", i, ipc_data); //lint !e666
 	}
@@ -613,10 +601,8 @@ void pm_status_show(struct seq_file *s)
 	if (!sysreg_base.reserved_base) {
 		if (M3_RDR_SYS_CONTEXT_BASE_ADDR)
 			sysreg_base.reserved_base = M3_RDR_SYS_CONTEXT_RUNTIME_VAR_ADDR;
-		else{
-			pr_err("%s: M3_RDR_SYS_CONTEXT_BASE_ADDR is NULL\n", __func__);
+		else
 			return;
-		}
 	}
 
 	wake_status = readb(sysreg_base.reserved_base + WAKE_STATUS_OFFSET); //lint !e578
@@ -629,7 +615,9 @@ void pm_status_show(struct seq_file *s)
 		(wake_status & HISEE_MASK) ? 1 : 0,
 		(wake_status & HOTPLUG_MASK(0)) ? 1 : 0,
 		(wake_status & HOTPLUG_MASK(1)) ? 1 : 0);
-	dubai_update_wakeup_info("DUBAI_TAG_WAKE_STATUS", "ap=%d modem=%d hifi=%d iomcu=%d hisee=%d hotplug0=%d hotplug1=%d",
+    power_monitor_report(MODEM_SLEEP,"%d",(wake_status & MODEM_MASK) ? 1 : 0);
+    power_monitor_report(IOM3_SLEEP,"%d",(wake_status & IOMCU_MASK) ? 1 : 0);
+	HWDUBAI_LOGE("DUBAI_TAG_WAKE_STATUS", "ap=%d modem=%d hifi=%d iomcu=%d hisee=%d hotplug0=%d hotplug1=%d",
 		(wake_status & AP_MASK) ? 1 : 0,
 		(wake_status & MODEM_MASK) ? 1 : 0,
 		(wake_status & HIFI_MASK) ? 1 : 0,
@@ -711,7 +699,7 @@ void pm_status_show(struct seq_file *s)
 	ap_irq = readl(sysreg_base.reserved_base + AP_WAKE_IRQ_OFFSET);
 	if ((g_lpmcu_irq_num > ap_irq)
 		&& (g_lpmcu_irq_name != NULL)){
-		dubai_update_wakeup_info("DUBAI_TAG_AP_WAKE_IRQ", "name=%s", g_lpmcu_irq_name[ap_irq]);
+		HWDUBAI_LOGE("DUBAI_TAG_AP_WAKE_IRQ", "name=%s", g_lpmcu_irq_name[ap_irq]);
 		LOWPM_MSG(s, "SR:AP WAKE IRQ(LPM3 NVIC): %d (%s)\n",
 				ap_irq, g_lpmcu_irq_name[ap_irq]);
 	} else {
@@ -802,7 +790,7 @@ void show_iocg_reg(unsigned int i, struct iocfg_lp *hisi_iocfg_lookups)
 	value = readl(addr);
 	iounmap(addr);
 
-	printk("[0x%x]iocg = %s", value, pulltype[((unsigned int)value) & 0x3]);
+	printk("[0x%x]iocg = %s", value, pulltype[value&0x3]);
 
 	if ((value != hisi_iocfg_lookups[i].iocg_val) &&
 			(hisi_iocfg_lookups[i].iocg_val != -1)) {
@@ -814,7 +802,7 @@ void show_iocg_reg(unsigned int i, struct iocfg_lp *hisi_iocfg_lookups)
 }
 
 
-void show_gpio_info(unsigned int i, struct iocfg_lp *hisi_iocfg_lookups, unsigned int gpio_id)
+void show_gpio_info(unsigned int i, struct iocfg_lp *hisi_iocfg_lookups)
 {
 	void __iomem *addr = NULL;
 	void __iomem **addr1 = NULL;
@@ -823,7 +811,6 @@ void show_gpio_info(unsigned int i, struct iocfg_lp *hisi_iocfg_lookups, unsigne
 
 	if(NULL == hisi_iocfg_lookups)
 		return;
-
 
 	if (hisi_iocfg_lookups[i].iomg_val == FUNC0) {
 		addr = GPIO_DIR(sysreg_base.gpio_base[hisi_iocfg_lookups[i].gpio_group_id]);
@@ -854,7 +841,7 @@ void show_gpio_info(unsigned int i, struct iocfg_lp *hisi_iocfg_lookups, unsigne
 void dbg_io_status_show(void)
 {
 	unsigned int i = 0;
-	unsigned int gpio_id = 0;
+	int gpio_id = 0;
 	unsigned int len = 0;
 	struct iocfg_lp *hisi_iocfg_lookups = NULL;
 
@@ -877,7 +864,7 @@ void dbg_io_status_show(void)
 		gpio_id = ((hisi_iocfg_lookups[i].gpio_group_id << 3)
 					+ hisi_iocfg_lookups[i].ugpio_bit);
 
-		printk("gpio - %u  gpio_logic - %s\t",
+		printk("gpio - %d  gpio_logic - %s\t",
 				gpio_id, hisi_iocfg_lookups[i].gpio_logic);
 
 	/* show iomg register's value */
@@ -887,7 +874,7 @@ void dbg_io_status_show(void)
 	show_iocg_reg(i, hisi_iocfg_lookups);
 
 	/* if this is gpio pin*/
-	show_gpio_info(i, hisi_iocfg_lookups, gpio_id);
+	show_gpio_info(i, hisi_iocfg_lookups);
 	}
 }
 
@@ -1641,8 +1628,6 @@ err:
 }
 
 
-
-
 static int init_lowpm_data(void)
 {
 	int ret = 0;
@@ -1664,7 +1649,6 @@ static int init_lowpm_data(void)
 		ret = -ENODEV;
 		goto err_put_node;
 	}
-
 
 
 	/* init lpmcu irq table */

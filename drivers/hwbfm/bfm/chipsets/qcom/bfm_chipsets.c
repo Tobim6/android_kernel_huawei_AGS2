@@ -32,15 +32,15 @@
 /*----local macroes------------------------------------------------------------------*/
 
 #define BFM_QCOM_LOG_PART_MOUINT_POINT "/log"
-#define BFM_QCOM_LOG_ROOT_PATH "/log/reliability/boot_fail"
+#define BFM_QCOM_LOG_ROOT_PATH "/log/boot_fail"
 #define BFM_QCOM_LOG_UPLOADING_PATH BFM_QCOM_LOG_ROOT_PATH "/" BFM_UPLOADING_DIR_NAME
 #define BFM_QCOM_BL1_BOOTFAIL_LOG_NAME "sbl1.log"
 #define BFM_QCOM_BL2_BOOTFAIL_LOG_NAME "lk.log"
-#define BFM_QCOM_KERNEL_BOOTFAIL_LOG_NAME "last_kmsg"
+#define BFM_QCOM_KERNEL_BOOTFAIL_LOG_NAME "kmsg.log"
 #define BFM_QCOM_RAMOOPS_BOOTFAIL_LOG_NAME "pmsg-ramoops-0"
 #define BFM_QCOM_WAIT_FOR_LOG_PART_TIMEOUT (40)
 
-#define BFM_QCOM_RAW_PART_NAME "bootfail_info"
+#define BFM_QCOM_RAW_PART_NAME "pad0"
 #define BFM_QCOM_RAW_LOG_MAGIC (0x12345678)
 #define BFM_QCOM_RAW_PART_OFFSET (512*1024)
 #define BFM_KMSG_TMP_BUF_LEN (3*1024*512)
@@ -95,7 +95,6 @@ int bfm_set_boot_stage(bfmr_detail_boot_stage_e bfmr_bootstage)
     qcom_set_boot_stage(bfmr_bootstage);
     return 0;
 }
-
 
 unsigned int bfmr_capture_log_from_src_file(char *buf, unsigned int buf_len, char *src_log_path)
 {
@@ -645,7 +644,7 @@ int bfm_capture_and_save_do_nothing_bootfail_log(bfm_process_bootfail_param_t *p
     case KERNEL_PRESS10S:
         {
             /*save_log_to_raw_part,then forward save log to log part in sbl1 and try_to_recovery*/
-            param->bootfail_time = (unsigned long long)bfm_hctosys(param->bootfail_time);
+            param->bootfail_time = (unsigned long long)bfm_hctosys(param->bootfail_time,false);
             param->dst_type = DST_RAW_PART;
             param->recovery_method = FRM_REBOOT;
             param->bootup_time = sched_clock()/(BFM_TIME_S_TO_NS);
@@ -704,18 +703,12 @@ int bfm_platform_process_boot_fail(bfm_process_bootfail_param_t *param)
     }
     else
     {
-        param->bootfail_time = (unsigned long long)bfm_hctosys(param->bootfail_time);
+        param->bootfail_time = (unsigned long long)bfm_hctosys(param->bootfail_time,true);
         param->bootfail_can_only_be_processed_in_platform = 0;
         param->recovery_method = try_to_recovery(param->bootfail_time,
             param->bootfail_errno, param->boot_stage, param->suggested_recovery_method, NULL);
     }
 
-    return 0;
-}
-
-
-int bfm_update_platform_logs(bfm_bootfail_log_info_t *pbootfail_log_info)
-{
     return 0;
 }
 
@@ -1011,6 +1004,17 @@ void bfmr_update_raw_log_info(bfmr_log_src_t *psrc, bfmr_log_dst_t *pdst, unsign
 void bfmr_copy_data_from_dfx_to_bfmr_tmp_buffer(void)
 {
     return;
+}
+
+
+int bfm_get_kmsg_log_header_size(void)
+{
+    return 0;
+}
+
+bool bfm_is_beta_version(void)
+{
+    return false;
 }
 
 

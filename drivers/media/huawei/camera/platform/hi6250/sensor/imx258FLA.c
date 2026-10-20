@@ -13,7 +13,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 #define SENSOR_REG_SETTING_DELAY_1_MS 1
 #define GPIO_LOW_STATE       0
 #define GPIO_HIGH_STATE      1
@@ -546,7 +545,7 @@ static int32_t imx258FLA_platform_probe(struct platform_device* pdev)
     rc = rpmsg_sensor_register(pdev, (void *)&s_imx258FLA);
     if (0 != rc){
         cam_err("%s rpmsg_sensor_register fail.\n", __func__);
-        hwsensor_unregister(Sensor2Pdev(s_imx258FLA));
+        hwsensor_unregister(&s_imx258FLA.intf);
         goto imx258FLA_sensor_probe_fail;
     }
 
@@ -563,7 +562,7 @@ static int __init imx258FLA_init_module(void)
 static void __exit imx258FLA_exit_module(void)
 {
     rpmsg_sensor_unregister((void *)&s_imx258FLA);
-    hwsensor_unregister(Sensor2Pdev(s_imx258FLA));
+    hwsensor_unregister(&s_imx258FLA.intf);
     platform_driver_unregister(&s_imx258FLA_driver);
 }
 //lint -restore

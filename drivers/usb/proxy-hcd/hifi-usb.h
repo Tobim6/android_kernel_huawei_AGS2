@@ -13,21 +13,11 @@
 #include "hifi-usb-urb-buf.h"
 #include "hifi-usb-stat.h"
 
-#define HIFI_USB_CONFIRM_UDEV_CONNECT_TIME (2 * HZ)
-#define HIFI_USB_CONFIRM_UDEV_RECONNECT_TIME (5 * HZ)
-
-#define MAX_QUIRK_DEVICES_ONE_GROUP 255
+#define HIFI_USB_CONFIRM_UDEV_TIME (5 * HZ)
 
 struct hifi_usb_msg_wrap {
 	struct list_head node;
 	struct hifi_usb_op_msg msg;
-};
-
-struct hifi_usb_phy_ldo_cfg {
-	u32 addr;
-	u32 bit;
-	u32 always_on;
-	u32 accessable; /* 0: not accessable, non-zero: accessable */
 };
 
 struct hifi_usb_proxy {
@@ -61,7 +51,7 @@ struct hifi_usb_proxy {
 	struct notifier_block		fb_notify;
 	unsigned int			hibernation_ctrl; /* hibernation allowed when all bits cleared */
 
-	__u32				port_status;
+	unsigned int 			port_status;
 	unsigned int			hibernation_count;
 	unsigned int			revive_time;
 	unsigned int 			max_revive_time;
@@ -69,27 +59,11 @@ struct hifi_usb_proxy {
 	bool				hifiusb_suspended;
 	bool				hifiusb_hibernating;
 	bool				hid_key_pressed;
-
-	struct hifi_usb_phy_ldo_cfg	hifi_usb_phy_ldo_33v;
-	struct hifi_usb_phy_ldo_cfg	hifi_usb_phy_ldo_18v;
-
-#ifdef CONFIG_HIFI_USB_HAS_H2X
-	/* for onetrack of apr es and cs
-	 * es: using h2x
-	 * cs: using x2x
-	 */
-	bool usb_not_using_h2x;
-#endif
+	bool				hifi_reset_flag;
 };
 
-extern u32 hifi_usb_base_quirk_devices[MAX_QUIRK_DEVICES_ONE_GROUP + 1];
-extern u32 hifi_usb_ext_quirk_devices[MAX_QUIRK_DEVICES_ONE_GROUP + 1];
-
 void hifi_usb_msg_receiver(struct hifi_usb_op_msg *__msg);
-void hifi_usb_announce_udev(struct usb_device *udev);
 int always_use_hifi_usb(int val);
 int never_use_hifi_usb(int val);
-
-#define HUAWEI_USB_C_AUDIO_ADAPTER "HUAWEI USB-C TO 3.5MM AUDIO ADAPTER"
 
 #endif /* _HIFI_USB_H_ */

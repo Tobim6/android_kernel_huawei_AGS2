@@ -935,6 +935,13 @@ static inline int CSMI_MsgChangeContentSanity(void* pD, uint8_t channelNumber, b
 	if (pD == NULL)
 		return EINVAL;
 
+
+	if (channelNumber > (255))
+		return EINVAL;
+
+
+
+
 	if (
 		presenceRate != CSMI_PR_12K   &&
 		presenceRate != CSMI_PR_24K   &&
@@ -1290,6 +1297,11 @@ static inline int CSMI_MsgNextDefineChannelSanity(void* pD, uint8_t channelNumbe
 	if (pD == NULL)
 		return EINVAL;
 
+
+	if (channelNumber > (255))
+		return EINVAL;
+
+
 	if (
 		transportProtocol != CSMI_TP_ISOCHRONOUS   &&
 		transportProtocol != CSMI_TP_PUSHED   &&
@@ -1332,6 +1344,13 @@ static inline int CSMI_MsgNextDefineContentSanity(void* pD, uint8_t channelNumbe
 {
 	if (pD == NULL)
 		return EINVAL;
+
+
+	if (channelNumber > (255))
+		return EINVAL;
+
+
+
 
 	if (
 		presenceRate != CSMI_PR_12K   &&

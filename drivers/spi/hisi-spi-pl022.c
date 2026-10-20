@@ -1,4 +1,4 @@
-#define GET_HARDWARE_TIMEOUT 10000
+#define GET_HARDWARE_TIMEOUT 100000
 #define SPI_4G_PHYS_ADDR 0xFFFFFFFF
 
 #define SSP_TXFIFOCR(r)	(r + 0x028)
@@ -64,7 +64,6 @@ static int pl022_prepare_transfer_hardware(struct spi_master *master)
 					dev_err(&pl022->adev->dev, "get hardware_mutex wait for completion timeout\n");
 					return -ETIME;
 				}
-				usleep_range(1000, 2000);
 			}
 		} while (0 == ret);
 	}
@@ -72,32 +71,9 @@ static int pl022_prepare_transfer_hardware(struct spi_master *master)
 	return 0;
 }
 
-static struct {
-	struct mutex lock;
-	int   users;
-} spi_secos_gates[5] = {
-
-	[0] = {
-		.lock = __MUTEX_INITIALIZER(spi_secos_gates[0].lock),
-	},
-	[1] = {
-		.lock = __MUTEX_INITIALIZER(spi_secos_gates[1].lock),
-	},
-	[2] = {
-		.lock = __MUTEX_INITIALIZER(spi_secos_gates[2].lock),
-	},
-	[3] = {
-		.lock = __MUTEX_INITIALIZER(spi_secos_gates[3].lock),
-	},
-	[4] = {
-		.lock = __MUTEX_INITIALIZER(spi_secos_gates[4].lock),
-	},
-
-};
-
 int spi_init_secos(unsigned int spi_bus_id)
 {
-	int ret = 0;
+	int ret;
 	struct spi_master *master = NULL;
 	struct pl022 *pl022 = NULL;
 
@@ -119,24 +95,14 @@ int spi_init_secos(unsigned int spi_bus_id)
 			return -EINVAL;
 		}
 
-		mutex_lock(&spi_secos_gates[spi_bus_id].lock);
-		if (spi_secos_gates[spi_bus_id].users) {
-			++spi_secos_gates[spi_bus_id].users;
-			mutex_unlock(&spi_secos_gates[spi_bus_id].lock);
-			return 0;
-		}
-
 		ret = clk_prepare_enable(pl022->clk);
 		if (ret) {
 			dev_err(&pl022->adev->dev, "switch to secos could not enable SPI%d bus clock\n", spi_bus_id);
-			ret = -EINVAL;
-		} else {
-			spi_secos_gates[spi_bus_id].users = 1;
+			return -EINVAL;
 		}
-		mutex_unlock(&spi_secos_gates[spi_bus_id].lock);
 	}
 
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(spi_init_secos);
 
@@ -162,14 +128,7 @@ int spi_exit_secos(unsigned int spi_bus_id)
 			dev_err(&pl022->adev->dev, "back to kernel pl022->clk is NULL for spi:%d\n", spi_bus_id);
 			return -EINVAL;
 		}
-
-		mutex_lock(&spi_secos_gates[spi_bus_id].lock);
-		if (--spi_secos_gates[spi_bus_id].users) {
-			mutex_unlock(&spi_secos_gates[spi_bus_id].lock);
-			return 0;
-		}
 		clk_disable_unprepare(pl022->clk);
-		mutex_unlock(&spi_secos_gates[spi_bus_id].lock);
 	}
 
 	return 0;
@@ -205,14 +164,6 @@ static int hisi_spi_get_pins_data(struct pl022 *pl022, struct device *dev)
 						   PINCTRL_STATE_SLEEP);
 	if (IS_ERR(pl022->pins_sleep))
 		dev_dbg(dev, "could not get sleep pinstate\n");
-
-	pl022->pins.p = pl022->pinctrl;
-	pl022->pins.default_state = pl022->pins_default;
-#ifdef CONFIG_PM
-	pl022->pins.idle_state = pl022->pins_idle;
-	pl022->pins.sleep_state = pl022->pins_sleep;
-#endif
-	dev->pins = &pl022->pins;
 
 	return 0;
 }

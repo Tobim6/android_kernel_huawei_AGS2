@@ -16,8 +16,6 @@
 
 #include <hisi_noc.h>
 #include <hisi_noc_info.h>
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_NOC_TAG
 
 #define ERR_CODE_NR  8
 #define OPC_NR      10
@@ -469,7 +467,6 @@ const struct noc_busid_initflow hisi_filter_initflow_kirin970[] = {
 	{0, 19, RDR_CP},	/*socp*/
 	{0,5,RDR_IOM3},
 	{0,6,RDR_IOM3},
-	{0, 0, RDR_HIFI},
 	{ARRAY_END_FLAG, 0, RDR_AP},	/*end*/
 };
 

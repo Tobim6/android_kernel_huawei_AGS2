@@ -14,8 +14,6 @@
 #include <linux/uaccess.h>
 #include <linux/unistd.h>
 #include <linux/sort.h>
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_FILESYS_TAG
 #include "mntn_filesys.h"
 
 extern void sort(void *base, size_t num, size_t size,
@@ -47,7 +45,7 @@ int mntn_filesys_rm_file(const char *fullname)
 	iret = (int)sys_access(fullname, 0);
 	if (0 == iret) {
 		if (sys_unlink(fullname)) {
-			MNTN_FILESYS_PRINT(
+			MNTN_FILESYS_PRINT(KERN_ERR
 					   "mntn_err: Fail to rm the file %s!\n",
 					   fullname);
 			return -1;
@@ -70,13 +68,13 @@ int mntn_filesys_rm_all_file(const char *path)
 	char fullname[MNTN_FILESYS_FNAME_LEN] = { 0 };
 
 	if (NULL == path) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: path is NULL when removing all files in dir\n");
 		return -1;
 	}
 	buf = kzalloc(MNTN_FILESYS_DIR_ENTRY_SIZE, GFP_KERNEL);
 	if (buf == NULL) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: fail to kzalloc when removing all files\n");
 		return -1;
 	}
@@ -84,7 +82,7 @@ int mntn_filesys_rm_all_file(const char *path)
 	/* check path , if path isnt exist, return. */
 	ret = vfs_stat(path, &m_stat);
 	if (ret) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: dir doesn't exist when removing all files, path %s\n",
 				   path);
 		ret = -1;
@@ -93,7 +91,7 @@ int mntn_filesys_rm_all_file(const char *path)
 
 	fd = sys_open(path, O_RDONLY, MNTN_FILESYS_DEFAULT_MODE);	/*create file */
 	if (fd < 0) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: fail to open dir when removing all files, path %s,  fd %d\n",
 				   path, fd);
 		ret = -1;
@@ -103,7 +101,7 @@ int mntn_filesys_rm_all_file(const char *path)
 	nread = sys_getdents(fd, (struct linux_dirent *)buf,
 			 MNTN_FILESYS_DIR_ENTRY_SIZE);
 	if (nread == -1) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: fail to getdents when when removing all files\n");
 		ret = -1;
 		goto oper_over1;
@@ -124,7 +122,7 @@ int mntn_filesys_rm_all_file(const char *path)
 		strncat(fullname, d->d_name, strlen(d->d_name));
 		ret = mntn_filesys_rm_file((const char *)fullname);
 		if (ret) {
-			MNTN_FILESYS_PRINT(
+			MNTN_FILESYS_PRINT(KERN_ERR
 					   "mntn_err: fail to mntn_filesys_rm_file\n");
 		}
 		memset(fullname, 0, sizeof(fullname));
@@ -146,7 +144,7 @@ int mntn_filesys_rm_dir(const char *dirname)
 	int iret = 0;
 
 	if (NULL == dirname) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: dir is null , so fail to open it!\n");
 		return -1;
 	}
@@ -159,7 +157,7 @@ int mntn_filesys_rm_dir(const char *dirname)
 	}
 	iret = sys_rmdir(dirname);
 	if (iret != 0) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: Fail to remove the dir %s!, iret = %d\n",
 				   dirname, iret);
 	}
@@ -167,12 +165,12 @@ int mntn_filesys_rm_dir(const char *dirname)
 }
 
 
-static int __mntn_filesys_create_dir(const char *path, umode_t umode)
+static int __mntn_filesys_create_dir(char *path, umode_t umode)
 {
 	int iret = 0;
 
 	if (NULL == path) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: dir is null , so fail to make it!\n");
 		return -1;
 	}
@@ -192,7 +190,7 @@ int mntn_filesys_create_dir(const char *path, umode_t umode)
 	int iret = 0;
 
 	if (NULL == path) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: dir is null , so fail to make it!\n");
 		return -1;
 	}
@@ -207,7 +205,7 @@ int mntn_filesys_create_dir(const char *path, umode_t umode)
 			iret = __mntn_filesys_create_dir(cur_path, umode);
 			/*the dir may exist if the result is not equal to 0, so needn't return */
 			if (0 != iret && (iret != (-EEXIST))) {
-				MNTN_FILESYS_PRINT(
+				MNTN_FILESYS_PRINT(KERN_ERR
 						   "mntn_err: Fail to create the dir %s!, result is %d\n",
 						   cur_path, iret);
 			}
@@ -236,13 +234,13 @@ int mntn_filesys_dir_list(const char *path, char *pout_namelist, int cnt,
 	struct linux_dirent *d;
 
 	if (NULL == pout_namelist || NULL == path) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn error: pointer is NULL when listing dir\n");
 		return 0;
 	}
 	buf = kzalloc(MNTN_FILESYS_DIR_ENTRY_SIZE, GFP_KERNEL);
 	if (buf == NULL) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: fail to kzalloc when when listing dir\n");
 		return 0;
 	}
@@ -250,14 +248,14 @@ int mntn_filesys_dir_list(const char *path, char *pout_namelist, int cnt,
 	/* check path , if path isnt exist, return. */
 	ret = vfs_stat(path, &m_stat);
 	if (ret) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: dir doesn't exist when when listing dir\n");
 		goto oper_over2;
 	}
 
 	fd = sys_open(path, O_RDONLY, MNTN_FILESYS_DEFAULT_MODE);	/*create file */
 	if (fd < 0) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: fail to open dir when when listing dir, fd %d\n",
 				   fd);
 		goto oper_over2;
@@ -266,7 +264,7 @@ int mntn_filesys_dir_list(const char *path, char *pout_namelist, int cnt,
 	nread = sys_getdents(fd, (struct linux_dirent *)buf,
 			 MNTN_FILESYS_DIR_ENTRY_SIZE);
 	if (nread == -1) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: fail to getdents when when listing dir\n");
 		goto oper_over1;
 	}
@@ -303,7 +301,7 @@ oper_over2:
 }
 
 
-int mntn_filesys_write_log(const char *pname, const void *pbuf_vir, unsigned int ulen,
+int mntn_filesys_write_log(const char *pname, void *pbuf_vir, unsigned int ulen,
 			   umode_t mode)
 {
 	int bytes = 0;
@@ -312,31 +310,31 @@ int mntn_filesys_write_log(const char *pname, const void *pbuf_vir, unsigned int
 	int iret = 0;
 
 	if (NULL == pname) {
-		MNTN_FILESYS_PRINT("mntn_err: File name is NULL\n");
+		MNTN_FILESYS_PRINT(KERN_ERR "mntn_err: File name is NULL\n");
 		return 0;
 	}
 
 	/*create dir, no error if it has been created */
 	iret = mntn_filesys_create_dir(pname, udefault);
 	if (0 != iret) {
-		MNTN_FILESYS_PRINT("mntn_err: Fail to create dir!\n");
+		MNTN_FILESYS_PRINT(KERN_ERR "mntn_err: Fail to create dir!\n");
 	}
 
 	fd = sys_open(pname, O_CREAT | O_RDWR, udefault);
 	if (fd < 0) {
-		MNTN_FILESYS_PRINT("mntn_err: Fail to open file %s\n",
+		MNTN_FILESYS_PRINT(KERN_ERR "mntn_err: Fail to open file %s\n",
 				   pname);
 	} else {
 		sys_lseek((int)(fd), 0, 2);
 		bytes = sys_write(fd, pbuf_vir, ulen);
 		if (bytes != ulen) {
-			MNTN_FILESYS_PRINT(
+			MNTN_FILESYS_PRINT(KERN_ERR
 					   "mntn_err: Fail to write all the data into the file %s, %d/%d\n",
 					   pname, bytes, ulen);
 		}
 		iret = sys_fsync(fd);
 		if (iret < 0) {
-			MNTN_FILESYS_PRINT(
+			MNTN_FILESYS_PRINT(KERN_ERR
 					   "mntn_err: Fail to sys_fsync data when saving log\n");
 		}
 		sys_close(fd);
@@ -348,7 +346,7 @@ int mntn_filesys_write_log(const char *pname, const void *pbuf_vir, unsigned int
 int mntn_str_cmp(const void *a, const void *b)
 {
 	if (NULL == a || NULL == b) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: pointer a or pointer b is null!\n");
 		return -1;
 	}
@@ -366,13 +364,13 @@ void mntn_rm_old_log(const char *ppath, unsigned int unumber)
 	char *pbuff = NULL;
 
 	if (NULL == ppath) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: path is NULL when removing old log\n");
 		return;
 	}
 	pbuff = kzalloc(tmp_cnt, GFP_KERNEL);
 	if (NULL == pbuff) {
-		MNTN_FILESYS_PRINT(
+		MNTN_FILESYS_PRINT(KERN_ERR
 				   "mntn_err: fail to kzalloc when removing old log\n");
 		return;
 	}
@@ -390,7 +388,7 @@ void mntn_rm_old_log(const char *ppath, unsigned int unumber)
 			iret = mntn_filesys_rm_all_file(fullpath_arr);
 			iret += mntn_filesys_rm_dir(fullpath_arr);
 			if (0 != iret) {
-				MNTN_FILESYS_PRINT(
+				MNTN_FILESYS_PRINT(KERN_ERR
 						   "mntn_err: fail to rm dir, %d",
 						   i);
 			}

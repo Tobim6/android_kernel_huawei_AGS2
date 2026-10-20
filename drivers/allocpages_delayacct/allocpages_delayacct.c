@@ -17,7 +17,7 @@ void __delayacct_allocpages_start(void)
 
 void __delayacct_allocpages_end(unsigned int order)
 {
-	u64 ns = ktime_get_ns() - current->delays->allocpages_start;
+	s64 ns = ktime_get_ns() - current->delays->allocpages_start;
 	unsigned long flags;
 
 	if (ns > 0) {
@@ -27,12 +27,6 @@ void __delayacct_allocpages_end(unsigned int order)
 		if (current->delays->allocpages_delay_max < ns) {
 			current->delays->allocpages_delay_max = ns;
 			current->delays->allocpages_delay_max_order = order;
-		}
-		current->delays->allocuser_delay += ns;
-		current->delays->allocuser_count++;
-		if (current->delays->allocuser_delay_max < ns) {
-			current->delays->allocuser_delay_max = ns;
-			current->delays->allocuser_delay_max_order = order;
 		}
 		spin_unlock_irqrestore(&current->delays->allocpages_lock, flags);
 	}

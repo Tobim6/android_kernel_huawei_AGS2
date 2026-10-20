@@ -12,7 +12,6 @@
 #include <linux/cpumask.h>
 #include <linux/uprobes.h>
 #include <linux/page-flags-layout.h>
-#include <linux/workqueue.h>
 #include <asm/page.h>
 #include <asm/mmu.h>
 
@@ -55,57 +54,60 @@ struct page {
 						 * see PAGE_MAPPING_ANON below.
 						 */
 		void *s_mem;			/* slab first object */
-		atomic_t compound_mapcount;	/* first tail page */
-		/* page_deferred_list().next	 -- second tail page */
 	};
 
 	/* Second double word */
-	union {
-		pgoff_t index;		/* Our offset within mapping. */
-		void *freelist;		/* sl[aou]b first free object */
-		/* page_deferred_list().prev	-- second tail page */
-	};
+	struct {
+		union {
+			pgoff_t index;		/* Our offset within mapping. */
+			void *freelist;		/* sl[aou]b first free object */
+		};
 
-	union {
+		union {
 #if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
 	defined(CONFIG_HAVE_ALIGNED_STRUCT_PAGE)
-		/* Used for cmpxchg_double in slub */
-		unsigned long counters;
+			/* Used for cmpxchg_double in slub */
+			unsigned long counters;
 #else
-		/*
-		 * Keep _refcount separate from slub cmpxchg_double data.
-		 * As the rest of the double word is protected by slab_lock
-		 * but _refcount is not.
-		 */
-		unsigned counters;
-#endif
-		struct {
-
-			union {
-				/*
-				 * Count of ptes mapped in mms, to show when
-				 * page is mapped & limit reverse map searches.
-				 *
-				 * Extra information about page type may be
-				 * stored here for pages that are never mapped,
-				 * in which case the value MUST BE <= -2.
-				 * See page-flags.h for more details.
-				 */
-				atomic_t _mapcount;
-
-				unsigned int active;		/* SLAB */
-				struct {			/* SLUB */
-					unsigned inuse:16;
-					unsigned objects:15;
-					unsigned frozen:1;
-				};
-				int units;			/* SLOB */
-			};
 			/*
-			 * Usage count, *USE WRAPPER FUNCTION* when manual
-			 * accounting. See page_ref.h
+			 * Keep _count separate from slub cmpxchg_double data.
+			 * As the rest of the double word is protected by
+			 * slab_lock but _count is not.
 			 */
-			atomic_t _refcount;
+			unsigned counters;
+#endif
+
+			struct {
+
+				union {
+					/*
+					 * Count of ptes mapped in
+					 * mms, to show when page is
+					 * mapped & limit reverse map
+					 * searches.
+					 *
+					 * Used also for tail pages
+					 * refcounting instead of
+					 * _count. Tail pages cannot
+					 * be mapped and keeping the
+					 * tail page _count zero at
+					 * all times guarantees
+					 * get_page_unless_zero() will
+					 * never succeed on tail
+					 * pages.
+					 */
+					atomic_t _mapcount;
+
+					struct { /* SLUB */
+						unsigned inuse:16;
+						unsigned objects:15;
+						unsigned frozen:1;
+					};
+					int units;	/* SLOB */
+				};
+				atomic_t _count;		/* Usage count, see below. */
+			};
+			unsigned int active;	/* SLAB */
 		};
 	};
 
@@ -118,15 +120,10 @@ struct page {
 	 */
 	union {
 		struct list_head lru;	/* Pageout list, eg. active_list
-					 * protected by zone_lru_lock !
+					 * protected by zone->lru_lock !
 					 * Can be used as a generic list
 					 * by the page owner.
 					 */
-		struct dev_pagemap *pgmap; /* ZONE_DEVICE pages are never on an
-					    * lru or handled by a slab
-					    * allocator, this points to the
-					    * hosting device page map.
-					    */
 		struct {		/* slub per cpu partial pages */
 			struct page *next;	/* Next partial slab */
 #ifdef CONFIG_64BIT
@@ -254,7 +251,7 @@ struct page_frag_cache {
 	__u32 offset;
 #endif
 	/* we maintain a pagecount bias, so that we dont dirty cache line
-	 * containing page->_refcount every time we allocate a fragment.
+	 * containing page->_count every time we allocate a fragment.
 	 */
 	unsigned int		pagecnt_bias;
 	bool pfmemalloc;
@@ -354,7 +351,7 @@ struct vm_area_struct {
 
 	/* Information about our backing store: */
 	unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
-					   units */
+					   units, *not* PAGE_CACHE_SIZE */
 	struct file * vm_file;		/* File we map to (can be NULL). */
 	void * vm_private_data;		/* was vm_pte (shared mem) */
 
@@ -365,10 +362,6 @@ struct vm_area_struct {
 	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
 #endif
 	struct vm_userfaultfd_ctx vm_userfaultfd_ctx;
-#ifdef CONFIG_SPECULATIVE_PAGE_FAULT
-	seqcount_t vm_sequence;
-	atomic_t vm_ref_count;		/* see vma_get(), vma_put() */
-#endif
 };
 
 struct core_thread {
@@ -383,10 +376,9 @@ struct core_state {
 };
 
 enum {
-	MM_FILEPAGES,	/* Resident file mapping pages */
-	MM_ANONPAGES,	/* Resident anonymous pages */
-	MM_SWAPENTS,	/* Anonymous swap entries */
-	MM_SHMEMPAGES,	/* Resident shared memory pages */
+	MM_FILEPAGES,
+	MM_ANONPAGES,
+	MM_SWAPENTS,
 	NR_MM_COUNTERS
 };
 
@@ -410,7 +402,7 @@ struct blk_throtl_io_limit;
 struct mm_struct {
 	struct vm_area_struct *mmap;		/* list of VMAs */
 	struct rb_root mm_rb;
-	u64 vmacache_seqnum;                   /* per-thread vmacache */
+	u32 vmacache_seqnum;                   /* per-thread vmacache */
 #ifdef CONFIG_MMU
 	unsigned long (*get_unmapped_area) (struct file *filp,
 				unsigned long addr, unsigned long len,
@@ -444,9 +436,9 @@ struct mm_struct {
 	unsigned long total_vm;		/* Total pages mapped */
 	unsigned long locked_vm;	/* Pages that have PG_mlocked set */
 	unsigned long pinned_vm;	/* Refcount permanently increased */
-	unsigned long data_vm;		/* VM_WRITE & ~VM_SHARED & ~VM_STACK */
-	unsigned long exec_vm;		/* VM_EXEC & ~VM_WRITE & ~VM_STACK */
-	unsigned long stack_vm;		/* VM_STACK */
+	unsigned long shared_vm;	/* Shared pages (files) */
+	unsigned long exec_vm;		/* VM_EXEC & ~VM_WRITE */
+	unsigned long stack_vm;		/* VM_GROWSUP/DOWN */
 	unsigned long def_flags;
 	unsigned long start_code, end_code, start_data, end_data;
 	unsigned long start_brk, brk, start_stack;
@@ -525,10 +517,6 @@ struct mm_struct {
 	 */
 	bool tlb_flush_pending;
 #endif
-#ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH
-	/* See flush_tlb_batched_pending() */
-	bool tlb_flush_batched;
-#endif
 	struct uprobes_state uprobes_state;
 #ifdef CONFIG_X86_INTEL_MPX
 	/* address of the bounds directory */
@@ -537,14 +525,8 @@ struct mm_struct {
 #ifdef CONFIG_HUGETLB_PAGE
 	atomic_long_t hugetlb_usage;
 #endif
-	struct work_struct async_put_work;
-
 #ifdef CONFIG_TASK_PROTECT_LRU
 	int protect;
-#endif
-
-#ifdef CONFIG_SPECULATIVE_PAGE_FAULT
-	rwlock_t mm_rb_lock;
 #endif
 };
 
@@ -603,29 +585,10 @@ static inline void clear_tlb_flush_pending(struct mm_struct *mm)
 }
 #endif
 
-struct vm_fault;
-
-struct vm_special_mapping {
-	const char *name;	/* The name, e.g. "[vdso]". */
-
-	/*
-	 * If .fault is not provided, this points to a
-	 * NULL-terminated array of pages that back the special mapping.
-	 *
-	 * This must not be NULL unless .fault is provided.
-	 */
+struct vm_special_mapping
+{
+	const char *name;
 	struct page **pages;
-
-	/*
-	 * If non-NULL, then this is called to resolve page faults
-	 * on the special mapping.  If used, .pages is not checked.
-	 */
-	int (*fault)(const struct vm_special_mapping *sm,
-		     struct vm_area_struct *vma,
-		     struct vm_fault *vmf);
-
-	int (*mremap)(const struct vm_special_mapping *sm,
-		     struct vm_area_struct *new_vma);
 };
 
 enum tlb_flush_reason {

@@ -462,11 +462,7 @@ static irqreturn_t rt1711_intr_handler(int irq, void *data)
 	gpio_set_value(DEBUG_GPIO, 0);
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-	kthread_queue_work(&chip->irq_worker, &chip->irq_work);
-#else
 	queue_kthread_work(&chip->irq_worker, &chip->irq_work);
-#endif
 	return IRQ_HANDLED;
 }
 
@@ -543,11 +539,7 @@ static int rt1711_init_alert(struct tcpc_device *tcpc)
 	}
 	pr_info("%s : irq initialized...\n", __func__);
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-	kthread_init_worker(&chip->irq_worker);
-#else
 	init_kthread_worker(&chip->irq_worker);
-#endif
 	chip->irq_worker_task = kthread_run(kthread_worker_fn,
 			&chip->irq_worker, chip->tcpc_desc->name);
 	if (IS_ERR(chip->irq_worker_task)) {
@@ -558,11 +550,7 @@ static int rt1711_init_alert(struct tcpc_device *tcpc)
 	}
 
 	sched_setscheduler(chip->irq_worker_task, SCHED_FIFO, &param);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-	kthread_init_work(&chip->irq_work, rt1711_irq_work_handler);
-#else
 	init_kthread_work(&chip->irq_work, rt1711_irq_work_handler);
-#endif
 
 	enable_irq_wake(chip->irq);
 
@@ -1127,7 +1115,7 @@ static int rt1711_tcpcdev_init(struct rt1711_chip *chip, struct device *dev)
 
 	if (of_property_read_u32(
 		np, "rt-tcpc,notifier_supply_num", &val) >= 0) {
-		if ((int)val < 0)
+		if (val < 0)
 			desc->notifier_supply_num = 0;
 		else
 			desc->notifier_supply_num = val;

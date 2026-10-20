@@ -156,6 +156,7 @@ hjpeg_vo_subdev_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
     hjpeg_t* hjpeg = NULL;
 
     hjpeg = SD2Hjpeg(sd);  //lint !e826 !e833
+    //mutex_lock(&hjpeg->lock);
     switch (cmd) {
         case HJPEG_ENCODE_PROCESS:
             rc = hjpeg_encode_process(hjpeg, arg);
@@ -177,6 +178,7 @@ hjpeg_vo_subdev_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
             cam_info("%s: invalid ioctl cmd for hjpeg!!!cmd is %d\n", __func__, cmd);
             break;
     }
+    //mutex_unlock(&hjpeg->lock);
     return rc;
 }
 
@@ -254,11 +256,14 @@ hjpeg_register(
     subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
     v4l2_set_subdevdata(subdev, pdev);
 
-    init_subdev_media_entity(subdev,HWCAM_SUBDEV_HJPEG);
-    hwcam_cfgdev_register_subdev(subdev,HWCAM_SUBDEV_HJPEG);
+    media_entity_init(&subdev->entity, 0, NULL, 0);
+    subdev->entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
+    subdev->entity.group_id = HWCAM_SUBDEV_HJPEG;
+    subdev->entity.name = subdev->name;
+
+    hwcam_cfgdev_register_subdev(subdev);
     subdev->devnode->lock = &jpeg->lock;
 
-    platform_set_drvdata(pdev, subdev);
     jpeg->intf = si;
     jpeg->pdev = pdev;
     jpeg->jpeg_power_ref = 0;
@@ -268,11 +273,13 @@ register_fail:
 }
 
 void
-hjpeg_unregister(struct platform_device* pdev)
+hjpeg_unregister(hjpeg_intf_t* si)
 {
-    struct v4l2_subdev *subdev = platform_get_drvdata(pdev);
-    hjpeg_t* jpeg = SD2Hjpeg(subdev);
+    struct v4l2_subdev* subdev = NULL;
+    hjpeg_t* jpeg = NULL;
+    jpeg =  I2Hjpeg(si);
 
+    subdev = &jpeg->subdev;
     media_entity_cleanup(&subdev->entity);
     hwcam_cfgdev_unregister_subdev(subdev);
 

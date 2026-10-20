@@ -33,10 +33,8 @@
 #include <chipset_common/bfmr/common/bfmr_common.h>
 #include <chipset_common/bfmr/bfm/chipsets/bfm_chipsets.h>
 #include <chipset_common/hwbfm/hw_boot_fail_core.h>
+#include <huawei_platform/log/log_usertype/log-usertype.h>
 #include "bfm_hisi_dmd_info_priv.h"
-#include <linux/notifier.h>
-#include <linux/kthread.h>
-#include <linux/mfd/hisi_pmic_mntn.h>
 
 
 /*----local macroes------------------------------------------------------------------*/
@@ -44,7 +42,7 @@
 #define BFM_HISI_BFI_PART_NAME "bootfail_info"
 #define BFM_HISI_BFI_BACKUP_PART_NAME PART_HISITEST0
 #define BFM_HISI_LOG_PART_MOUINT_POINT "/splash2"
-#define BFM_HISI_LOG_ROOT_PATH "/splash2/reliability/boot_fail"
+#define BFM_HISI_LOG_ROOT_PATH "/splash2/boot_fail"
 #define BFM_HISI_LOG_UPLOADING_PATH BFM_HISI_LOG_ROOT_PATH "/" BFM_UPLOADING_DIR_NAME
 #define BFM_BFI_MAGIC_NUMBER ((unsigned int)0x42464958) /*BFIX*/
 
@@ -59,18 +57,17 @@
 #define BFM_HISI_RAMOOPS_BOOTFAIL_LOG_NAME "pmsg-ramoops-0"
 
 #define BFM_HISI_WAIT_FOR_LOG_PART_TIMEOUT (40)
+#define BFM_HISI_WAIT_FOR_VERSION_PART_TIMEOUT (40)
 #define BFM_BFI_PART_MAX_COUNT (2)
 
 #define BFM_MAX_U32 (0xFFFFFFFFU)
+#define BFM_MAX_INT_NUMBER_LEN (21)
 #define BFM_HISI_PWR_KEY_PRESS_KEYWORD "power key press interrupt"
-#define BFM_BOOT_SUCCESS_TIME_IN_KENREL ((long long)60) /* unit: second */
+#define BFM_BOOT_SUCCESS_TIME_IN_KENREL ((long long)40000000) /* unit: microsecond */
+#define BFM_US_PER_SEC ((long long)1000000)
+#define BFM_MS_PER_SEC ((long long)1000)
 #define BFM_DATAREADY_PATH "/proc/data-ready"
-
-#define BFM_SUB_BOOTFAIL_ADDR HISI_SUB_RESERVED_UNUSED_PHYMEM_BASE
-#define BFM_SUB_BOOTFAIL_MAGIC_NUM_ADDR ((void *)BFM_SUB_BOOTFAIL_ADDR)
-#define BFM_SUB_BOOTFAIL_NUM_ADDR ((void *)(BFM_SUB_BOOTFAIL_MAGIC_NUM_ADDR + sizeof(unsigned int)))
-#define BFM_SUB_BOOTFAIL_COUNT_ADDR ((void *)(BFM_SUB_BOOTFAIL_NUM_ADDR + sizeof(unsigned int)))
-#define BFM_SUB_BOOTFAIL_MAGIC_NUMBER ((unsigned int)0x42464E4F) /*BFNO*/
+#define BFM_POWERDOWN_CHARGE_KEYWORD "powerdown charge is true"
 
 
 /*----local prototypes----------------------------------------------------------------*/
@@ -115,10 +112,6 @@ typedef enum
     MODID_BFM_NATIVE_START,
     MODID_BFM_NATIVE_SECURITY_FAIL,
     MODID_BFM_NATIVE_CRITICAL_SERVICE_FAIL_TO_START,
-    MODID_BFM_NATIVE_MAPLE_ESCAPE_DLOPEN_MRT,
-    MODID_BFM_NATIVE_MAPLE_ESCAPE_CRITICAL_CRASH,
-    MODID_BFM_NATIVE_MAPLE_CRITICAL_CRASH_MYGOTE_DATA,
-    MODID_BFM_NATIVE_MAPLE_CRITICAL_CRASH_SYSTEMSERVER_DATA,
     MODID_BFM_NATIVE_END,
     MODID_BFM_NATIVE_DATA_START,
     MODID_BFM_NATIVE_SYS_MOUNT_FAIL,
@@ -135,7 +128,6 @@ typedef enum
     MODID_BFM_FRAMEWORK_LEVEL_END,
     MODID_BFM_FRAMEWORK_PACKAGE_MANAGER_SETTING_FILE_DAMAGED,
     MODID_BFM_BOOTUP_SLOWLY,
-    MODID_BFM_HARDWARE_FAULT,
     MODID_BFM_END              = HISI_BB_MOD_BFM_END
 } bfm_hisi_modid_for_bfmr;
 
@@ -161,12 +153,6 @@ typedef struct fastboot_log_header
     unsigned int log_start;
     unsigned int log_offset;
 } fastboot_log_header_t;
-
-typedef struct
-{
-    bfmr_hardware_fault_type_e bfmr_fault_type;
-    unsigned long hisi_fault_type;
-} bfmr_hw_fault_map_table_t;
 
 
 /*----local variables-----------------------------------------------------------------*/
@@ -244,7 +230,7 @@ static bfmr_stagecode_to_hisi_keypoint_t s_bfmr_stagecode_hisi_keypoint_map_tbl[
 static bfmr_bootfail_errno_to_hisi_modid_t s_bfmr_errno_to_hisi_modid_map_tbl[] = {
     {KERNEL_BOOT_TIMEOUT, MODID_BFM_BOOT_TIMEOUT},
 
-    {SYSTEM_MOUNT_FAIL, (unsigned int)MODID_BFM_NATIVE_SYS_MOUNT_FAIL},
+    {SYSTEM_MOUNT_FAIL, MODID_BFM_NATIVE_SYS_MOUNT_FAIL},
     {SECURITY_FAIL, MODID_BFM_NATIVE_SECURITY_FAIL},
     {CRITICAL_SERVICE_FAIL_TO_START, MODID_BFM_NATIVE_CRITICAL_SERVICE_FAIL_TO_START},
     {DATA_MOUNT_FAILED_AND_ERASED, MODID_BFM_NATIVE_DATA_MOUNT_FAILED_AND_ERASED},
@@ -258,54 +244,43 @@ static bfmr_bootfail_errno_to_hisi_modid_t s_bfmr_errno_to_hisi_modid_map_tbl[] 
     {VM_OAT_FILE_DAMAGED, MODID_BFM_FRAMEWORK_VM_OAT_FILE_DAMAGED},
     {PACKAGE_MANAGER_SETTING_FILE_DAMAGED, MODID_BFM_FRAMEWORK_PACKAGE_MANAGER_SETTING_FILE_DAMAGED},
     {BOOTUP_SLOWLY, MODID_BFM_BOOTUP_SLOWLY},
-    {BFM_HARDWARE_FAULT, MODID_BFM_HARDWARE_FAULT},
-    {MAPLE_ESCAPE_DLOPEN_MRT, MODID_BFM_NATIVE_MAPLE_ESCAPE_DLOPEN_MRT},
-    {MAPLE_ESCAPE_CRITICAL_CRASH, MODID_BFM_NATIVE_MAPLE_ESCAPE_CRITICAL_CRASH},
-    {MAPLE_CRITICAL_CRASH_MYGOTE_DATA, MODID_BFM_NATIVE_MAPLE_CRITICAL_CRASH_MYGOTE_DATA},
-    {MAPLE_CRITICAL_CRASH_SYSTEMSERVER_DATA, MODID_BFM_NATIVE_MAPLE_CRITICAL_CRASH_SYSTEMSERVER_DATA},
 
     //TBD: add more bootErrNo from kernel and application level.
 };
 
 struct rdr_exception_info_s s_rdr_excetion_info_for_bfmr[] = {
     {
-        {0, 0}, (u32)MODID_BFM_BOOT_TIMEOUT, (u32)MODID_BFM_BOOT_TIMEOUT, RDR_ERR,
+        {0, 0}, MODID_BFM_BOOT_TIMEOUT, MODID_BFM_BOOT_TIMEOUT, RDR_ERR,
         RDR_REBOOT_NOW, RDR_AP | RDR_BFM, RDR_AP, RDR_AP,
-        (u32)RDR_REENTRANT_DISALLOW, (u32)BFM_S_BOOT_TIMEOUT, 0, (u32)RDR_UPLOAD_YES, "bfm", "bfm-boot-TO",
+        RDR_REENTRANT_DISALLOW, BFM_S_BOOT_TIMEOUT, RDR_UPLOAD_YES, "bfm", "bfm-boot-TO",
         0, 0, 0
     },
 
     {
-        {0, 0}, (u32)MODID_BFM_NATIVE_START, (u32)MODID_BFM_NATIVE_END, RDR_ERR,
+        {0, 0}, MODID_BFM_NATIVE_START, MODID_BFM_NATIVE_END, RDR_ERR,
         RDR_REBOOT_NOW, RDR_AP | RDR_BFM, RDR_AP, RDR_AP,
-        (u32)RDR_REENTRANT_DISALLOW, (u32)BFM_S_NATIVE_BOOT_FAIL, 0, (u32)RDR_UPLOAD_YES, "bfm", "bfm-boot-TO",
+        RDR_REENTRANT_DISALLOW, BFM_S_BOOT_NATIVE_BOOT_FAIL, RDR_UPLOAD_YES, "bfm", "bfm-boot-TO",
         0, 0, 0
     },
 
     {
-        {0, 0}, (u32)MODID_BFM_NATIVE_DATA_START, (u32)MODID_BFM_NATIVE_DATA_END, RDR_ERR,
+        {0, 0}, MODID_BFM_NATIVE_DATA_START, MODID_BFM_NATIVE_DATA_END, RDR_ERR,
         RDR_REBOOT_NOW, RDR_AP | RDR_BFM, RDR_AP, RDR_AP,
-        (u32)RDR_REENTRANT_DISALLOW,(u32) BFM_S_NATIVE_DATA_FAIL, 0, (u32)RDR_UPLOAD_YES, "bfm", "bfm-boot-TO",
+        RDR_REENTRANT_DISALLOW, BFM_S_BOOT_NATIVE_DATA_FAIL, RDR_UPLOAD_YES, "bfm", "bfm-boot-TO",
         0, 0, 0
     },
 
     {
-        {0, 0}, (u32)MODID_BFM_FRAMEWORK_LEVEL_START, (u32)MODID_BFM_FRAMEWORK_LEVEL_END, RDR_ERR,
+        {0, 0}, MODID_BFM_FRAMEWORK_LEVEL_START, MODID_BFM_FRAMEWORK_LEVEL_END, RDR_ERR,
         RDR_REBOOT_NOW, RDR_AP | RDR_BFM, RDR_AP, RDR_AP,
-        (u32)RDR_REENTRANT_DISALLOW, (u32)BFM_S_FW_BOOT_FAIL, 0, (u32)RDR_UPLOAD_YES, "bfm", "bfm-boot-TO",
+        RDR_REENTRANT_DISALLOW, BFM_S_BOOT_FRAMEWORK_BOOT_FAIL, RDR_UPLOAD_YES, "bfm", "bfm-boot-TO",
         0, 0, 0
     },
 
     {
-        {0, 0}, (u32)MODID_BFM_FRAMEWORK_PACKAGE_MANAGER_SETTING_FILE_DAMAGED, (u32)MODID_BFM_FRAMEWORK_PACKAGE_MANAGER_SETTING_FILE_DAMAGED, RDR_WARN,
+        {0, 0}, MODID_BFM_FRAMEWORK_PACKAGE_MANAGER_SETTING_FILE_DAMAGED, MODID_BFM_FRAMEWORK_PACKAGE_MANAGER_SETTING_FILE_DAMAGED, RDR_WARN,
         RDR_REBOOT_NO, RDR_AP | RDR_BFM, 0, RDR_AP,
-        (u32)RDR_REENTRANT_DISALLOW, 0, 0, (u32)RDR_UPLOAD_YES, "bfm", "bfm-boot-TO",
-        0, 0, 0
-    },
-    {
-        {0, 0}, (u32)MODID_BFM_HARDWARE_FAULT, (u32)MODID_BFM_HARDWARE_FAULT, RDR_ERR,
-        RDR_REBOOT_NOW, RDR_AP | RDR_BFM, RDR_AP, RDR_AP,
-        (u32)RDR_REENTRANT_DISALLOW, (u32)BFM_S_BOOT_TIMEOUT, 0, (u32)RDR_UPLOAD_YES, "bfm", "bfm-boot-TO",
+        RDR_REENTRANT_DISALLOW, 0, RDR_UPLOAD_YES, "bfm", "bfm-boot-TO",
         0, 0, 0
     },
 };
@@ -314,15 +289,6 @@ static DEFINE_SEMAPHORE(s_process_bottom_layer_boot_fail_sem);
 static char *s_bottom_layer_log_buf = NULL;
 static bfm_process_bootfail_param_t s_process_bootfail_param;
 static bfm_bootfail_log_saving_param_t s_bootfail_log_saving_param;
-static bfm_process_ocp_excp_param_t s_process_ocp_excp_param;
-static bool s_chipsets_is_bootup_successfully = false;
-static struct semaphore s_process_ocp_sem;
-static bfmr_hw_fault_map_table_t s_hw_fault_map_table[] = {
-    {HW_FAULT_OCP, HISI_PMIC_OCP_EVENT},
-};
-
-static bool s_is_recovery_mode = false;
-static bool s_power_off_charge = false;
 
 
 /*----global variables-----------------------------------------------------------------*/
@@ -347,6 +313,7 @@ static int bfm_register_callbacks_to_rdr(void);
 static void bfm_reregister_exceptions_to_rdr(unsigned int modid, unsigned int exec_type);
 static void bfm_register_exceptions_to_rdr(void);
 static unsigned int bfm_get_hisi_modid_according_to_bootfail_errno(bfmr_bootfail_errno_e bootfail_errno);
+static unsigned int bfm_get_bootfail_errno_according_to_hisi_modid(u32 hisi_modid);
 static int bfm_read_bfi_part_header(bfm_bfi_header_info_t *pbfi_header_info);
 static int bfm_update_bfi_part_header(bfm_bfi_header_info_t *pbfi_header_info);
 static int bfm_get_rtc_time_of_latest_bootail_log_from_dfx_part(u64 *prtc_time);
@@ -362,6 +329,10 @@ static unsigned int bfmr_capture_logcat_on_beta_version(char *buf, unsigned int 
 static unsigned int bfmr_capture_beta_kmsg(char *buf, unsigned int buf_len, char *src_log_file_path);
 static unsigned int bfmr_capture_critical_process_crash_log(char *buf, unsigned int buf_len, char *src_log_file_path);
 static unsigned int bfmr_capture_fixed_framework_bootfail_log(char *buf, unsigned int buf_len, char *src_log_file_path);
+static long long bfm_get_print_time_in_us(char *plog_start_addr, char *pkmsg);
+static long long bfm_get_power_key_press_time_in_us(char *plog_start_addr, char *power_key_press_log);
+static bool bfm_is_valid_long_press_bootfail_log(char *log_add, unsigned int log_len,
+    char *pfastboot_log_add, unsigned int fastboot_log_len);
 static int bfm_save_bootfail_log_to_fs_immediately(
     bfm_process_bootfail_param_t *process_bootfail_param,
     bfm_bootfail_log_saving_param_t *psave_param,
@@ -370,10 +341,10 @@ static int bfm_save_bootfail_log_to_fs_immediately(
 static int bfm_check_validity_of_bootfail_log_in_dfx(bfm_bfi_member_info_t *pbfi_info, u64 rtc_time);
 static int bfm_read_log_in_dfx_part(void);
 static void bfm_release_buffer_saving_dfx_log(void);
-static int bfm_add_bfi_info(bfm_bfi_member_info_t *pbfi_memeber, unsigned int bfi_memeber_len);
-static int bfm_update_save_flag_in_bfi(bfm_bfi_member_info_t *pbfi_info);
-static void bfm_sort_dfx_log_by_create_time(struct dfx_head_info *pdfx_head_info, char **paddr_buf, size_t addr_count);
-static int bfm_process_ocp_callback(struct notifier_block *self, unsigned long val, void *data);
+static bool bfmr_userdata_is_ready(void);
+static unsigned int bfm_get_latest_fastboot_log(char *pdst, unsigned int dst_size,
+    char *pfastboot_log_add, unsigned int fastboot_log_len);
+static unsigned int bfm_get_text_kmsg(char *pbuf, unsigned int buf_size, bfmr_log_src_t *src);
 
 
 /*----function definitions--------------------------------------------------------------*/
@@ -424,7 +395,7 @@ int bfm_get_boot_stage(bfmr_detail_boot_stage_e *pbfmr_bootstage)
 
     if (unlikely(NULL == pbfmr_bootstage))
     {
-        BFMR_PRINT_INVALID_PARAMS("pbfmr_bootstage.\n");
+        BFMR_PRINT_INVALID_PARAMS("pbfmr_bootstage: %p\n", pbfmr_bootstage);
         return -1;
     }
 
@@ -459,7 +430,7 @@ static unsigned int bfm_read_file(char *buf, unsigned int buf_len, char *src_log
 
     if (unlikely((NULL == buf) || (NULL == src_log_path)))
     {
-        BFMR_PRINT_INVALID_PARAMS("buf or src_log_path.\n");
+        BFMR_PRINT_INVALID_PARAMS("buf: %p src_file_path: %p\n", buf, src_log_path);
         return 0;
     }
 
@@ -585,6 +556,71 @@ static unsigned int bfmr_capture_fixed_framework_bootfail_log(char *buf, unsigne
     return bfm_read_file(buf, buf_len, src_log_file_path, 1);
 }
 
+static unsigned int bfm_get_version_type(void)
+{
+    int i;
+    unsigned int user_flag = 0;
+
+    for (i = 0; i < BFM_HISI_WAIT_FOR_VERSION_PART_TIMEOUT; i++)
+    {
+        user_flag = get_logusertype_flag();
+        if (0 != user_flag)
+        {
+            break;
+        }
+        msleep(1000);
+    }
+
+    return user_flag;
+}
+
+
+bool bfm_is_beta_version(void)
+{
+    unsigned int usertype = bfm_get_version_type();
+
+    return ((BETA_USER == usertype) || (OVERSEA_USER == usertype));
+}
+
+
+static unsigned int bfm_get_text_kmsg(char *pbuf, unsigned int buf_size, bfmr_log_src_t *src)
+{
+    unsigned int bytes_captured = 0U;
+    bfm_dfx_log_read_param_t *pdfx_log_read_param = NULL;
+
+    if (unlikely((NULL == pbuf) || (0U == buf_size) || (NULL == src)))
+    {
+        BFMR_PRINT_INVALID_PARAMS("buf: %p, src: %p\n", pbuf, src);
+        return 0U;
+    }
+
+    if (NULL == src->log_save_context)
+    {
+        return 0U;
+    }
+
+    pdfx_log_read_param = (bfm_dfx_log_read_param_t *)src->log_save_context;
+    if (pdfx_log_read_param->kernel_log_len != 0)
+    {
+        struct persistent_ram_buffer *log_header = (struct persistent_ram_buffer *)pdfx_log_read_param->kernel_log_start;
+        unsigned int new_log_size = 0U;
+        unsigned int total_log_size = 0U;
+
+        total_log_size = BFMR_MIN(log_header->size, buf_size);
+        new_log_size = BFMR_MIN(total_log_size, log_header->start);
+        memcpy(pbuf, pdfx_log_read_param->kernel_log_start + new_log_size, (unsigned long)(total_log_size - new_log_size));
+        memcpy(pbuf + (total_log_size - new_log_size), pdfx_log_read_param->kernel_log_start
+            + sizeof(struct persistent_ram_buffer), (unsigned long)new_log_size);
+        bytes_captured = total_log_size;
+    }
+    else
+    {
+        BFMR_PRINT_KEY_INFO("There is no kernel boot fail log!\n");
+    }
+
+    return bytes_captured;
+}
+
 
 static unsigned int bfm_copy_user_log(char *buf, unsigned int buf_len, bfm_process_bootfail_param_t *pparam, bool from_begin)
 {
@@ -596,11 +632,11 @@ static unsigned int bfm_copy_user_log(char *buf, unsigned int buf_len, bfm_proce
         return 0U;
     }
 
-    bytes_captured = BFMR_MIN(buf_len, pparam->user_space_log_read_len);
-    memcpy(buf, pparam->user_space_log_buf + (from_begin ? 0 : ((pparam->user_space_log_read_len <= buf_len)
-        ? (0) : (pparam->user_space_log_read_len - buf_len))), bytes_captured);
-    BFMR_PRINT_KEY_INFO("Copy data from previous read data!buf_len: %u, file len: %ld!\n", buf_len, pparam->user_space_log_read_len);
-    pparam->user_space_log_read_len = 0L;
+    bytes_captured = BFMR_MIN(buf_len, pparam->user_space_read_len);
+    memcpy(buf, pparam->user_space_log_buf + (from_begin ? 0 : ((pparam->user_space_read_len <= buf_len)
+        ? (0) : (pparam->user_space_read_len - buf_len))), bytes_captured);
+    BFMR_PRINT_KEY_INFO("Copy data from previous read data!buf_len: %u, file len: %ld!\n", buf_len, pparam->user_space_read_len);
+    pparam->user_space_read_len = 0L;
 
     return bytes_captured;
 }
@@ -622,12 +658,13 @@ static unsigned int bfm_copy_user_log(char *buf, unsigned int buf_len, bfm_proce
 unsigned int bfmr_capture_log_from_system(char *buf, unsigned int buf_len, bfmr_log_src_t *src, int timeout)
 {
     unsigned int bytes_captured = 0U;
+    unsigned int usertype = 0;
     bfm_dfx_log_read_param_t *pdfx_log_read_param = NULL;
     bfm_process_bootfail_param_t *pparam = NULL;
 
     if (unlikely((NULL == buf) || (NULL == src)))
     {
-        BFMR_PRINT_INVALID_PARAMS("buf or src.\n");
+        BFMR_PRINT_INVALID_PARAMS("buf: %p, src: %p\n", buf, src);
         return 0U;
     }
 
@@ -665,8 +702,8 @@ unsigned int bfmr_capture_log_from_system(char *buf, unsigned int buf_len, bfmr_
             pdfx_log_read_param = (bfm_dfx_log_read_param_t *)src->log_save_context;
             if (pdfx_log_read_param->bl2_log_len != 0)
             {
-                bytes_captured = BFMR_MIN(pdfx_log_read_param->bl2_log_len, buf_len);
-                memcpy((void *)buf, (void *)pdfx_log_read_param->bl2_log_start, bytes_captured);
+                bytes_captured = bfm_get_latest_fastboot_log(buf, buf_len,
+                    pdfx_log_read_param->bl2_log_start, pdfx_log_read_param->bl2_log_len);
             }
             else
             {
@@ -713,21 +750,8 @@ unsigned int bfmr_capture_log_from_system(char *buf, unsigned int buf_len, bfmr_
     case LOG_TYPE_TEXT_KMSG:
         {
             /* get text kmsg on commercial version */
-            if (NULL == src->log_save_context)
-            {
-                break;
-            }
+            bytes_captured = bfm_get_text_kmsg(buf, buf_len, src);
 
-            pdfx_log_read_param = (bfm_dfx_log_read_param_t *)src->log_save_context;
-            if (pdfx_log_read_param->kernel_log_len != 0)
-            {
-                bytes_captured = BFMR_MIN(pdfx_log_read_param->kernel_log_len, buf_len);
-                memcpy((void *)buf, (void *)pdfx_log_read_param->kernel_log_start, bytes_captured);
-            }
-            else
-            {
-                BFMR_PRINT_KEY_INFO("There is no Kernel boot fail log!\n");
-            }
             break;
         }
     case LOG_TYPE_RAMOOPS:
@@ -772,37 +796,37 @@ unsigned int bfmr_capture_log_from_system(char *buf, unsigned int buf_len, bfmr_
         }
     case LOG_TYPE_CRITICAL_PROCESS_CRASH:
         {
-            bytes_captured = (NULL == pparam || pparam->user_space_log_read_len <= 0) ? bfmr_capture_critical_process_crash_log(
+            bytes_captured = (NULL == pparam || pparam->user_space_read_len <= 0) ? bfmr_capture_critical_process_crash_log(
                 buf, buf_len, src->src_log_file_path) : (bfm_copy_user_log(buf, buf_len, pparam, false));
             break;
         }
     case LOG_TYPE_VM_TOMBSTONES:
         {
-            bytes_captured = (NULL == pparam || pparam->user_space_log_read_len <= 0) ? bfmr_capture_tombstone(
+            bytes_captured = (NULL == pparam || pparam->user_space_read_len <= 0) ? bfmr_capture_tombstone(
                 buf, buf_len, src->src_log_file_path) : (bfm_copy_user_log(buf, buf_len, pparam, true));
             break;
         }
     case LOG_TYPE_VM_CRASH:
         {
-            bytes_captured = (NULL == pparam || pparam->user_space_log_read_len <= 0) ? bfmr_capture_vm_crash(
+            bytes_captured = (NULL == pparam || pparam->user_space_read_len <= 0) ? bfmr_capture_vm_crash(
                 buf, buf_len, src->src_log_file_path) : (bfm_copy_user_log(buf, buf_len, pparam, false));
             break;
         }
     case LOG_TYPE_VM_WATCHDOG:
         {
-            bytes_captured = (NULL == pparam || pparam->user_space_log_read_len <= 0) ? bfmr_capture_vm_watchdog(
+            bytes_captured = (NULL == pparam || pparam->user_space_read_len <= 0) ? bfmr_capture_vm_watchdog(
                 buf, buf_len, src->src_log_file_path) : (bfm_copy_user_log(buf, buf_len, pparam, false));
             break;
         }
     case LOG_TYPE_NORMAL_FRAMEWORK_BOOTFAIL_LOG:
         {
-            bytes_captured = (NULL == pparam || pparam->user_space_log_read_len <= 0) ? bfmr_capture_normal_framework_bootfail_log(
+            bytes_captured = (NULL == pparam || pparam->user_space_read_len <= 0) ? bfmr_capture_normal_framework_bootfail_log(
                 buf, buf_len, src->src_log_file_path) : (bfm_copy_user_log(buf, buf_len, pparam, true));
             break;
         }
     case LOG_TYPE_FIXED_FRAMEWORK_BOOTFAIL_LOG:
         {
-            bytes_captured = (NULL == pparam || pparam->user_space_log_read_len <= 0) ? bfmr_capture_fixed_framework_bootfail_log(
+            bytes_captured = (NULL == pparam || pparam->user_space_read_len <= 0) ? bfmr_capture_fixed_framework_bootfail_log(
                 buf, buf_len, BFM_FRAMEWORK_BOOTFAIL_LOG_PATH) : (bfm_copy_user_log(buf, buf_len, pparam, true));
             break;
         }
@@ -862,11 +886,11 @@ static int bfm_check_validity_of_bootfail_log_in_dfx(bfm_bfi_member_info_t *pbfi
     }
 
     /* seek the header in the beginning of the BFI part */
-    seek_result = sys_lseek(fd, BFM_BFI_HEADER_SIZE, SEEK_SET);
-    if (seek_result != (long)BFM_BFI_HEADER_SIZE)
+    seek_result = sys_lseek(fd, BFM_BFI_MEMBER_SIZE, SEEK_SET);
+    if (seek_result != (long)BFM_BFI_MEMBER_SIZE)
     {
         BFMR_PRINT_ERR("sys_lseek [%s] failed!, seek_results: %ld ,it must be: %ld\n",
-            bfi_part_full_path, seek_result, (long)BFM_BFI_HEADER_SIZE);
+            bfi_part_full_path, seek_result, (long)BFM_BFI_MEMBER_SIZE);
         goto __out;
     }
 
@@ -883,7 +907,7 @@ static int bfm_check_validity_of_bootfail_log_in_dfx(bfm_bfi_member_info_t *pbfi
         memcpy((void *)pbfi_info, (void *)pdata_buf, sizeof(bfm_bfi_member_info_t));
         if ((pbfi_info->rtcValue == rtc_time) && (rtc_time != 0ULL))
         {
-            BFMR_PRINT_KEY_INFO("RTC time in BFI[%d]: %llx, RTC time in DFX: %llx\n", i, pbfi_info->rtcValue, rtc_time);
+            BFMR_PRINT_KEY_INFO("RTC time in BFI[%d]: %llu, RTC time in DFX: %llu\n", i, pbfi_info->rtcValue, rtc_time);
             ret = 0;
             break;
         }
@@ -906,135 +930,154 @@ __out:
 }
 
 
-static int bfm_update_save_flag_in_bfi(bfm_bfi_member_info_t *pbfi_info)
+static long long bfm_get_print_time_in_us(char *plog_start_addr, char *pkmsg)
 {
-    bfm_bfi_member_info_t *pbfi_info_local = NULL;
-    char *bfi_part_full_path = NULL;
-    long bytes_read = 0L;
-    long bytes_write = 0L;
-    long seek_result = 0L;
-    mm_segment_t old_fs;
-    int ret = -1;
-    int fd = -1;
-    int i = 0;
+    bfm_kernel_print_time_t print_time = {0};
 
-    old_fs = get_fs();
-    set_fs(KERNEL_DS);
-    bfi_part_full_path = (char *)bfmr_malloc(BFMR_DEV_FULL_PATH_MAX_LEN + 1);
-    if (NULL == bfi_part_full_path)
+    if (unlikely((NULL == pkmsg)))
     {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        goto __out;
-    }
-    memset((void *)bfi_part_full_path, 0, (BFMR_DEV_FULL_PATH_MAX_LEN + 1));
-
-    pbfi_info_local = (bfm_bfi_member_info_t *)bfmr_malloc(BFM_BFI_MEMBER_SIZE);
-    if (NULL == pbfi_info_local)
-    {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        goto __out;
-    }
-    memset((void *)pbfi_info_local, 0, BFM_BFI_MEMBER_SIZE);
-
-    ret = bfm_get_bfi_part_full_path(bfi_part_full_path, BFMR_DEV_FULL_PATH_MAX_LEN);
-    if (0 != ret)
-    {
-        BFMR_PRINT_ERR("failed ot get full path of bfi part!\n");
-        goto __out;
+        BFMR_PRINT_INVALID_PARAMS("power_key_press_log is NULL\n");
+        return 0LL;
     }
 
-    ret = -1;
-    fd = sys_open(bfi_part_full_path, O_RDWR, BFMR_FILE_LIMIT);
-    if (fd < 0)
+    memset((void *)&print_time, 0, sizeof(print_time));
+    while (pkmsg >= plog_start_addr)
     {
-        BFMR_PRINT_ERR("sys_open [%s] failed [ret = %d]\n", bfi_part_full_path, fd);
-        goto __out;
-    }
-
-    /* seek the header in the beginning of the BFI part */
-    seek_result = sys_lseek(fd, BFM_BFI_HEADER_SIZE, SEEK_SET);
-    if (seek_result != (long)BFM_BFI_HEADER_SIZE)
-    {
-        BFMR_PRINT_ERR("sys_lseek [%s] failed!, seek_results: %ld ,it must be: %ld\n",
-            bfi_part_full_path, seek_result, (long)BFM_BFI_HEADER_SIZE);
-        goto __out;
-    }
-
-    for (i = 0; i < BFM_BFI_RECORD_TOTAL_COUNT; i++)
-    {
-        memset((void *)pbfi_info_local, 0, BFM_BFI_MEMBER_SIZE);
-        bytes_read = bfmr_full_read(fd, (char *)pbfi_info_local, BFM_BFI_MEMBER_SIZE);
-        if (bytes_read < 0)
+        if ('\n' == *pkmsg)
         {
-            BFMR_PRINT_ERR("bfmr_full_read [%s] failed! [ret = %ld]\n", bfi_part_full_path, bytes_read);
-            goto  __out;
-        }
-
-        if (pbfi_info->rtcValue == pbfi_info_local->rtcValue)
-        {
-            seek_result = sys_lseek(fd, (long)(BFM_BFI_HEADER_SIZE + i * BFM_BFI_MEMBER_SIZE), SEEK_SET);/*lint !e647 */
-            if (seek_result != (long)(BFM_BFI_HEADER_SIZE + i * BFM_BFI_MEMBER_SIZE))/*lint !e647 */
-            {
-                BFMR_PRINT_ERR("sys_lseek [%s] failed!, seek_results: %ld ,it must be: %ld\n",
-                    bfi_part_full_path, seek_result, (long)(BFM_BFI_HEADER_SIZE + i * BFM_BFI_MEMBER_SIZE));/*lint !e647 */
-                goto __out;
-            }
-
-            bytes_write = bfmr_full_write(fd, (char *)pbfi_info, BFM_BFI_MEMBER_SIZE);
-            if (bytes_write <= 0L)
-            {
-                BFMR_PRINT_ERR("bfmr_full_write [%s] failed! [ret = %ld]\n", bfi_part_full_path, bytes_write);
-                goto  __out;
-            }
-            ret = 0;
+            sscanf(pkmsg + 1, "[%lld.%llds]", &print_time.integer_part, &print_time.decimal_part);
             break;
+        }
+        pkmsg--;
+    }
+
+    return (BFM_US_PER_SEC * print_time.integer_part + print_time.decimal_part);
+}
+
+
+static long long bfm_get_power_key_press_time_in_us(char *plog_start_addr, char *power_key_press_log)
+{
+    return bfm_get_print_time_in_us(plog_start_addr, power_key_press_log);
+}
+
+
+static unsigned int bfm_get_latest_fastboot_log(char *pdst, unsigned int dst_size,
+    char *pfastboot_log_add, unsigned int fastboot_log_len)
+{
+    fastboot_log_header_t *pfastboot_log_header = (fastboot_log_header_t *)pfastboot_log_add;
+    unsigned int latest_log_len = 0U;
+
+    if (unlikely((NULL == pdst) || (0U == dst_size) || (NULL == pfastboot_log_add) || (0U == fastboot_log_len)))
+    {
+        BFMR_PRINT_INVALID_PARAMS("pdst is NULL or dst_size is 0\n");
+        return 0U;
+    }
+
+    BFMR_PRINT_KEY_INFO("fastboot_log_start: %u, fastboot_log_offset: %u, fastboot_log_len: %u\n",
+        pfastboot_log_header->log_start, pfastboot_log_header->log_offset, fastboot_log_len);
+    if ((pfastboot_log_header->log_start > fastboot_log_len) || (pfastboot_log_header->log_offset > fastboot_log_len))
+    {
+        return 0U;
+    }
+
+    if (pfastboot_log_header->log_start >= pfastboot_log_header->log_offset)
+    {
+        latest_log_len = fastboot_log_len - pfastboot_log_header->log_start;
+        memcpy(pdst, pfastboot_log_add + pfastboot_log_header->log_start, latest_log_len);
+        memcpy(pdst + latest_log_len, pfastboot_log_add + sizeof(fastboot_log_header_t),
+            (pfastboot_log_header->log_offset - sizeof(fastboot_log_header_t)));
+        latest_log_len += (pfastboot_log_header->log_offset - sizeof(fastboot_log_header_t));
+    }
+    else
+    {
+        latest_log_len = pfastboot_log_header->log_offset - pfastboot_log_header->log_start;
+        memcpy(pdst, pfastboot_log_add + pfastboot_log_header->log_start, latest_log_len);
+    }
+
+    return latest_log_len;
+}
+
+
+static bool bfm_is_valid_long_press_bootfail_log(char *log_add, unsigned int log_len,
+    char *pfastboot_log_add, unsigned int fastboot_log_len)
+{
+    char *ptemp = NULL;
+    char *pkey_press_log = NULL;
+    long long key_press_time = 0LL;
+    unsigned int total_log_size = 0;
+    unsigned int new_log_size = 0;
+    struct persistent_ram_buffer *log_header = (struct persistent_ram_buffer *)log_add;
+    bool is_valid_long_press_bootfail_log = true;
+
+    if (unlikely((NULL == log_add) || (0U == log_len) || (NULL == pfastboot_log_add) || (0U == fastboot_log_len)))
+    {
+        BFMR_PRINT_INVALID_PARAMS("log_add is NULL or log_len is 0\n");
+        goto __out;
+    }
+
+    total_log_size = BFMR_MIN(log_header->size, LAST_KMSG_SIZE - sizeof(struct persistent_ram_buffer));
+    new_log_size = BFMR_MIN(total_log_size, log_header->start);
+    ptemp = (char *)bfmr_malloc((unsigned long)(total_log_size + 1));
+    if (NULL == ptemp)
+    {
+        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
+        goto __out;
+    }
+    memset((void *)ptemp, 0, (unsigned long)(total_log_size + 1));
+
+    log_add += sizeof(struct persistent_ram_buffer);
+    memcpy(ptemp, log_add + new_log_size, (unsigned long)(total_log_size - new_log_size));
+    memcpy(ptemp + (total_log_size - new_log_size), log_add, (unsigned long)new_log_size);
+    pkey_press_log = bfmr_reverse_find_string(ptemp, BFM_HISI_PWR_KEY_PRESS_KEYWORD);
+    if (NULL != pkey_press_log)
+    {
+        key_press_time = bfm_get_power_key_press_time_in_us(ptemp, pkey_press_log);
+    }
+
+    BFMR_PRINT_KEY_INFO("The long press occurs @%lldms!\n", key_press_time / (BFM_MS_PER_SEC));
+    is_valid_long_press_bootfail_log = (key_press_time <= BFM_BOOT_SUCCESS_TIME_IN_KENREL) ? (false) : (true);
+
+    /* check validity of log in fastboot_log further */
+    if (is_valid_long_press_bootfail_log)
+    {
+        unsigned int keyword_len = strlen(BFM_POWERDOWN_CHARGE_KEYWORD);
+        unsigned int usefull_log_len = 0U;
+        char *plog = NULL;
+
+        /* alloc buffer */
+        bfmr_free(ptemp);
+        total_log_size = BFMR_MIN(fastboot_log_len, FASTBOOTLOG_SIZE);
+        ptemp = (char *)bfmr_malloc((unsigned long)(total_log_size + 1));
+        if (NULL == ptemp)
+        {
+            BFMR_PRINT_ERR("bfmr_malloc failed!\n");
+            goto __out;
+        }
+        memset((void *)ptemp, 0, (unsigned long)(total_log_size + 1));
+
+        /* get usefull fastboot log and find the powerdown charge keyword */
+        usefull_log_len = bfm_get_latest_fastboot_log(ptemp, total_log_size, pfastboot_log_add, fastboot_log_len);
+        plog = ptemp;
+        while (usefull_log_len > keyword_len)
+        {
+            if (0 == memcmp(plog, BFM_POWERDOWN_CHARGE_KEYWORD, keyword_len))
+            {
+                BFMR_PRINT_ERR("This is powerdown charge log!\n");
+                is_valid_long_press_bootfail_log = false;
+                break;
+            }
+            plog++;
+            usefull_log_len--;
         }
     }
 
 __out:
-    if (fd >= 0)
+    if (NULL != ptemp)
     {
-        sys_close(fd);
-    }
-    set_fs(old_fs);
-    bfmr_free(bfi_part_full_path);
-    bfmr_free(pbfi_info_local);
-    BFMR_PRINT_KEY_INFO("update log-saving flag in bfi part %s!\n", (0 == ret) ? ("successfully") : ("failed"));
-
-    return ret;
-}
-
-
-static void bfm_sort_dfx_log_by_create_time(struct dfx_head_info *pdfx_head_info, char **paddr_buf, size_t addr_count)
-{
-    int log_max_count = 0;
-    int i = 0;
-    int j = 0;
-
-    if (unlikely((NULL == pdfx_head_info) || (NULL == paddr_buf)))
-    {
-        BFMR_PRINT_INVALID_PARAMS("pdfx_head_info or paddr_buf.\n");
-        return;
+        bfmr_free(ptemp);
     }
 
-    log_max_count = BFMR_MIN(addr_count, BFMR_MIN(TOTAL_NUMBER, pdfx_head_info->total_number));/*lint !e574 */
-    for (i = 0; i < log_max_count; i++)
-    {
-        paddr_buf[i] = (char *)((char *)pdfx_head_info + pdfx_head_info->every_number_addr[i]);
-    }
-
-    for (i = 0; i < log_max_count; i++)
-    {
-        for (j = 0; j < (log_max_count - i - 1); j++)
-        {
-            if (((struct every_number_info *)(paddr_buf[j + 1]))->rtc_time < ((struct every_number_info *)(paddr_buf[j]))->rtc_time)/*lint !e679 */
-            {
-                char *ptemp_addr = paddr_buf[j];
-                paddr_buf[j] = paddr_buf[j + 1];/*lint !e679 */
-                paddr_buf[j + 1] = ptemp_addr;/*lint !e679 */
-            }
-        }
-    }
+    return is_valid_long_press_bootfail_log;
 }
 
 
@@ -1045,12 +1088,10 @@ static int bfm_save_bootfail_log_to_fs_immediately(
     int save_bottom_layer_bootfail_log)
 {
     int ret = -1;
-    int log_idx = -1;
-    int log_max_count = 0;
+    int last_number = -1;
     struct every_number_info *pdfx_log_info;
     bfm_bfi_member_info_t *pbfi_info = NULL;
     bfm_dfx_log_read_param_t *pdfx_log_read_param = NULL;
-    char *paddr_buf[TOTAL_NUMBER] = {0};
 
     BFMR_PRINT_ENTER();
     if (unlikely((NULL == process_bootfail_param)
@@ -1079,24 +1120,16 @@ static int bfm_save_bootfail_log_to_fs_immediately(
     memset((void *)pdfx_log_read_param, 0, sizeof(bfm_dfx_log_read_param_t));
 
     /* parse and save boot fail log saved in DFX part */
-    log_idx = 0;
-    log_max_count = BFMR_MIN(TOTAL_NUMBER, pdfx_head_info->total_number);
-    memset(paddr_buf, 0, sizeof(paddr_buf));
-    bfm_sort_dfx_log_by_create_time(pdfx_head_info, &(paddr_buf[0]), sizeof(paddr_buf) / sizeof(paddr_buf[0]));
-    while (log_idx < log_max_count)
+    last_number = (pdfx_head_info->cur_number - pdfx_head_info->need_save_number + TOTAL_NUMBER) % TOTAL_NUMBER;
+    while (pdfx_head_info->need_save_number > 0)
     {
-        pdfx_log_info = (struct every_number_info *)paddr_buf[log_idx];
-        BFMR_PRINT_KEY_INFO("reboot_type: %llx\n", pdfx_log_info->reboot_type);
-        memset((void *)pbfi_info, 0, (sizeof(bfm_bfi_member_info_t)));
+        pdfx_log_info = (struct every_number_info *)((char *)pdfx_head_info + pdfx_head_info->every_number_addr[last_number]);
+
+        BFMR_PRINT_KEY_INFO("need_save_number is %d, last_number is %d, reboot_type: %llx\n",
+            pdfx_head_info->need_save_number, last_number, pdfx_log_info->reboot_type);
         if (0 != bfm_check_validity_of_bootfail_log_in_dfx(pbfi_info, pdfx_log_info->rtc_time))
         {
-            BFMR_PRINT_ERR("the log in dfx is invalid, whose index is [%d], continue to check the next one\n", log_idx);
-            goto __next;
-        }
-
-        if (0 != pbfi_info->is_log_saved)
-        {
-            BFMR_PRINT_ERR("the log in dfx has been saved, continue to check the next one\n");
+            BFMR_PRINT_ERR("the log in dfx is invalid, whose index is [%d], continue to check the next one\n", last_number);
             goto __next;
         }
 
@@ -1111,10 +1144,6 @@ static int bfm_save_bootfail_log_to_fs_immediately(
         process_bootfail_param->is_user_sensible = (int)pbfi_info->isUserPerceptiable;
         process_bootfail_param->is_system_rooted = (int)pbfi_info->isSystemRooted;
         process_bootfail_param->dmd_num = pbfi_info->dmdErrNo;
-        process_bootfail_param->is_bootup_successfully = pbfi_info->is_bootup_successfully;
-        process_bootfail_param->suggested_recovery_method = pbfi_info->suggested_recovery_method;
-        process_bootfail_param->reboot_type = pbfi_info->reboot_type;
-        strncpy(process_bootfail_param->excepInfo, pbfi_info->excepInfo, sizeof(pbfi_info->excepInfo) -1);
         process_bootfail_param->log_save_context = (void *)pdfx_log_read_param;
         pdfx_log_read_param->bl1_log_start = NULL; /* TODO: captue BL1 bootfail log on HISI */
         pdfx_log_read_param->bl1_log_len = 0U; /* TODO: captue BL1 bootfail log on HISI */
@@ -1133,19 +1162,24 @@ static int bfm_save_bootfail_log_to_fs_immediately(
             pdfx_log_read_param->applogcat_log_len = 0U;
         }
         pdfx_log_read_param->save_log_after_reboot = process_bootfail_param->save_log_after_reboot;
+
+        if ((KERNEL_PRESS10S == process_bootfail_param->bootfail_errno)
+            && (!bfm_is_valid_long_press_bootfail_log(pdfx_log_read_param->kernel_log_start,
+            pdfx_log_read_param->kernel_log_len, pdfx_log_read_param->bl2_log_start, pdfx_log_read_param->bl2_log_len)))
+        {
+            BFMR_PRINT_ERR("Invalid long press log!\n");
+            goto __next;
+        }
+
         ret = psave_param->capture_and_save_bootfail_log(process_bootfail_param);
         if (0 != ret)
         {
             BFMR_PRINT_ERR("Save boot fail log failed!\n");
         }
-        else
-        {
-            pbfi_info->is_log_saved = ~0;
-            (void)bfm_update_save_flag_in_bfi(pbfi_info);
-        }
 
 __next:
-        log_idx++;
+        pdfx_head_info->need_save_number--;
+        last_number = (last_number + 1 + TOTAL_NUMBER) % TOTAL_NUMBER;
     }
 
 __out:
@@ -1179,10 +1213,11 @@ int bfm_parse_and_save_bottom_layer_bootfail_log(
 {
     int ret = -1;
     struct dfx_head_info *pdfx_head_info = (struct dfx_head_info *)buf;
+    bool find_valid_log = false;
 
     if (unlikely((NULL == process_bootfail_param) || (NULL == buf)))
     {
-        BFMR_PRINT_INVALID_PARAMS("process_bootfail_param or buf.\n");
+        BFMR_PRINT_INVALID_PARAMS("psave_param: %p, buf: %p\n", process_bootfail_param, buf);
         return -1;
     }
 
@@ -1191,24 +1226,39 @@ int bfm_parse_and_save_bottom_layer_bootfail_log(
         buf_len, bfm_get_dfx_log_length());
     down(&s_process_bottom_layer_boot_fail_sem);
     pdfx_head_info = (struct dfx_head_info *)buf;
-    BFMR_PRINT_ERR("Info of dfx part, magic: 0x%08x, it must be: 0x%08x; it can save up to %d logs!\n",
-        (unsigned int)pdfx_head_info->magic, (unsigned int)DFX_MAGIC_NUMBER, (int)TOTAL_NUMBER);
+    if ((DFX_MAGIC_NUMBER == pdfx_head_info->magic)
+        && (pdfx_head_info->need_save_number > 0)
+        && (pdfx_head_info->need_save_number <= TOTAL_NUMBER))
+    {
+        BFMR_PRINT_KEY_INFO("There are %d logs need be saved!\n", pdfx_head_info->need_save_number);
+        find_valid_log = true;
+    }
+    else
+    {
+        BFMR_PRINT_ERR("Info of dfx part, magic: 0x%08x, it must be: 0x%08x; "
+            "need_save_number:%d, it must be: (0 < need_save_number <= %d), "
+            "there is at least one is wrong\n", (unsigned int)pdfx_head_info->magic,
+            (unsigned int)DFX_MAGIC_NUMBER, pdfx_head_info->need_save_number, (int)TOTAL_NUMBER);
+    }
     up(&s_process_bottom_layer_boot_fail_sem);
 
-    /* 2. wait for the log part */
-    BFMR_PRINT_SIMPLE_INFO("============ wait for log part start =============\n");
-    if (0 != bfmr_wait_for_part_mount_with_timeout(bfm_get_bfmr_log_part_mount_point(),
-        BFM_HISI_WAIT_FOR_LOG_PART_TIMEOUT))
+    if (find_valid_log)
     {
-        BFMR_PRINT_ERR("[%s] is not ready, the boot fail logs can't be saved!\n", bfm_get_bfmr_log_part_mount_point());
-        goto __out;
-    }
-    BFMR_PRINT_SIMPLE_INFO("============ wait for log part end =============\n");
+        /* 2. wait for the log part */
+        BFMR_PRINT_SIMPLE_INFO("============ wait for log part start =============\n");
+        if (0 != bfmr_wait_for_part_mount_with_timeout(bfm_get_bfmr_log_part_mount_point(),
+            BFM_HISI_WAIT_FOR_LOG_PART_TIMEOUT))
+        {
+            BFMR_PRINT_ERR("[%s] is not ready, the boot fail logs can't be saved!\n", bfm_get_bfmr_log_part_mount_point());
+            goto __out;
+        }
+        BFMR_PRINT_SIMPLE_INFO("============ wait for log part end =============\n");
 
-    process_bootfail_param->save_log_after_reboot = true;
-    ret = bfm_save_bootfail_log_to_fs_immediately(process_bootfail_param,
-        &s_bootfail_log_saving_param, pdfx_head_info, 1);
-    BFMR_PRINT_KEY_INFO("Save boot fail log %s!\n", (0 == ret) ? ("successfully") : ("failed"));
+        process_bootfail_param->save_log_after_reboot = true;
+        ret = bfm_save_bootfail_log_to_fs_immediately(process_bootfail_param,
+            &s_bootfail_log_saving_param, pdfx_head_info, 1);
+        BFMR_PRINT_KEY_INFO("Save boot fail log %s!\n", (0 == ret) ? ("successfully") : ("failed"));
+    }
 
 __out:
     return ret; 
@@ -1237,7 +1287,7 @@ int bfmr_save_log_to_fs(char *dst_file_path, char *buf, unsigned int log_len, in
 
     if (unlikely(NULL == dst_file_path || NULL == buf))
     {
-        BFMR_PRINT_INVALID_PARAMS("dst_file_path or buf.\n");
+        BFMR_PRINT_INVALID_PARAMS("dst_file_path: %p, buf: %p\n", dst_file_path, buf);
         return -1;
     }
 
@@ -1258,15 +1308,7 @@ int bfmr_save_log_to_fs(char *dst_file_path, char *buf, unsigned int log_len, in
         goto __out;
     }
 
-    /* 2. seek file */
-    ret = sys_lseek(fd, 0, ((0 == append) ? (SEEK_SET) : (SEEK_END)));
-    if (ret < 0)
-    {
-        BFMR_PRINT_ERR("sys_lseek [%s] failed, ret: %d\n", dst_file_path, ret);
-        goto __out;
-    }
-
-    /* 3. write file */
+    /* 2. write file */
     bytes_written = bfmr_full_write(fd, buf, log_len);
     if ((long)log_len != bytes_written)
     {
@@ -1275,10 +1317,10 @@ int bfmr_save_log_to_fs(char *dst_file_path, char *buf, unsigned int log_len, in
         goto __out;
     }
 
-    /* 4. change own and mode for the file */
+    /* 3. change own and mode for the file */
     bfmr_change_own_mode(dst_file_path, BFMR_AID_ROOT, BFMR_AID_SYSTEM, BFMR_FILE_LIMIT);
 
-    /* 5. write successfully, modify the value of ret */
+    /* 4. write successfully, modify the value of ret */
     ret = 0;
 
 __out:
@@ -1315,7 +1357,7 @@ int bfmr_save_log_to_raw_part(char *raw_part_name, unsigned long long offset, ch
 
     if (unlikely(NULL == raw_part_name || NULL == buf))
     {
-        BFMR_PRINT_INVALID_PARAMS("raw_part_name or buf.\n");
+        BFMR_PRINT_INVALID_PARAMS("raw_part_name: %p, buf: %p\n", raw_part_name, buf);
         return -1;
     }
 
@@ -1365,7 +1407,7 @@ int bfmr_save_log_to_mem_buffer(char *dst_buf, unsigned int dst_buf_len, char *s
 {
     if (unlikely(NULL == dst_buf || NULL == src_buf))
     {
-        BFMR_PRINT_INVALID_PARAMS("dst_buf or src_buf.\n");
+        BFMR_PRINT_INVALID_PARAMS("dst_buf: %p, src_buf: %p\n", dst_buf, src_buf);
         return -1;
     }
 
@@ -1416,7 +1458,7 @@ static int bfm_open_bfi_part_at_latest_bfi_info(int *fd)
 
     if (unlikely(NULL == fd))
     {
-        BFMR_PRINT_INVALID_PARAMS("fd.\n");
+        BFMR_PRINT_INVALID_PARAMS("fd: %p\n", fd);
         return -1;
     }
 
@@ -1424,7 +1466,7 @@ static int bfm_open_bfi_part_at_latest_bfi_info(int *fd)
     set_fs(KERNEL_DS);
 
     /* 1. find the full path of bfi part */
-    bfi_dev_path = (char *)bfmr_malloc(BFMR_DEV_FULL_PATH_MAX_LEN);
+    bfi_dev_path = bfmr_malloc(BFMR_DEV_FULL_PATH_MAX_LEN);
     if (NULL == bfi_dev_path)
     {
         BFMR_PRINT_ERR("bfmr_malloc failed!\n");
@@ -1452,7 +1494,7 @@ static int bfm_open_bfi_part_at_latest_bfi_info(int *fd)
         goto __out;
     }
 
-    /* 2. read header of bfi */
+    /* 2. read out header of bfi */
     memset(pbfi_header, 0, BFM_BFI_HEADER_SIZE);
     bytes_read = bfmr_full_read(*fd, (char *)pbfi_header, BFM_BFI_HEADER_SIZE);
     if (bytes_read != BFM_BFI_HEADER_SIZE)
@@ -1461,7 +1503,7 @@ static int bfm_open_bfi_part_at_latest_bfi_info(int *fd)
         goto __out;
     }
 
-    /* 3. read out latest member info */
+    /* 3. read out latest member infor */
     cur_number = pbfi_header->cur_number;
     cur_number = ((0 == cur_number) ? (BFM_BFI_RECORD_TOTAL_COUNT - 1) : (cur_number - 1));
     offset = BFM_BFI_HEADER_SIZE + cur_number * pbfi_header->every_number_size;
@@ -1471,13 +1513,12 @@ static int bfm_open_bfi_part_at_latest_bfi_info(int *fd)
         BFMR_PRINT_ERR("lseek [%s] fail[%d]\n", bfi_dev_path, ret);
         goto __out;
     }
-    else
-    {
-        ret = 0;
-    }
+
+    ret = 0;
 
 __out:
     set_fs(old_fs);
+
     bfmr_free(bfi_dev_path);
     bfmr_free(pbfi_header);
 
@@ -1494,7 +1535,7 @@ static int bfm_read_latest_bfi_info(bfm_bfi_member_info_t *pbfi_memeber, unsigne
 
     if (unlikely(NULL == pbfi_memeber))
     {
-        BFMR_PRINT_INVALID_PARAMS("pbfi_memeber.\n");
+        BFMR_PRINT_INVALID_PARAMS("path_buf: %p\n", pbfi_memeber);
         return -1;
     }
 
@@ -1540,12 +1581,13 @@ static int bfm_update_latest_bfi_info(bfm_bfi_member_info_t *pbfi_memeber, unsig
 
     if (unlikely(NULL == pbfi_memeber))
     {
-        BFMR_PRINT_INVALID_PARAMS("pbfi_memeber.\n");
+        BFMR_PRINT_INVALID_PARAMS("pbfi_memeber: %p\n", pbfi_memeber);
         return -1;
     }
 
     old_fs = get_fs();
-    set_fs(KERNEL_DS);/*lint !e501 */
+    set_fs(KERNEL_DS);
+
     if (0 != bfm_open_bfi_part_at_latest_bfi_info(&fd))
     {
         BFMR_PRINT_ERR("open bfi part failed!\n");
@@ -1588,7 +1630,7 @@ static int bfm_get_bfi_part_full_path(char *path_buf, unsigned int path_buf_len)
 
     if (unlikely(NULL == path_buf))
     {
-        BFMR_PRINT_INVALID_PARAMS("path_buf.\n");
+        BFMR_PRINT_INVALID_PARAMS("path_buf: %p\n", path_buf);
         return -1;
     }
 
@@ -1617,22 +1659,20 @@ static int bfm_get_bfi_part_full_path(char *path_buf, unsigned int path_buf_len)
     }
 
     return ret;
-}/*lint !e429 */
+}
 
 
 int bfm_capture_and_save_do_nothing_bootfail_log(bfm_process_bootfail_param_t *param)
 {
     int ret = -1;
     unsigned int modid;
-    bfm_bfi_member_info_t *pbfi_memeber = NULL;
 
     if (unlikely(NULL == param))
     {
-        BFMR_PRINT_INVALID_PARAMS("param.\n");
+        BFMR_PRINT_INVALID_PARAMS("param: %p\n", param);
         return -1;
     }
 
-    /* save log to dfx part */
     systemerror_save_log2dfx(param->reboot_type);
     modid = bfm_get_hisi_modid_according_to_bootfail_errno(param->bootfail_errno);
     BFMR_PRINT_KEY_INFO("modid: 0x%x bootfail_errno: 0x%x\n", modid, param->bootfail_errno);
@@ -1641,12 +1681,9 @@ int bfm_capture_and_save_do_nothing_bootfail_log(bfm_process_bootfail_param_t *p
         BFMR_PRINT_ERR("modid: is 0x%x\n", modid);
         return -1;
     }
-
-    /* save log to bfi part */
     bfm_save_log_to_bfi_part(modid, param);
     (void)bfm_read_log_in_dfx_part();
 
-    /* save log from dfx and bfi part to log part */
     ret = bfm_save_bootfail_log_to_fs_immediately(param, &s_bootfail_log_saving_param,
         (struct dfx_head_info *)s_bottom_layer_log_buf, 0);
     if (0 != ret)
@@ -1656,39 +1693,21 @@ int bfm_capture_and_save_do_nothing_bootfail_log(bfm_process_bootfail_param_t *p
         return -1;
     }
 
-    /* release buffer */
     bfm_release_buffer_saving_dfx_log();
 
-    /* read latest bfi info */
-    pbfi_memeber = (bfm_bfi_member_info_t *)bfmr_malloc(BFM_BFI_MEMBER_SIZE);
-    if (NULL == pbfi_memeber)
-    {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        goto __out;
-    }
-    memset(pbfi_memeber, 0, BFM_BFI_MEMBER_SIZE);/*lint !e669 */
-
-    ret = bfm_read_latest_bfi_info(pbfi_memeber, BFM_BFI_MEMBER_SIZE);
-    if (0 != ret)
-    {
-        BFMR_PRINT_ERR("bfm_read_latest_bfi_info failed!\n");
-        goto __out;
-    }
-
-    /*  update the RTC time to an invalid value in case of saving log repeatedly */
-    BFMR_PRINT_ERR("pbfi_memeber->rtcValue: %llx\n", pbfi_memeber->rtcValue);
-    pbfi_memeber->rtcValue = (unsigned int)(-1);
-    ret = bfm_update_latest_bfi_info(pbfi_memeber, BFM_BFI_MEMBER_SIZE);
-    if (0 != ret)
-    {
-        BFMR_PRINT_ERR("update latest bfi info\n");
-        goto __out;
-    }
-
-__out:
-    bfmr_free(pbfi_memeber);
-
     return ret;
+}
+
+static bool bfmr_userdata_is_ready(void)
+{
+    char data[BFM_MAX_INT_NUMBER_LEN] = {0};
+    int userdata_is_ready = 0;
+
+    (void)bfmr_full_read_with_file_path(BFM_DATAREADY_PATH, data, sizeof(char));
+    userdata_is_ready = (int)simple_strtol(data, NULL, 10);
+    BFMR_PRINT_KEY_INFO("userdata_is_ready: %d\n", userdata_is_ready);
+
+    return (0 != userdata_is_ready);
 }
 
 /**
@@ -1707,7 +1726,7 @@ int bfm_platform_process_boot_fail(bfm_process_bootfail_param_t *param)
 
     if (unlikely(NULL == param))
     {
-        BFMR_PRINT_INVALID_PARAMS("param.\n");
+        BFMR_PRINT_INVALID_PARAMS("param: %p\n", param);
         return -1;
     }
 
@@ -1720,15 +1739,16 @@ int bfm_platform_process_boot_fail(bfm_process_bootfail_param_t *param)
         return -1;
     }
 
-    if (!bfmr_is_part_ready_without_timeout(PART_DFX)
-        || !bfmr_is_part_ready_without_timeout(PART_BOOTFAIL_INFO)
-        || !bfmr_is_part_ready_without_timeout(PART_RRECORD))
+    if (!bfmr_is_part_ready_without_timeout(PART_DFX) ||
+        !bfmr_is_part_ready_without_timeout(PART_BOOTFAIL_INFO) ||
+        !bfmr_is_part_ready_without_timeout(PART_RRECORD)
+        )
     {
-        panic("bootfail: dfx or bootfail_info or rrecord is not ready, so panic....");
+        panic("bootfail:dfx is not ready,so panic....");
         while(1);
     }
 
-    param->reboot_type = BFM_S_NATIVE_BOOT_FAIL;
+    param->reboot_type = REBOOT_REASON_LABEL9;
     memset((void *)&s_process_bootfail_param, 0, sizeof(bfm_process_bootfail_param_t));
     memcpy((void *)&s_process_bootfail_param, (void *)param, sizeof(bfm_process_bootfail_param_t));
     switch (param->bootfail_errno)
@@ -1746,7 +1766,7 @@ int bfm_platform_process_boot_fail(bfm_process_bootfail_param_t *param)
         }
     default:
         {
-            bfm_reregister_exceptions_to_rdr(modid, BFM_S_NATIVE_DATA_FAIL);
+            bfm_reregister_exceptions_to_rdr(modid, BFM_S_BOOT_NATIVE_DATA_FAIL);
             BFMR_PRINT_KEY_INFO("Call \"rdr_syserr_process_for_ap\" to process boot fail in case of dead lock!\n");
             rdr_syserr_process_for_ap(modid, 0, 0);
             break;
@@ -1756,10 +1776,6 @@ int bfm_platform_process_boot_fail(bfm_process_bootfail_param_t *param)
     return 0;
 }
 
-int bfm_update_platform_logs(bfm_bootfail_log_info_t *pbootfail_log_info)
-{
-    return 0;
-}
 
 /**
     @function: int bfm_platform_process_boot_success(void)
@@ -1777,19 +1793,19 @@ int bfm_platform_process_boot_success(void)
     bfm_bfi_member_info_t *pbfi_memeber = NULL;
 
     /* 1. read latest bfi info */
-    pbfi_memeber = (bfm_bfi_member_info_t *)bfmr_malloc(BFM_BFI_MEMBER_SIZE);
+    pbfi_memeber = bfmr_malloc(BFM_BFI_MEMBER_SIZE);
     if (NULL == pbfi_memeber)
     {
         BFMR_PRINT_ERR("bfmr_malloc failed!\n");
         goto __out;
     }
-    memset((void *)pbfi_memeber, 0, BFM_BFI_MEMBER_SIZE);
+    memset(pbfi_memeber, 0, BFM_BFI_MEMBER_SIZE);
 
     ret = bfm_read_latest_bfi_info(pbfi_memeber, BFM_BFI_MEMBER_SIZE);
     if (0 != ret)
     {
-        BFMR_PRINT_ERR("bfm_read_latest_bfi_info failed!\n");
-        goto __out;
+        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
+        goto __out; 
     }
 
     /* 2. update the result into success */
@@ -1803,10 +1819,6 @@ int bfm_platform_process_boot_success(void)
 
 __out:
     bfmr_free(pbfi_memeber);
-    s_chipsets_is_bootup_successfully = true;
-    bfm_write_sub_bootfail_magic_num(0x0, BFM_SUB_BOOTFAIL_MAGIC_NUM_ADDR);
-    bfm_write_sub_bootfail_num(0x0, BFM_SUB_BOOTFAIL_NUM_ADDR);
-    bfm_write_sub_bootfail_count(0x0, BFM_SUB_BOOTFAIL_COUNT_ADDR);
     return ret;
 }
 
@@ -1826,7 +1838,26 @@ static unsigned int bfm_get_hisi_modid_according_to_bootfail_errno(bfmr_bootfail
 
     BFMR_PRINT_ERR("bootfail_errno: 0x%x has no hisi_modid!\n", bootfail_errno);
 
-    return (unsigned int)-1;
+    return -1;
+}
+
+
+static unsigned int bfm_get_bootfail_errno_according_to_hisi_modid(u32 hisi_modid)
+{
+    unsigned int i;
+    unsigned int size = sizeof(s_bfmr_errno_to_hisi_modid_map_tbl) / sizeof(s_bfmr_errno_to_hisi_modid_map_tbl[0]);
+
+    for (i = 0; i < size; i++)
+    {
+        if (hisi_modid == s_bfmr_errno_to_hisi_modid_map_tbl[i].hisi_modid) 
+        {
+            return s_bfmr_errno_to_hisi_modid_map_tbl[i].bootfail_errno;
+        }
+    }
+
+    BFMR_PRINT_ERR("hisi_modid: 0x%x has no bootfail_errno!\n", hisi_modid);
+
+    return -1;
 }
 
 
@@ -1840,15 +1871,15 @@ static int bfm_read_bfi_part_header(bfm_bfi_header_info_t *pbfi_header_info)
 
     if (unlikely(NULL == pbfi_header_info))
     {
-        BFMR_PRINT_INVALID_PARAMS("pbfi_header_info.\n");
+        BFMR_PRINT_INVALID_PARAMS("pbfi_header_info: %p\n", pbfi_header_info);
         return -1;
     }
 
     old_fs = get_fs();
-    set_fs(KERNEL_DS);/*lint !e501 */
+    set_fs(KERNEL_DS);
 
     /* 1. get the full path of bfi part */
-    bfi_dev_path = (char *)bfmr_malloc(BFMR_DEV_FULL_PATH_MAX_LEN);
+    bfi_dev_path = bfmr_malloc(BFMR_DEV_FULL_PATH_MAX_LEN);
     if (NULL == bfi_dev_path)
     {
         BFMR_PRINT_ERR("bfmr_malloc failed!\n");
@@ -1897,7 +1928,6 @@ __out:
 }
 
 
-/* NOTE: thif func only can be invoked when write BFI */
 static int bfm_update_bfi_part_header(bfm_bfi_header_info_t *pbfi_header_info)
 {
     int ret = -1;
@@ -1908,15 +1938,15 @@ static int bfm_update_bfi_part_header(bfm_bfi_header_info_t *pbfi_header_info)
 
     if (unlikely(NULL == pbfi_header_info))
     {
-        BFMR_PRINT_INVALID_PARAMS("pbfi_header_info.\n");
+        BFMR_PRINT_INVALID_PARAMS("pbfi_header_info: %p\n", pbfi_header_info);
         return -1;
     }
 
     old_fs = get_fs();
-    set_fs(KERNEL_DS);/*lint !e501 */
+    set_fs(KERNEL_DS);
 
     /* 1. get the full path of bfi part */
-    bfi_dev_path = (char *)bfmr_malloc(BFMR_DEV_FULL_PATH_MAX_LEN);
+    bfi_dev_path = bfmr_malloc(BFMR_DEV_FULL_PATH_MAX_LEN);
     if (NULL == bfi_dev_path)
     {
         BFMR_PRINT_ERR("bfmr_malloc failed!\n");
@@ -1982,7 +2012,7 @@ static int bfm_get_rtc_time_of_latest_bootail_log_from_dfx_part(u64 *prtc_time)
 
     if (unlikely(NULL == prtc_time))
     {
-        BFMR_PRINT_INVALID_PARAMS("prtc_time.\n");
+        BFMR_PRINT_INVALID_PARAMS("prtc_time: %p\n", prtc_time);
         return -1;
     }
 
@@ -2136,134 +2166,6 @@ unsigned int bfm_get_dfx_log_length(void)
 }
 
 
-static int bfm_add_bfi_info(bfm_bfi_member_info_t *pbfi_memeber, unsigned int bfi_memeber_len)
-{
-    int ret = -1;
-    int fd = -1;
-    long bytes_write = 0;
-    long bytes_read = 0;
-    long seek_result = -1;
-    long offset = 0L;
-    char *bfi_dev_path = NULL;
-    bfm_bfi_header_info_t *pbfi_header = NULL;
-    mm_segment_t old_fs;
-
-    if (unlikely(NULL == pbfi_memeber))
-    {
-        BFMR_PRINT_INVALID_PARAMS("pbfi_memeber.\n");
-        return -1;
-    }
-
-    old_fs = get_fs();
-    set_fs(KERNEL_DS);/*lint !e501 */
-
-    /* 1. find the full path of bfi part */
-    bfi_dev_path = (char *)bfmr_malloc(BFMR_DEV_FULL_PATH_MAX_LEN);
-    if (NULL == bfi_dev_path)
-    {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        goto __out;
-    }
-    memset(bfi_dev_path, 0, BFMR_DEV_FULL_PATH_MAX_LEN);
-
-    if (0 != bfm_get_bfi_part_full_path(bfi_dev_path, BFMR_DEV_FULL_PATH_MAX_LEN))
-    {
-        BFMR_PRINT_ERR("get full path of bfi part failed!\n");
-        goto __out;
-    }
-
-    pbfi_header = (bfm_bfi_header_info_t *)bfmr_malloc(BFM_BFI_HEADER_SIZE);
-    if (NULL == pbfi_header)
-    {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        goto __out;
-    }
-
-    fd = sys_open(bfi_dev_path, O_RDWR, BFMR_FILE_LIMIT);
-    if (fd < 0)
-    {
-        BFMR_PRINT_ERR("sys_open: [%s] failed![ret=%d]\n", bfi_dev_path, fd);
-        goto __out;
-    }
-
-    /* 2. read header of bfi */
-    memset(pbfi_header, 0, BFM_BFI_HEADER_SIZE);
-    bytes_read = bfmr_full_read(fd, (char *)pbfi_header, BFM_BFI_HEADER_SIZE);
-    if (bytes_read != BFM_BFI_HEADER_SIZE)
-    {
-        BFMR_PRINT_ERR("read [%s] fail![%ld]\n", bfi_dev_path, bytes_read);
-        goto __out;
-    }
-
-    /* 3. seek to current write pos */
-    offset = (long)BFM_BFI_HEADER_SIZE + (long)pbfi_header->cur_number * (long)pbfi_header->every_number_size;
-    seek_result = sys_lseek(fd, offset, SEEK_SET);
-    if (seek_result != offset)
-    {
-        BFMR_PRINT_ERR("lseek [%s] fail[%d]\n", bfi_dev_path, ret);
-        goto __out;
-    }
-
-    /* 4. write bfi */
-    bytes_write = bfmr_full_write(fd, (char*)pbfi_memeber, bfi_memeber_len);
-    if (bytes_write != (long)bfi_memeber_len)
-    {
-        BFMR_PRINT_ERR("write bfi part failed!bytes_write: %ld, it should be: %ld\n",
-            bytes_write, (long)bfi_memeber_len);
-        goto __out;
-    }
-    else
-    {
-        ret = 0;
-    }
-
-__out:
-    if (fd >= 0)
-    {
-        sys_fsync(fd);
-        sys_close(fd);
-    }
-    bfmr_free(bfi_dev_path);
-    bfmr_free(pbfi_header);
-    set_fs(old_fs);
-
-    return ret;
-}
-
-
-static const char *bfm_get_hardware_fault_type(bfmr_hardware_fault_type_e fault_type)
-{
-    switch (fault_type)
-    {
-    case HW_FAULT_OCP:
-    default:
-        {
-            return "ocp";
-        }
-    }
-
-    return "";
-}
-
-
-static void bfm_format_hardware_excp_detail_info(bfmr_hardware_fault_type_e fault_type,
-    bfmr_detail_boot_stage_e boot_stage,
-    const char *poriginal_detail,
-    char *pdetail_info_out,
-    size_t pdetail_info_out_buf_len)
-{
-    if (unlikely((NULL == poriginal_detail) || (NULL == pdetail_info_out)))
-    {
-        BFMR_PRINT_INVALID_PARAMS("poriginal_detail or pdetail_info_out.\n");
-        return;
-    }
-
-    snprintf(pdetail_info_out, pdetail_info_out_buf_len - 1, "%s_%s_%s_%s",
-        bfm_get_platform_name(), bfm_get_boot_stage_name(boot_stage),
-        bfm_get_hardware_fault_type(fault_type), poriginal_detail);
-}
-
-
 static void bfm_save_log_to_bfi_part(u32 hisi_modid, bfm_process_bootfail_param_t *param)
 {
     u64 rtc_time_of_latest_log;
@@ -2273,7 +2175,7 @@ static void bfm_save_log_to_bfi_part(u32 hisi_modid, bfm_process_bootfail_param_
     BFMR_PRINT_ENTER();
     if (unlikely(NULL == param))
     {
-        BFMR_PRINT_INVALID_PARAMS("param.\n");
+        BFMR_PRINT_INVALID_PARAMS("param: %p\n", param);
         return;
     }
 
@@ -2317,18 +2219,9 @@ static void bfm_save_log_to_bfi_part(u32 hisi_modid, bfm_process_bootfail_param_
         pbfi_member_info->bfmErrNo, param->suggested_recovery_method);
     pbfi_member_info->rcvMethod = try_to_recovery(pbfi_member_info->rtcValue,
         pbfi_member_info->bfmErrNo, pbfi_member_info->bfmStageCode,
-        param->suggested_recovery_method, param->addl_info.detail_info);
+        param->suggested_recovery_method, NULL);
     param->recovery_method = pbfi_member_info->rcvResult;
     pbfi_member_info->rcvResult = 0;
-    pbfi_member_info->suggested_recovery_method = param->suggested_recovery_method;
-    pbfi_member_info->is_bootup_successfully = s_chipsets_is_bootup_successfully ? (~0) : (0U);
-    pbfi_member_info->reboot_type = hisi_modid;
-    if (BFM_HARDWARE_FAULT == param->bootfail_errno)
-    {
-        bfm_format_hardware_excp_detail_info(param->addl_info.hardware_fault_type, param->boot_stage,
-            param->addl_info.detail_info, pbfi_member_info->excepInfo, sizeof(pbfi_member_info->excepInfo));
-    }
-
     if (pbfi_member_info->bfmErrNo > KERNEL_ERRNO_START)
     {
         unsigned int  count = 0;
@@ -2367,13 +2260,13 @@ static void bfm_save_log_to_bfi_part(u32 hisi_modid, bfm_process_bootfail_param_
         pbfi_member_info->isUserPerceptiable,
         pbfi_member_info->rcvMethod,
         pbfi_member_info->rcvResult);
-    if (0 != bfm_add_bfi_info(pbfi_member_info, sizeof(bfm_bfi_member_info_t)))
+    if (0 != bfm_update_latest_bfi_info(pbfi_member_info, sizeof(bfm_bfi_member_info_t)))
     {
         BFMR_PRINT_ERR("update latest bfi info failed!\n");
         goto __out;
     }
 
-    /* 4. update the next write pos of header info in bfi part */
+    /* 4. update header info of bfi part */
     pbfi_header_info->cur_number = (pbfi_header_info->cur_number + 1) % (BFM_BFI_RECORD_TOTAL_COUNT);
     if (0 != bfm_update_bfi_part_header(pbfi_header_info))
     {
@@ -2396,7 +2289,7 @@ static void bfm_dump_callback(u32 modid,
     pfn_cb_dump_done pfn_cb)
 {
     BFMR_PRINT_ENTER();
-    if (BFM_S_NATIVE_DATA_FAIL == etype)
+    if (BFM_S_BOOT_NATIVE_DATA_FAIL == etype)
     {
         preempt_enable();
     }
@@ -2419,7 +2312,7 @@ static void bfm_dump_callback(u32 modid,
         pfn_cb(modid, coreid);
     }
 
-    if (BFM_S_NATIVE_DATA_FAIL == etype)
+    if (BFM_S_BOOT_NATIVE_DATA_FAIL == etype)
     {
         preempt_disable();
     }
@@ -2672,163 +2565,15 @@ void bfmr_update_raw_log_info(bfmr_log_src_t *psrc, bfmr_log_dst_t *pdst, unsign
 }
 
 
-static struct notifier_block ocp_event_nb = {
-    .notifier_call = bfm_process_ocp_callback,
-    .priority	= INT_MAX,
-};
-
-
-static int bfm_process_ocp_boot_fail_func(void *param)
+int bfm_get_kmsg_log_header_size(void)
 {
-    BFMR_PRINT_KEY_INFO("param.\n");
-    while (1)
-    {
-        int i = 0;
-
-        if (0 != down_interruptible(&s_process_ocp_sem))
-        {
-            continue;
-		}
-
-        for (i = 0; i < (sizeof(s_process_ocp_excp_param.ocp_excp_info) / sizeof(s_process_ocp_excp_param.ocp_excp_info[0])); i++)
-        {
-            if (down_trylock(&(s_process_ocp_excp_param.ocp_excp_info[i].sem)))
-            {
-                continue;
-            }
-
-            if ((NULL != s_process_ocp_excp_param.process_ocp_excp)
-                && (0 != strcmp(s_process_ocp_excp_param.ocp_excp_info[i].excp_info.ldo_num, "")))
-            {
-                s_process_ocp_excp_param.process_ocp_excp(s_process_ocp_excp_param.ocp_excp_info[i].fault_type,
-                    &s_process_ocp_excp_param.ocp_excp_info[i].excp_info);
-                memset(&s_process_ocp_excp_param.ocp_excp_info[i].excp_info, 0, sizeof(ocp_excp_info_t));
-            }
-            up(&(s_process_ocp_excp_param.ocp_excp_info[i].sem));
-        }
-    }
-
-    return 0;
-}
-
-
-
-static int bfm_process_ocp_boot_fail(void)
-{
-    int ret = -1;
-    struct task_struct *tsk;
-
-    ret = hisi_pmic_mntn_register_notifier(&ocp_event_nb);
-    if (0 != ret)
-    {
-        BFMR_PRINT_ERR("ocp_event_nb register fail!\n");
-        return -1;
-    }
-
-    tsk = kthread_run(bfm_process_ocp_boot_fail_func, NULL, "process_ocp");
-    if (IS_ERR(tsk))
-    {
-        BFMR_PRINT_ERR("Failed to create thread to process OCP exception!\n");
-        return -1;
-    }
-
-    return 0;
-}
-
-static bfmr_hardware_fault_type_e bfm_get_bfmr_fault_type(unsigned long hisi_fault_type)
-{
-    size_t i = 0;
-    size_t count = sizeof(s_hw_fault_map_table) / sizeof(s_hw_fault_map_table[0]);
-
-    for (i = 0; i < count; i++)
-    {
-        if (hisi_fault_type == s_hw_fault_map_table[i].hisi_fault_type)
-        {
-            return s_hw_fault_map_table[i].bfmr_fault_type;
-        }
-    }
-
-    return HW_FAULT_OCP;
-}
-
-static int bfm_process_ocp_callback(struct notifier_block *self, unsigned long val, void *data)
-{
-    int i = 0;
-
-    for (i = 0; i < (sizeof(s_process_ocp_excp_param.ocp_excp_info) / sizeof(s_process_ocp_excp_param.ocp_excp_info[0])); i++)
-    {
-        if (down_trylock(&(s_process_ocp_excp_param.ocp_excp_info[i].sem)))
-        {
-            BFMR_PRINT_ERR("There's an OCP is being processed!\n");
-            continue;
-        }
-
-        if (0 == strcmp(s_process_ocp_excp_param.ocp_excp_info[i].excp_info.ldo_num, ""))
-        {
-            memset((void *)&s_process_ocp_excp_param.ocp_excp_info[i].excp_info, 0x0, sizeof(ocp_excp_info_t));
-            memcpy((void *)&s_process_ocp_excp_param.ocp_excp_info[i].excp_info, data, sizeof(ocp_excp_info_t));
-            s_process_ocp_excp_param.ocp_excp_info[i].fault_type = bfm_get_bfmr_fault_type(val);
-            up(&(s_process_ocp_excp_param.ocp_excp_info[i].sem));
-            break;
-        }
-        up(&(s_process_ocp_excp_param.ocp_excp_info[i].sem));
-    }
-
-    up(&s_process_ocp_sem);
-
-    return NOTIFY_DONE;
-}
-
-
-static int __init bfm_early_parse_recovery_mode_cmdline(char *p)
-{
-    if (NULL != p)
-    {
-        s_is_recovery_mode = (0 == strncmp(p, "1", strlen("1"))) ? true : false;
-    }
-
-    return 0;
-}
-early_param("enter_recovery", bfm_early_parse_recovery_mode_cmdline);
-
-static int __init bfm_early_parse_power_off_charge_cmdline(char *p)
-{
-    if (NULL != p)
-    {
-        s_power_off_charge = (0 == strncmp(p, "charger", strlen("charger"))) ? true : false;
-    }
-
-    return 0;
-}
-early_param("androidboot.mode", bfm_early_parse_power_off_charge_cmdline);
-
-
-void bfm_set_valid_long_press_flag(void)
-{
-    bfmr_rrecord_misc_msg_param_t misc_msg;
-    bfmr_detail_boot_stage_e bfmr_bootstage = STAGE_BOOT_SUCCESS;
-
-    bfm_get_boot_stage(&bfmr_bootstage);
-    if (!s_is_recovery_mode && !s_power_off_charge
-        && (bfmr_get_bootup_time() > BFM_BOOT_SUCCESS_TIME_IN_KENREL)
-        && (bfmr_bootstage < STAGE_BOOT_SUCCESS))
-    {
-        memset((void *)&misc_msg, 0, sizeof(misc_msg));
-        memcpy(misc_msg.command, BFR_VALID_LONG_PRESS_LOG,
-            BFMR_MIN(sizeof(misc_msg.command) - 1, strlen(BFR_VALID_LONG_PRESS_LOG)));
-        (void)bfmr_write_rrecord_misc_msg(&misc_msg);
-    }
-    else
-    {
-        BFMR_PRINT_KEY_INFO("There's no need to save long press log\n");
-    }
+    return (int)sizeof(struct persistent_ram_buffer);
 }
 
 
 int bfm_chipsets_init(bfm_chipsets_init_param_t *param)
 {
     int ret = 0;
-    int i = 0;
 
     if (unlikely((NULL == param)))
     {
@@ -2847,15 +2592,6 @@ int bfm_chipsets_init(bfm_chipsets_init_param_t *param)
     memset((void *)&s_bootfail_log_saving_param, 0, sizeof(bfm_bootfail_log_saving_param_t));
     memcpy((void *)&s_bootfail_log_saving_param, (void *)&param->log_saving_param,
         sizeof(bfm_bootfail_log_saving_param_t));
-    memset((void *)&s_process_ocp_excp_param, 0, sizeof(bfm_process_ocp_excp_param_t));
-    memcpy((void *)&s_process_ocp_excp_param.process_ocp_excp, (void *)&param->process_ocp_excp,
-        sizeof(param->process_ocp_excp));
-    for (i = 0; i < sizeof(s_process_ocp_excp_param.ocp_excp_info) / sizeof(s_process_ocp_excp_param.ocp_excp_info[0]); i++)
-    {
-        sema_init(&s_process_ocp_excp_param.ocp_excp_info[i].sem, 1);
-    }
-	sema_init(&s_process_ocp_sem, 0);
-    (void)bfm_process_ocp_boot_fail();
     BFMR_PRINT_EXIT();
 
     return 0;

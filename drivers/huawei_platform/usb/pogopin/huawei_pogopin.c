@@ -52,6 +52,13 @@ static int get_connect_status(void){
 	return 0;
 }
 
+static int is_typec_connected(void){
+	int usb_switch_value = -1, buck_boost_value = -1;
+	usb_switch_value = gpio_get_value(g_pogopin_device_ops->di->usb_switch_gpio);
+	buck_boost_value = gpio_get_value(g_pogopin_device_ops->di->buck_boost_gpio);
+	return (usb_switch_value == LOW) && (buck_boost_value == LOW);
+}
+
 static int get_interface_status(void)
 {
 	int pogopin_int_value = -1, typec_int_value = -1;
@@ -319,7 +326,7 @@ static void pogopin_switch_work(struct work_struct *work)
 			pogopin_charge();
 			hisi_usb_otg_bc_again();
 			reinit_completion(&dev_off_completion);
-		}else if(HIGH == pogopin_gpio_value){
+		}else if((HIGH == pogopin_gpio_value) && !is_typec_connected()){
 			hw_pogopin_dbg("%s-%d pogopin charger remove\n", __func__, __LINE__);
 			pogopin_set_fcp_support(TRUE);
 			hw_pogopin_dbg("1.cutoff pogopin charger\n");

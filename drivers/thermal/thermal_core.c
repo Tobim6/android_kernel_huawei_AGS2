@@ -45,10 +45,6 @@
 #include "thermal_core.h"
 #include "thermal_hwmon.h"
 
-#ifdef CONFIG_HISI_PERF_CTRL
-#include "../hisi/perf_ctrl/perf_ctrl.h"
-#endif
-
 MODULE_AUTHOR("Zhang Rui");
 MODULE_DESCRIPTION("Generic thermal management sysfs support");
 MODULE_LICENSE("GPL v2");
@@ -74,39 +70,39 @@ static struct thermal_governor *def_governor;
 #define SOC_THERMAL_NAME "soc_thermal"
 #define USER_SPACE_GOVERNOR       "user_space"
 int g_ipa_freq_limit_debug = 0;
-
-unsigned int g_ipa_freq_limit[CAPACITY_OF_ARRAY] = {
-	IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX,
-	IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX
+unsigned int g_ipa_freq_limit[IPA_ACTOR_MAX] = {
+	IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX
 };
-unsigned int g_ipa_soc_freq_limit[CAPACITY_OF_ARRAY] = {
-	IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX,
-	IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX
+unsigned int g_ipa_soc_freq_limit[IPA_ACTOR_MAX] = {
+	               IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX
 };
-unsigned int g_ipa_board_freq_limit[CAPACITY_OF_ARRAY] = {
-	IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX,
-	IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX
+unsigned int g_ipa_board_freq_limit[IPA_ACTOR_MAX] = {
+	              IPA_FREQ_MAX, IPA_FREQ_MAX, IPA_FREQ_MAX
 };
-unsigned int g_ipa_soc_state[CAPACITY_OF_ARRAY] = {0};
-unsigned int g_ipa_board_state[CAPACITY_OF_ARRAY] = {0};
+unsigned int g_ipa_soc_state[IPA_ACTOR_MAX] = {
+	               0, 0, 0
+};
+unsigned int g_ipa_board_state[IPA_ACTOR_MAX] = {
+	               0, 0, 0
+};
 
 #define IPA_CLUSTER0_WEIGHT_NAME       "cdev1_weight"  //default name value
 #define IPA_CLUSTER1_WEIGHT_NAME       "cdev2_weight"
-#define IPA_CLUSTER2_WEIGHT_NAME       "cdev3_weight"
 #define IPA_GPU_WEIGHT_NAME            "cdev0_weight"
-
-unsigned int g_ipa_gpu_boost_weights[CAPACITY_OF_ARRAY] = {0};
-unsigned int g_ipa_normal_weights[CAPACITY_OF_ARRAY] = {0};
+unsigned int g_ipa_act_weights[IPA_ACTOR_MAX] = {0};
+unsigned int g_ipa_gpu_boost_weights[IPA_ACTOR_MAX] = {0};
+unsigned int g_ipa_normal_weights[IPA_ACTOR_MAX] = {0};
 
 static DEFINE_MUTEX(thermal_boost_lock);/*lint !e64 !e570 !e651 !e708 !e785*/
 
 #ifdef CONFIG_HISI_THERMAL_SPM
+unsigned int profile_power[IPA_ACTOR_MAX];
 extern bool is_spm_mode_enabled(void);
-extern unsigned int get_powerhal_profile(int actor);
-extern unsigned int get_minfreq_profile(int actor);
+extern unsigned int get_powerhal_profile(enum ipa_actor actor);
+extern unsigned int get_minfreq_profile(enum ipa_actor actor);
 int of_thermal_get_num_tbps(struct thermal_zone_device *tz);
 int of_thermal_get_actor_weight(struct thermal_zone_device *tz, int i,
-				int *actor, unsigned int *weight);
+				enum ipa_actor *actor, unsigned int *weight);
 #endif
 
 bool thermal_of_get_cdev_type(struct thermal_zone_device *tzd,
@@ -117,22 +113,10 @@ void ipa_freq_debug(int onoff)
 	g_ipa_freq_limit_debug = onoff;
 }
 
-#define MAX_TEMP 145000
-#define MIN_TEMP -40000
-s32 thermal_zone_temp_check(s32 temperature)
-{
-	if (temperature > MAX_TEMP) {
-		temperature = MAX_TEMP;
-	} else if (temperature < MIN_TEMP) {
-		temperature = MIN_TEMP;
-	}
-	return temperature;
-}
-
 void ipa_freq_limit_init(void)
 {
 	int i;
-	for (i = 0; i < (int)g_ipa_actor_num; i++)
+	for(i = 0; i < IPA_ACTOR_MAX; i++)
 		g_ipa_freq_limit[i] = IPA_FREQ_MAX;
 }
 
@@ -142,21 +126,21 @@ void ipa_freq_limit_reset(struct thermal_zone_device *tz)
 
 	struct thermal_instance *instance;
 
-	if (tz->is_board_thermal) {
-		for (i = 0; i < (int)g_ipa_actor_num; i++) {
+	if(tz->is_board_thermal) {
+		for(i = 0; i < IPA_ACTOR_MAX; i++){
 			g_ipa_board_freq_limit[i] = IPA_FREQ_MAX;
 			g_ipa_board_state[i] = 0;
 		}
 	} else {
-		for (i = 0; i < (int)g_ipa_actor_num; i++) {
+		for(i = 0; i < IPA_ACTOR_MAX; i++){
 			g_ipa_soc_freq_limit[i] = IPA_FREQ_MAX;
 			g_ipa_soc_state[i] = 0;
 		}
 	}
 
-	for (i = 0; i < (int)g_ipa_actor_num; i++) {
-		if (g_ipa_soc_freq_limit[i] != 0 && g_ipa_board_freq_limit[i] !=0 )
-			g_ipa_freq_limit[i] = min(g_ipa_soc_freq_limit[i], g_ipa_board_freq_limit[i]);/*lint !e1058*/
+	for(i = 0; i < IPA_ACTOR_MAX; i++) {
+		if(g_ipa_soc_freq_limit[i] != 0 && g_ipa_board_freq_limit[i] !=0 )
+			g_ipa_freq_limit[i] = min(g_ipa_soc_freq_limit[i], g_ipa_board_freq_limit[i]);
 		else if (g_ipa_soc_freq_limit[i] == 0)
 			g_ipa_freq_limit[i] = g_ipa_board_freq_limit[i];
 		else if (g_ipa_board_freq_limit[i] ==0)
@@ -172,23 +156,20 @@ void ipa_freq_limit_reset(struct thermal_zone_device *tz)
 	}
 }
 
-unsigned int ipa_freq_limit(int actor, unsigned int target_freq)
+unsigned int ipa_freq_limit(enum ipa_actor actor, unsigned int target_freq)
 {
 #ifdef CONFIG_HISI_THERMAL_SPM
 	unsigned int freq, min_freq;
 #endif
-	int i = 0;
 
-	if (actor >= (int)g_ipa_actor_num)
+	if (actor >= IPA_ACTOR_MAX)
 		return target_freq;
 
-	if (g_ipa_freq_limit_debug) {
-		pr_err("actor[%d]target_freq[%u]IPA:", actor, target_freq);
-		for (i = 0; i < (int)g_ipa_actor_num; i++) {
-			pr_err("[%u]", g_ipa_freq_limit[i]);
-		}
-		pr_err("min[%u]\n", min(target_freq, g_ipa_freq_limit[actor]));/*lint !e1058*/
-	}
+	if (g_ipa_freq_limit_debug)
+		pr_err("actor[%d]target_freq[%u]IPA:[%u][%u][%u]min[%u]\n",
+			  actor,target_freq, g_ipa_freq_limit[IPA_CLUSTER0],
+			  g_ipa_freq_limit[IPA_CLUSTER1], g_ipa_freq_limit[IPA_GPU],
+			  min(target_freq, g_ipa_freq_limit[actor]));
 
 #ifdef CONFIG_HISI_THERMAL_SPM
 	if (is_spm_mode_enabled()) {
@@ -205,28 +186,9 @@ unsigned int ipa_freq_limit(int actor, unsigned int target_freq)
 	}
 #endif
 
-	return min(target_freq, g_ipa_freq_limit[actor]);/*lint !e1058*/
+	return min(target_freq, g_ipa_freq_limit[actor]);
 }
 EXPORT_SYMBOL(ipa_freq_limit);
-#endif
-
-#ifdef CONFIG_HISI_PERF_CTRL
-int get_ipa_status(struct ipa_stat *status)
-{
-#ifdef CONFIG_HISI_IPA_THERMAL
-	status->cluster0 = g_ipa_freq_limit[0];
-	status->cluster1 = g_ipa_freq_limit[1];
-	if (ipa_get_actor_id("gpu") == 3) {
-		status->cluster2 = g_ipa_freq_limit[2];
-		status->gpu = g_ipa_freq_limit[3];
-	} else {
-		status->cluster2 = 0;
-		status->gpu = g_ipa_freq_limit[2];
-	}
-#endif
-	return 0;
-}
-EXPORT_SYMBOL(get_ipa_status);
 #endif
 
 static struct thermal_governor *__find_governor(const char *name)
@@ -698,56 +660,6 @@ exit:
 }
 EXPORT_SYMBOL_GPL(thermal_zone_get_temp);
 
-void thermal_zone_set_trips(struct thermal_zone_device *tz)
-{
-	int low = -INT_MAX;
-	int high = INT_MAX;
-	int trip_temp, hysteresis;
-	int i, ret;
-
-	mutex_lock(&tz->lock);
-
-	if (!tz->ops->set_trips || !tz->ops->get_trip_hyst)
-		goto exit;
-
-	for (i = 0; i < tz->trips; i++) {
-		int trip_low;
-
-		tz->ops->get_trip_temp(tz, i, &trip_temp);
-		tz->ops->get_trip_hyst(tz, i, &hysteresis);
-
-		trip_low = trip_temp - hysteresis;
-
-		if (trip_low < tz->temperature && trip_low > low)
-			low = trip_low;
-
-		if (trip_temp > tz->temperature && trip_temp < high)
-			high = trip_temp;
-	}
-
-	/* No need to change trip points */
-	if (tz->prev_low_trip == low && tz->prev_high_trip == high)
-		goto exit;
-
-	tz->prev_low_trip = low;
-	tz->prev_high_trip = high;
-
-	dev_dbg(&tz->device,
-		"new temperature boundaries: %d < x < %d\n", low, high);
-
-	/*
-	 * Set a temperature window. When this window is left the driver
-	 * must inform the thermal core via thermal_zone_device_update.
-	 */
-	ret = tz->ops->set_trips(tz, low, high);
-	if (ret)
-		dev_err(&tz->device, "Failed to set trips: %d\n", ret);
-
-exit:
-	mutex_unlock(&tz->lock);
-}
-EXPORT_SYMBOL_GPL(thermal_zone_set_trips);
-
 static void update_temperature(struct thermal_zone_device *tz)
 {
 	int temp, ret;
@@ -785,36 +697,19 @@ static void thermal_zone_device_reset(struct thermal_zone_device *tz)
 		pos->initialized = false;
 }
 
-#ifdef CONFIG_HISI_IPA_THERMAL
-int nametoactor(const char* weight_attr_name)
-{
-	int actor_id = -1;
-
-	if (!strncmp(weight_attr_name, IPA_GPU_WEIGHT_NAME, sizeof(IPA_GPU_WEIGHT_NAME) - 1))
-			actor_id = ipa_get_actor_id("gpu");
-	else if (!strncmp(weight_attr_name, IPA_CLUSTER0_WEIGHT_NAME, sizeof(IPA_CLUSTER0_WEIGHT_NAME) - 1))
-			actor_id = ipa_get_actor_id("cluster0");
-	else if (!strncmp(weight_attr_name, IPA_CLUSTER1_WEIGHT_NAME, sizeof(IPA_CLUSTER1_WEIGHT_NAME) - 1))
-			actor_id = ipa_get_actor_id("cluster1");
-	else if (!strncmp(weight_attr_name, IPA_CLUSTER2_WEIGHT_NAME, sizeof(IPA_CLUSTER2_WEIGHT_NAME) - 1))
-			actor_id = ipa_get_actor_id("cluster2");
-	else
-		actor_id = -1;
-
-	return actor_id;
-}
-#endif
-
-#ifdef CONFIG_HISI_IPA_THERMAL
+#if defined(CONFIG_HISI_IPA_THERMAL) || defined(CONFIG_HISI_THERMAL_SPM)
 void restore_actor_weights(struct thermal_zone_device *tz)
 {
 	struct thermal_instance *pos;
-	int actor_id = -1;
 
 	list_for_each_entry(pos, &tz->thermal_instances, tz_node) {
-		actor_id = nametoactor(pos->weight_attr_name);
-		if(actor_id != -1)
-			pos->weight = g_ipa_normal_weights[actor_id];
+		if (!strncmp(pos->weight_attr_name, IPA_GPU_WEIGHT_NAME, sizeof(IPA_GPU_WEIGHT_NAME) - 1))
+			pos->weight = g_ipa_normal_weights[IPA_GPU];
+		else if (!strncmp(pos->weight_attr_name, IPA_CLUSTER0_WEIGHT_NAME, sizeof(IPA_CLUSTER0_WEIGHT_NAME) - 1))
+			pos->weight = g_ipa_normal_weights[IPA_CLUSTER0];
+		else if(!strncmp(pos->weight_attr_name, IPA_CLUSTER1_WEIGHT_NAME, sizeof(IPA_CLUSTER1_WEIGHT_NAME) - 1)) {
+			pos->weight = g_ipa_normal_weights[IPA_CLUSTER1];
+		}
 	}
 }
 
@@ -823,8 +718,7 @@ void update_actor_weights(struct thermal_zone_device *tz)
 	struct thermal_instance *pos;
 	bool bGPUBounded = false;
 	struct thermal_cooling_device *cdev;
-	int actor_id = -1;
-
+	dynipa_get_weights_cfg(g_ipa_act_weights,g_ipa_gpu_boost_weights);
 	list_for_each_entry(pos, &tz->thermal_instances, tz_node) {
 		cdev = pos->cdev;
 		if (!strncmp(pos->weight_attr_name, IPA_GPU_WEIGHT_NAME,sizeof(IPA_GPU_WEIGHT_NAME) - 1) && cdev->bound_event) {
@@ -834,21 +728,26 @@ void update_actor_weights(struct thermal_zone_device *tz)
 	}
 
 	list_for_each_entry(pos, &tz->thermal_instances, tz_node) {
-		actor_id = nametoactor(pos->weight_attr_name);
-
 		if (bGPUBounded) {
-			if (actor_id != -1)
-				pos->weight = g_ipa_gpu_boost_weights[actor_id];
+			if (!strncmp(pos->weight_attr_name, IPA_GPU_WEIGHT_NAME, sizeof(IPA_GPU_WEIGHT_NAME) - 1))
+				pos->weight = g_ipa_gpu_boost_weights[IPA_GPU];
+			else if (!strncmp(pos->weight_attr_name, IPA_CLUSTER0_WEIGHT_NAME, sizeof(IPA_CLUSTER0_WEIGHT_NAME) - 1))
+				pos->weight = g_ipa_gpu_boost_weights[IPA_CLUSTER0];
+			else if (!strncmp(pos->weight_attr_name, IPA_CLUSTER1_WEIGHT_NAME, sizeof(IPA_CLUSTER1_WEIGHT_NAME) - 1))
+				pos->weight = g_ipa_gpu_boost_weights[IPA_CLUSTER1];
 		} else {
-			if (actor_id != -1)
-				pos->weight = g_ipa_normal_weights[actor_id];
+			if (!strncmp(pos->weight_attr_name, IPA_GPU_WEIGHT_NAME, sizeof(IPA_GPU_WEIGHT_NAME) - 1))
+				pos->weight = g_ipa_act_weights[IPA_GPU];
+			else if (!strncmp(pos->weight_attr_name, IPA_CLUSTER0_WEIGHT_NAME, sizeof(IPA_CLUSTER0_WEIGHT_NAME) - 1))
+				pos->weight = g_ipa_act_weights[IPA_CLUSTER0];
+			else if (!strncmp(pos->weight_attr_name, IPA_CLUSTER1_WEIGHT_NAME, sizeof(IPA_CLUSTER1_WEIGHT_NAME) - 1))
+				pos->weight = g_ipa_act_weights[IPA_CLUSTER1];
 		}
 	}
 }
 #endif
 
-void thermal_zone_device_update(struct thermal_zone_device *tz,
-				enum thermal_notify_event event)
+void thermal_zone_device_update(struct thermal_zone_device *tz)
 {
 	int count;
 
@@ -860,10 +759,7 @@ void thermal_zone_device_update(struct thermal_zone_device *tz,
 
 	update_temperature(tz);
 
-	thermal_zone_set_trips(tz);
-
-	tz->notify_event = event;
-#ifdef CONFIG_HISI_IPA_THERMAL
+#if defined(CONFIG_HISI_IPA_THERMAL) || defined(CONFIG_HISI_THERMAL_SPM)
 	update_actor_weights(tz);
 #endif
 
@@ -882,7 +778,7 @@ static void thermal_zone_device_check(struct work_struct *work)
 	tz->tzp->boost = THERMAL_BOOST_DISABLED;
 	mutex_unlock(&tz->lock);
 #endif
-	thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+	thermal_zone_device_update(tz);
 }
 
 /* sys I/F for thermal zone */
@@ -895,7 +791,7 @@ type_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct thermal_zone_device *tz = to_thermal_zone(dev);
 
-	return sprintf(buf, "%s\n", tz->type);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	return sprintf(buf, "%s\n", tz->type);/*lint !e421 */
 }
 
 static ssize_t
@@ -909,7 +805,7 @@ temp_show(struct device *dev, struct device_attribute *attr, char *buf)
 	if (ret)
 		return ret;
 
-	return sprintf(buf, "%d\n", temperature);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	return sprintf(buf, "%d\n", temperature);/*lint !e421 */
 }
 
 static ssize_t
@@ -928,11 +824,11 @@ mode_show(struct device *dev, struct device_attribute *attr, char *buf)
 
 	switch (mode) {
 	case THERMAL_DEVICE_DISABLED:
-		return sprintf(buf, "%s\n",  "disabled");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "%s\n",  "disabled");/*lint !e421 */
 	case THERMAL_DEVICE_ENABLED:
-		return sprintf(buf, "%s\n",  "enabled");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "%s\n",  "enabled");/*lint !e421 */
 	default:
-		return sprintf(buf, "%s\n",  "disabled");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "%s\n",  "disabled");/*lint !e421 */
 	}
 
 }
@@ -942,26 +838,27 @@ mode_store(struct device *dev, struct device_attribute *attr,
 	   const char *buf, size_t count)
 {
 	struct thermal_zone_device *tz = to_thermal_zone(dev);
+
+#if defined(CONFIG_HISI_IPA_THERMAL) || defined(CONFIG_HISI_THERMAL_SPM)
 	int result;
+#endif
 
 	if (!tz->ops->set_mode)
 		return -EPERM;
 
+#if defined(CONFIG_HISI_IPA_THERMAL) || defined(CONFIG_HISI_THERMAL_SPM)
 	if (!strncmp(buf, "enabled", sizeof("enabled") - 1)) {
-#ifdef CONFIG_HISI_IPA_THERMAL
 		restore_actor_weights(tz);
-#endif
 		result = tz->ops->set_mode(tz, THERMAL_DEVICE_ENABLED);
 	} else if (!strncmp(buf, "disabled", sizeof("disabled") - 1)) {
-#ifdef CONFIG_HISI_IPA_THERMAL
 		restore_actor_weights(tz);
-#endif
 		result = tz->ops->set_mode(tz, THERMAL_DEVICE_DISABLED);
 	} else
 		result = -EINVAL;
 
 	if (result)
 		return result;
+#endif
 
 #ifdef CONFIG_HISI_IPA_THERMAL
 	if(strncmp(tz->governor->name, USER_SPACE_GOVERNOR, THERMAL_NAME_LENGTH)) {/*[false alarm]*/
@@ -986,7 +883,8 @@ boost_show(struct device *dev, struct device_attribute *attr, char *buf)
 	mutex_lock(&tz->lock);
 	mode = tz->tzp->boost;
 	mutex_unlock(&tz->lock);
-	return sprintf(buf, "%s\n", mode == THERMAL_BOOST_ENABLED ? "enabled" : "disabled");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	return sprintf(buf, "%s\n", mode == THERMAL_BOOST_ENABLED ? "enabled"
+		       : "disabled");/*lint !e421 */
 }
 
 static ssize_t
@@ -1016,7 +914,7 @@ boost_store(struct device *dev, struct device_attribute *attr,
 		mutex_unlock(&tz->lock);
 	} else if (!strncmp(buf, "disabled", sizeof("disabled") - 1)) {
 		tz->tzp->boost = THERMAL_BOOST_DISABLED;
-		thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+		thermal_zone_device_update(tz);
 	} else
 		result = -EINVAL;
 
@@ -1044,7 +942,7 @@ trip_point_type_show(struct device *dev, struct device_attribute *attr,
 	if (!tz->ops->get_trip_type)
 		return -EPERM;
 
-	if (!sscanf(attr->attr.name, "trip_point_%d_type", &trip)) /* unsafe_function_ignore: sscanf */
+	if (!sscanf(attr->attr.name, "trip_point_%d_type", &trip))
 		return -EINVAL;
 
 	result = tz->ops->get_trip_type(tz, trip, &type);
@@ -1053,33 +951,33 @@ trip_point_type_show(struct device *dev, struct device_attribute *attr,
 
 	switch (type) {
 	case THERMAL_TRIP_CRITICAL:
-		return sprintf(buf, "critical\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "critical\n");/*lint !e421 */
 	case THERMAL_TRIP_HOT:
-		return sprintf(buf, "hot\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "hot\n");/*lint !e421 */
 #if defined(CONFIG_HISI_THERMAL_TSENSOR) || defined(CONFIG_HISI_THERMAL_PERIPHERAL)
 	case THERMAL_TRIP_CONFIGURABLE_HI:
-		return sprintf(buf, "configurable_hi\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "configurable_hi\n");/*lint !e421 */
 	case THERMAL_TRIP_CONFIGURABLE_LOW:
-		return sprintf(buf, "configurable_low\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "configurable_low\n");/*lint !e421 */
 	case THERMAL_TRIP_CRITICAL_LOW:
-		return sprintf(buf, "critical_low\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "critical_low\n");/*lint !e421 */
 #endif
 #ifdef CONFIG_HISI_THERMAL_TRIP
 	case THERMAL_TRIP_THROTTLING:
-		return sprintf(buf, "throttling\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "throttling\n");/*lint !e421 */
 	case THERMAL_TRIP_SHUTDOWN:
-		return sprintf(buf, "shutdown\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "shutdown\n");/*lint !e421 */
 	case THERMAL_TRIP_BELOW_VR_MIN:
-		return sprintf(buf, "below_vr_min\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "below_vr_min\n");/*lint !e421 */
 	case THERMAL_TRIP_OVER_SKIN:
-		return sprintf(buf, "over_skin\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "over_skin\n");/*lint !e421 */
 #endif
 	case THERMAL_TRIP_PASSIVE:
-		return sprintf(buf, "passive\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "passive\n");/*lint !e421 */
 	case THERMAL_TRIP_ACTIVE:
-		return sprintf(buf, "active\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "active\n");/*lint !e421 */
 	default:
-		return sprintf(buf, "unknown\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "unknown\n");/*lint !e421 */
 	}
 }
 
@@ -1094,7 +992,7 @@ trip_point_type_activate(struct device *dev, struct device_attribute *attr,
 	if (!tz->ops->activate_trip_type)
 		return -EPERM;
 
-	if (!sscanf(attr->attr.name, "trip_point_%d_type", &trip)) /* unsafe_function_ignore: sscanf */
+	if (!sscanf(attr->attr.name, "trip_point_%d_type", &trip))
 		return -EINVAL;
 
 	if (!strncmp(buf, "enabled", strlen("enabled"))) {
@@ -1120,27 +1018,23 @@ trip_point_temp_store(struct device *dev, struct device_attribute *attr,
 {
 	struct thermal_zone_device *tz = to_thermal_zone(dev);
 	int trip, ret;
-	int temperature;
+	unsigned long temperature;
 
 	if (!tz->ops->set_trip_temp)
 		return -EPERM;
 
-	if (!sscanf(attr->attr.name, "trip_point_%d_temp", &trip)) /* unsafe_function_ignore: sscanf */
+	if (!sscanf(attr->attr.name, "trip_point_%d_temp", &trip))
 		return -EINVAL;
 
-	if (kstrtoint(buf, 10, &temperature))
+	if (kstrtoul(buf, 10, &temperature))/*lint !esym(64,*) */
 		return -EINVAL;
 
 	ret = tz->ops->set_trip_temp(tz, trip, temperature);
+
 #ifdef CONFIG_HISI_IPA_THERMAL
 	update_pid_value(tz);
 #endif
-	if (ret)
-		return ret;
-
-	thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
-
-	return count;
+	return ret ? ret : count;
 }
 
 static ssize_t
@@ -1154,7 +1048,7 @@ trip_point_temp_show(struct device *dev, struct device_attribute *attr,
 	if (!tz->ops->get_trip_temp)
 		return -EPERM;
 
-	if (!sscanf(attr->attr.name, "trip_point_%d_temp", &trip)) /* unsafe_function_ignore: sscanf */
+	if (!sscanf(attr->attr.name, "trip_point_%d_temp", &trip))
 		return -EINVAL;
 
 	ret = tz->ops->get_trip_temp(tz, trip, &temperature);
@@ -1162,7 +1056,7 @@ trip_point_temp_show(struct device *dev, struct device_attribute *attr,
 	if (ret)
 		return ret;
 
-	return sprintf(buf, "%d\n", temperature);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	return sprintf(buf, "%d\n", temperature);/*lint !e421 */
 }
 
 static ssize_t
@@ -1176,7 +1070,7 @@ trip_point_hyst_store(struct device *dev, struct device_attribute *attr,
 	if (!tz->ops->set_trip_hyst)
 		return -EPERM;
 
-	if (!sscanf(attr->attr.name, "trip_point_%d_hyst", &trip)) /* unsafe_function_ignore: sscanf */
+	if (!sscanf(attr->attr.name, "trip_point_%d_hyst", &trip))
 		return -EINVAL;
 
 	if (kstrtoint(buf, 10, &temperature))
@@ -1188,9 +1082,6 @@ trip_point_hyst_store(struct device *dev, struct device_attribute *attr,
 	 * take care of this.
 	 */
 	ret = tz->ops->set_trip_hyst(tz, trip, temperature);
-
-	if (!ret)
-		thermal_zone_set_trips(tz);
 
 	return ret ? ret : count;
 }
@@ -1206,12 +1097,12 @@ trip_point_hyst_show(struct device *dev, struct device_attribute *attr,
 	if (!tz->ops->get_trip_hyst)
 		return -EPERM;
 
-	if (!sscanf(attr->attr.name, "trip_point_%d_hyst", &trip)) /* unsafe_function_ignore: sscanf */
+	if (!sscanf(attr->attr.name, "trip_point_%d_hyst", &trip))
 		return -EINVAL;
 
 	ret = tz->ops->get_trip_hyst(tz, trip, &temperature);
 
-	return ret ? ret : sprintf(buf, "%d\n", temperature);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	return ret ? ret : sprintf(buf, "%d\n", temperature);/*lint !e421 */
 }
 
 static ssize_t
@@ -1222,7 +1113,7 @@ passive_store(struct device *dev, struct device_attribute *attr,
 	struct thermal_cooling_device *cdev = NULL;
 	int state;
 
-	if (!sscanf(buf, "%d\n", &state)) /* unsafe_function_ignore: sscanf */
+	if (!sscanf(buf, "%d\n", &state))
 		return -EINVAL;
 
 	/* sanity check: values below 1000 millicelcius don't make sense
@@ -1260,7 +1151,7 @@ passive_store(struct device *dev, struct device_attribute *attr,
 
 	tz->forced_passive = state;
 
-	thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+	thermal_zone_device_update(tz);
 
 	return count;
 }
@@ -1271,7 +1162,7 @@ passive_show(struct device *dev, struct device_attribute *attr,
 {
 	struct thermal_zone_device *tz = to_thermal_zone(dev);
 
-	return sprintf(buf, "%d\n", tz->forced_passive);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	return sprintf(buf, "%d\n", tz->forced_passive);/*lint !e421 */
 }
 
 static ssize_t
@@ -1283,7 +1174,7 @@ policy_store(struct device *dev, struct device_attribute *attr,
 	struct thermal_governor *gov;
 	char name[THERMAL_NAME_LENGTH];
 
-	snprintf(name, sizeof(name), "%s", buf);/* unsafe_function_ignore: snprintf */
+	snprintf(name, sizeof(name), "%s", buf);
 
 	mutex_lock(&thermal_governor_lock);
 	mutex_lock(&tz->lock);
@@ -1307,7 +1198,7 @@ policy_show(struct device *dev, struct device_attribute *devattr, char *buf)
 {
 	struct thermal_zone_device *tz = to_thermal_zone(dev);
 
-	return sprintf(buf, "%s\n", tz->governor->name);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	return sprintf(buf, "%s\n", tz->governor->name);/*lint !e421 */
 }
 
 static ssize_t
@@ -1337,14 +1228,16 @@ emul_temp_store(struct device *dev, struct device_attribute *attr,
 {
 	struct thermal_zone_device *tz = to_thermal_zone(dev);
 	int ret = 0;
+#ifdef CONFIG_HISI_IPA_THERMAL
 	int temperature;
-
 	if (kstrtoint(buf, 10, &temperature))
+#else
+	unsigned long temperature;
+
+	if (kstrtoul(buf, 10, &temperature))
+#endif
 		return -EINVAL;
 
-#ifdef CONFIG_HISI_IPA_THERMAL
-	temperature = thermal_zone_temp_check(temperature);
-#endif
 	if (!tz->ops->set_emul_temp) {
 		mutex_lock(&tz->lock);
 		tz->emul_temperature = temperature;
@@ -1354,7 +1247,7 @@ emul_temp_store(struct device *dev, struct device_attribute *attr,
 	}
 
 	if (!ret)
-		thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+		thermal_zone_device_update(tz);
 
 	return ret ? ret : count;
 }
@@ -1367,7 +1260,7 @@ sustainable_power_show(struct device *dev, struct device_attribute *devattr,
 	struct thermal_zone_device *tz = to_thermal_zone(dev);
 
 	if (tz->tzp)
-		return sprintf(buf, "%u\n", tz->tzp->sustainable_power);/*lint !e421*/ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "%u\n", tz->tzp->sustainable_power);
 	else
 		return -EIO;
 }
@@ -1404,7 +1297,7 @@ boost_timeout_show(struct device *dev, struct device_attribute *devattr,
 	struct thermal_zone_device *tz = to_thermal_zone(dev);
 
 	if (tz->tzp)
-		return snprintf(buf, PAGE_SIZE, "%u\n", tz->tzp->boost_timeout);/* unsafe_function_ignore: snprintf */
+		return sprintf(buf, "%u\n", tz->tzp->boost_timeout);
 	else
 		return -EIO;
 }
@@ -1437,10 +1330,6 @@ static DEVICE_ATTR(boost_timeout, (S_IWUSR | S_IRUGO), boost_timeout_show,
 		boost_timeout_store);
 #endif
 
-#ifdef CONFIG_HISI_IPA_THERMAL
-#define  MAX_S16 0x7FFF
-#endif
-
 #define create_s32_tzp_attr(name)					\
 	static ssize_t							\
 	name##_show(struct device *dev, struct device_attribute *devattr, \
@@ -1449,7 +1338,7 @@ static DEVICE_ATTR(boost_timeout, (S_IWUSR | S_IRUGO), boost_timeout_show,
 	struct thermal_zone_device *tz = to_thermal_zone(dev);		\
 									\
 	if (tz->tzp)							\
-		return sprintf(buf, "%d\n", tz->tzp->name); /* unsafe_function_ignore: sprintf */ \
+		return sprintf(buf, "%u\n", tz->tzp->name);		\
 	else								\
 		return -EIO;						\
 	}								\
@@ -1466,13 +1355,8 @@ static DEVICE_ATTR(boost_timeout, (S_IWUSR | S_IRUGO), boost_timeout_show,
 									\
 		if (kstrtos32(buf, 10, &value))				\
 			return -EINVAL;					\
-											\
-		if (value > MAX_S16)                    \
-			tz->tzp->name = MAX_S16;        \
-		else if (value < -MAX_S16)             \
-			tz->tzp->name = -MAX_S16;        \
-		else                                 \
-			tz->tzp->name = value;					\
+									\
+		tz->tzp->name = value;					\
 									\
 		return count;						\
 	}								\
@@ -1487,78 +1371,6 @@ create_s32_tzp_attr(slope);/*lint !e421 */
 create_s32_tzp_attr(offset);/*lint !e421 */
 #undef create_s32_tzp_attr
 
-static ssize_t cur_power_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct thermal_zone_device *tz;
-	struct thermal_instance *instance;
-	ssize_t buf_len;
-	ssize_t size = PAGE_SIZE;
-	if (dev == NULL || attr == NULL || buf == NULL){
-		return -EIO;
-	}
-
-	tz = to_thermal_zone(dev);
-	if (tz == NULL || tz->tzp == NULL){
-		return -EIO;
-	}
-
-	mutex_lock(&tz->lock);
-	buf_len = scnprintf(buf, size, "%llu,%u,", tz->tzp->cur_ipa_total_power, tz->tzp->check_cnt);
-	if (buf_len < 0)
-		goto unlock;
-	list_for_each_entry(instance, &tz->thermal_instances, tz_node) {
-		struct thermal_cooling_device *cdev = instance->cdev;
-		ssize_t ret;
-		size = PAGE_SIZE - buf_len;
-		if (size < 0 || size > (ssize_t)PAGE_SIZE)
-			break;
-		ret = scnprintf(buf + buf_len, size, "%llu,", cdev->cdev_cur_power);
-		if (ret < 0)
-			break;
-		buf_len += ret;
-	}
-unlock:
-	mutex_unlock(&tz->lock);
-
-	if (buf_len > 0)
-		buf[buf_len-1] = '\0';  ///set string end with '\0'
-	return buf_len;
-}
-
-static DEVICE_ATTR(cur_power, S_IRUGO, cur_power_show, NULL);
-
-static ssize_t
-cur_enable_show(struct device *dev, struct device_attribute *devattr,
-		       char *buf)
-{
-	struct thermal_zone_device *tz = to_thermal_zone(dev);
-
-	if (tz->tzp)
-		return scnprintf(buf, PAGE_SIZE, "%u\n", tz->tzp->cur_enable);/*lint !e421*/
-	else
-		return -EIO;
-}
-
-static ssize_t
-cur_enable_store(struct device *dev, struct device_attribute *devattr,
-			const char *buf, size_t count)
-{
-	struct thermal_zone_device *tz = to_thermal_zone(dev);
-	u32 cur_enable;
-
-	if (!tz->tzp)
-		return -EIO;
-
-	if (kstrtou32(buf, 10, &cur_enable))
-		return -EINVAL;
-
-	tz->tzp->cur_enable = (cur_enable > 0);
-
-	return count;
-}
-
-static DEVICE_ATTR(cur_enable, S_IWUSR | S_IRUGO, cur_enable_show, cur_enable_store);
-
 static struct device_attribute *dev_tzp_attrs[] = {
 	&dev_attr_sustainable_power,
 	&dev_attr_k_po,
@@ -1572,8 +1384,6 @@ static struct device_attribute *dev_tzp_attrs[] = {
 	&dev_attr_boost,
 	&dev_attr_boost_timeout,
 #endif
-	&dev_attr_cur_power,
-	&dev_attr_cur_enable,
 };
 
 static int create_tzp_attrs(struct device *dev)
@@ -1666,9 +1476,7 @@ int power_actor_set_power(struct thermal_cooling_device *cdev,
 		return ret;
 
 	instance->target = state;
-	mutex_lock(&cdev->lock);
 	cdev->updated = false;
-	mutex_unlock(&cdev->lock);
 	thermal_cdev_update(cdev);
 
 	return 0;
@@ -1691,7 +1499,7 @@ thermal_cooling_device_type_show(struct device *dev,
 {
 	struct thermal_cooling_device *cdev = to_cooling_device(dev);
 
-	return sprintf(buf, "%s\n", cdev->type);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	return sprintf(buf, "%s\n", cdev->type);/*lint !e421 */
 }
 
 static ssize_t
@@ -1705,7 +1513,7 @@ thermal_cooling_device_max_state_show(struct device *dev,
 	ret = cdev->ops->get_max_state(cdev, &state);
 	if (ret)
 		return ret;
-	return sprintf(buf, "%ld\n", state);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	return sprintf(buf, "%ld\n", state);/*lint !e421 */
 }
 
 static ssize_t
@@ -1719,7 +1527,7 @@ thermal_cooling_device_cur_state_show(struct device *dev,
 	ret = cdev->ops->get_cur_state(cdev, &state);
 	if (ret)
 		return ret;
-	return sprintf(buf, "%ld\n", state);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	return sprintf(buf, "%ld\n", state);/*lint !e421 */
 }
 
 static ssize_t
@@ -1731,7 +1539,7 @@ thermal_cooling_device_cur_state_store(struct device *dev,
 	unsigned long state;
 	int result;
 
-	if (!sscanf(buf, "%ld\n", &state)) /* unsafe_function_ignore: sscanf */
+	if (!sscanf(buf, "%ld\n", &state))
 		return -EINVAL;
 
 	if ((long)state < 0)
@@ -1761,9 +1569,9 @@ thermal_cooling_device_trip_point_show(struct device *dev,
 	    container_of(attr, struct thermal_instance, attr);
 
 	if (instance->trip == THERMAL_TRIPS_NONE)
-		return sprintf(buf, "-1\n");/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "-1\n");/*lint !e421 */
 	else
-		return sprintf(buf, "%d\n", instance->trip);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+		return sprintf(buf, "%d\n", instance->trip);/*lint !e421 */
 }
 
 static struct attribute *cooling_device_attrs[] = {
@@ -1790,7 +1598,7 @@ thermal_cooling_device_weight_show(struct device *dev,
 
 	instance = container_of(attr, struct thermal_instance, weight_attr);
 
-	return sprintf(buf, "%d\n", instance->weight);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	return sprintf(buf, "%d\n", instance->weight);/*lint !e421 */
 }
 
 static ssize_t
@@ -1802,7 +1610,6 @@ thermal_cooling_device_weight_store(struct device *dev,
 	struct thermal_zone_device *tz = to_thermal_zone(dev);
 	enum thermal_device_mode mode;
 	int result;
-	int actor_id = -1;
 #endif
 
 	struct thermal_instance *instance;
@@ -1825,9 +1632,12 @@ thermal_cooling_device_weight_store(struct device *dev,
 	instance->weight = weight;
 
 #ifdef CONFIG_HISI_IPA_THERMAL
-	actor_id = nametoactor(instance->weight_attr_name);
-	if(actor_id != -1)
-		g_ipa_normal_weights[actor_id] = weight;
+	if (!strncmp(instance->weight_attr_name, IPA_GPU_WEIGHT_NAME, sizeof(IPA_GPU_WEIGHT_NAME) - 1))
+		g_ipa_normal_weights[IPA_GPU] = weight;
+	else if (!strncmp(instance->weight_attr_name, IPA_CLUSTER0_WEIGHT_NAME, sizeof(IPA_CLUSTER0_WEIGHT_NAME) - 1))
+		g_ipa_normal_weights[IPA_CLUSTER0] = weight;
+	else if (!strncmp(instance->weight_attr_name, IPA_CLUSTER1_WEIGHT_NAME, sizeof(IPA_CLUSTER1_WEIGHT_NAME) - 1))
+		g_ipa_normal_weights[IPA_CLUSTER1] = weight;
 #endif
 
 	return count;
@@ -1914,13 +1724,13 @@ int thermal_zone_bind_cooling_device(struct thermal_zone_device *tz,
 	if (result)
 		goto free_mem;
 
-	sprintf(dev->name, "cdev%d", dev->id);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	sprintf(dev->name, "cdev%d", dev->id);/*lint !e421 */
 	result =
 	    sysfs_create_link(&tz->device.kobj, &cdev->device.kobj, dev->name);
 	if (result)
 		goto release_idr;
 
-	sprintf(dev->attr_name, "cdev%d_trip_point", dev->id);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	sprintf(dev->attr_name, "cdev%d_trip_point", dev->id);/*lint !e421 */
 	sysfs_attr_init(&dev->attr.attr);
 	dev->attr.attr.name = dev->attr_name;
 	dev->attr.attr.mode = 0444;
@@ -1929,12 +1739,21 @@ int thermal_zone_bind_cooling_device(struct thermal_zone_device *tz,
 	if (result)
 		goto remove_symbol_link;
 
-	sprintf(dev->weight_attr_name, "cdev%d_weight", dev->id);/*lint !e421 */ /* unsafe_function_ignore: sprintf */
+	sprintf(dev->weight_attr_name, "cdev%d_weight", dev->id);/*lint !e421 */
 	sysfs_attr_init(&dev->weight_attr.attr);
 	dev->weight_attr.attr.name = dev->weight_attr_name;
 	dev->weight_attr.attr.mode = S_IWUSR | S_IRUGO;
 	dev->weight_attr.show = thermal_cooling_device_weight_show;
 	dev->weight_attr.store = thermal_cooling_device_weight_store;
+
+#ifdef CONFIG_HISI_IPA_THERMAL
+	if (!strncmp(dev->weight_attr_name, IPA_GPU_WEIGHT_NAME, sizeof(IPA_GPU_WEIGHT_NAME) - 1))
+		g_ipa_normal_weights[IPA_GPU] = weight;
+	else if (!strncmp(dev->weight_attr_name, IPA_CLUSTER0_WEIGHT_NAME, sizeof(IPA_CLUSTER0_WEIGHT_NAME) - 1))
+		g_ipa_normal_weights[IPA_CLUSTER0] = weight;
+	else if (!strncmp(dev->weight_attr_name, IPA_CLUSTER1_WEIGHT_NAME, sizeof(IPA_CLUSTER1_WEIGHT_NAME) - 1))
+		g_ipa_normal_weights[IPA_CLUSTER1] = weight;
+#endif
 
 	result = device_create_file(&tz->device, &dev->weight_attr);
 	if (result)
@@ -2110,8 +1929,7 @@ __thermal_cooling_device_register(struct device_node *np,
 	mutex_lock(&thermal_list_lock);
 	list_for_each_entry(pos, &thermal_tz_list, node)
 		if (atomic_cmpxchg(&pos->need_update, 1, 0))
-			thermal_zone_device_update(pos,
-						   THERMAL_EVENT_UNSPECIFIED);
+			thermal_zone_device_update(pos);
 	mutex_unlock(&thermal_list_lock);
 
 	return cdev;
@@ -2227,13 +2045,11 @@ void thermal_cdev_update(struct thermal_cooling_device *cdev)
 	struct thermal_instance *instance;
 	unsigned long target = 0;
 
-	mutex_lock(&cdev->lock);
 	/* cooling device is updated*/
-	if (cdev->updated) {
-		mutex_unlock(&cdev->lock);
+	if (cdev->updated)
 		return;
-	}
 
+	mutex_lock(&cdev->lock);
 	/* Make sure cdev enters the deepest cooling state */
 	list_for_each_entry(instance, &cdev->thermal_instances, cdev_node) {
 		dev_dbg(&cdev->device, "zone%d->target=%lu\n",
@@ -2243,9 +2059,9 @@ void thermal_cdev_update(struct thermal_cooling_device *cdev)
 		if (instance->target > target)
 			target = instance->target;
 	}
+	mutex_unlock(&cdev->lock);
 	cdev->ops->set_cur_state(cdev, target);
 	cdev->updated = true;
-	mutex_unlock(&cdev->lock);
 	trace_cdev_update(cdev, target);
 	dev_dbg(&cdev->device, "set to state %lu\n", target);
 }
@@ -2306,7 +2122,8 @@ static int create_trip_attrs(struct thermal_zone_device *tz, int mask)
 
 	for (indx = 0; indx < tz->trips; indx++) {
 		/* create trip type attribute */
-		snprintf(tz->trip_type_attrs[indx].name, THERMAL_NAME_LENGTH, "trip_point_%d_type", indx);/* unsafe_function_ignore: snprintf */
+		snprintf(tz->trip_type_attrs[indx].name, THERMAL_NAME_LENGTH,
+			 "trip_point_%d_type", indx);
 
 		sysfs_attr_init(&tz->trip_type_attrs[indx].attr.attr);
 		tz->trip_type_attrs[indx].attr.attr.name =
@@ -2328,7 +2145,8 @@ static int create_trip_attrs(struct thermal_zone_device *tz, int mask)
 				   &tz->trip_type_attrs[indx].attr);
 
 		/* create trip temp attribute */
-		snprintf(tz->trip_temp_attrs[indx].name, THERMAL_NAME_LENGTH, "trip_point_%d_temp", indx);/* unsafe_function_ignore: snprintf */
+		snprintf(tz->trip_temp_attrs[indx].name, THERMAL_NAME_LENGTH,
+			 "trip_point_%d_temp", indx);
 
 		sysfs_attr_init(&tz->trip_temp_attrs[indx].attr.attr);
 		tz->trip_temp_attrs[indx].attr.attr.name =
@@ -2348,7 +2166,8 @@ static int create_trip_attrs(struct thermal_zone_device *tz, int mask)
 		/* create Optional trip hyst attribute */
 		if (!tz->ops->get_trip_hyst)
 			continue;
-		snprintf(tz->trip_hyst_attrs[indx].name, THERMAL_NAME_LENGTH, "trip_point_%d_hyst", indx);/* unsafe_function_ignore: snprintf */
+		snprintf(tz->trip_hyst_attrs[indx].name, THERMAL_NAME_LENGTH,
+			 "trip_point_%d_hyst", indx);
 
 		sysfs_attr_init(&tz->trip_hyst_attrs[indx].attr.attr);
 		tz->trip_hyst_attrs[indx].attr.attr.name =
@@ -2424,7 +2243,7 @@ struct thermal_zone_device *thermal_zone_device_register(const char *type,
 	struct thermal_zone_device_ops *ops,
 	struct thermal_zone_params *tzp,
 	int passive_delay, int polling_delay)
-{/*lint !e18*/
+{
 	struct thermal_zone_device *tz;
 	enum thermal_trip_type trip_type;
 	int trip_temp;
@@ -2583,7 +2402,7 @@ struct thermal_zone_device *thermal_zone_device_register(const char *type,
 	thermal_zone_device_reset(tz);
 	/* Update the new thermal zone and mark it as already updated. */
 	if (atomic_cmpxchg(&tz->need_update, 1, 0))
-		thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+		thermal_zone_device_update(tz);
 
 	return tz;
 
@@ -2701,36 +2520,6 @@ exit:
 }
 EXPORT_SYMBOL_GPL(thermal_zone_get_zone_by_name);
 
-/**
- * thermal_zone_get_slope - return the slope attribute of the thermal zone
- * @tz: thermal zone device with the slope attribute
- *
- * Return: If the thermal zone device has a slope attribute, return it, else
- * return 1.
- */
-int thermal_zone_get_slope(struct thermal_zone_device *tz)
-{
-	if (tz && tz->tzp)
-		return tz->tzp->slope;
-	return 1;
-}
-EXPORT_SYMBOL_GPL(thermal_zone_get_slope);
-
-/**
- * thermal_zone_get_offset - return the offset attribute of the thermal zone
- * @tz: thermal zone device with the offset attribute
- *
- * Return: If the thermal zone device has a offset attribute, return it, else
- * return 0.
- */
-int thermal_zone_get_offset(struct thermal_zone_device *tz)
-{
-	if (tz && tz->tzp)
-		return tz->tzp->offset;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(thermal_zone_get_offset);
-
 #ifdef CONFIG_NET
 static const struct genl_multicast_group thermal_event_mcgrps[] = {
 	{ .name = THERMAL_GENL_MCAST_GROUP_NAME, },
@@ -2791,7 +2580,7 @@ int thermal_generate_netlink_event(struct thermal_zone_device *tz,
 		return -EINVAL;
 	}
 
-	memset(thermal_event, 0, sizeof(struct thermal_genl_event)); /* unsafe_function_ignore: memset */
+	memset(thermal_event, 0, sizeof(struct thermal_genl_event));
 
 	thermal_event->orig = tz->id;
 	thermal_event->event = event;
@@ -2873,12 +2662,11 @@ static int thermal_pm_notify(struct notifier_block *nb,
 #ifdef CONFIG_HISI_IPA_THERMAL
 			if(strncmp(tz->governor->name, USER_SPACE_GOVERNOR, THERMAL_NAME_LENGTH)){ /*[false alarm]*/
 				thermal_zone_device_reset(tz);
-				thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
+				thermal_zone_device_update(tz);
 			}
 #else
 			thermal_zone_device_reset(tz);
-			thermal_zone_device_update(tz,
-						   THERMAL_EVENT_UNSPECIFIED);
+			thermal_zone_device_update(tz);
 #endif
 		}
 		break;
@@ -2891,6 +2679,90 @@ static int thermal_pm_notify(struct notifier_block *nb,
 static struct notifier_block thermal_pm_nb = {
 	.notifier_call = thermal_pm_notify,
 };
+
+#ifdef CONFIG_HISI_THERMAL_SPM
+static int init_profile_power(void)
+{
+	struct thermal_zone_device *pos;
+	unsigned int sustainable_power;
+	unsigned int total_weight = 0;
+	unsigned int weight;
+	int i, num_tbps = 0;
+	enum ipa_actor actor;
+	int ret = 0;
+
+	mutex_lock(&thermal_list_lock);
+
+	/*lint -e64 -e826 -esym(64,826,*)*/
+	list_for_each_entry(pos, &thermal_tz_list, node) {
+		if (!strncasecmp(pos->type, "soc_thermal", sizeof("soc_thermal") - 1)) {
+			sustainable_power = pos->tzp->sustainable_power;
+			num_tbps = of_thermal_get_num_tbps(pos);
+			for (i = 0; i < num_tbps; i++) {
+				ret = of_thermal_get_actor_weight(pos, i, &actor, &weight);
+				if (ret)
+					goto EXIT;
+
+				total_weight += weight;
+				profile_power[actor] = weight * sustainable_power;
+
+			}
+			break;
+		}
+	}
+	/*lint -e64 -e826 +esym(64,826,*)*/
+
+	if (total_weight) {
+		for (i = 0; i < num_tbps; i++) {
+			profile_power[i] /= total_weight;
+			pr_err("IPA: actor %d, power: %d\n", i, profile_power[i]);
+		}
+	}
+EXIT:
+	mutex_unlock(&thermal_list_lock);
+
+	return ret;
+}
+
+int get_profile_power(enum ipa_actor actor, unsigned int *power)
+{
+	if (actor >= IPA_ACTOR_MAX || actor < IPA_CLUSTER0)
+		return -EDOM;
+
+	*power = profile_power[actor];
+
+	return 0;
+}
+EXPORT_SYMBOL(get_profile_power);
+
+int get_soc_target_temp(struct thermal_cooling_device *cdev, int *target_temp)
+{
+	bool found = false;
+	struct thermal_instance *instance;
+	struct thermal_zone_device *thermal_zone;
+
+	mutex_lock(&cdev->lock);
+	/*lint -e64 -e826 -esym(64,826,*)*/
+	list_for_each_entry(instance, &cdev->thermal_instances, cdev_node) {
+		if (!strncasecmp(instance->tz->type, "soc_thermal", sizeof("soc_thermal") - 1)) {
+			found = true;
+			thermal_zone = instance->tz;
+			thermal_zone->ops->get_trip_temp(thermal_zone, instance->trip, target_temp);
+			break;
+		}
+	}
+	/*lint -e64 -e826 +esym(64,826,*)*/
+	mutex_unlock(&cdev->lock);
+
+	if (!found)
+		return -EINVAL;
+
+	pr_err("IPA: soc target temp: %d", *target_temp);
+	return 0;
+}
+EXPORT_SYMBOL(get_soc_target_temp);
+
+#endif
 
 static int __init thermal_init(void)
 {
@@ -2908,20 +2780,14 @@ static int __init thermal_init(void)
 	if (result)
 		goto unregister_class;
 
-#ifdef CONFIG_HISI_IPA_THERMAL
-	result = of_parse_ipa_sensor_index_table();
-	if (result)
-		goto exit_netlink;
-#endif
-
 	result = of_parse_thermal_zones();
 	if (result)
 		goto exit_netlink;
 
 #ifdef CONFIG_HISI_THERMAL_SPM
-	if (ipa_weights_cfg_init()) {
-		pr_err("%s:ipa_weights_init error, use default value.\n", __func__);
-	}
+	result = init_profile_power();
+	if (result)
+		goto exit_netlink;
 #endif
 
 	result = register_pm_notifier(&thermal_pm_nb);

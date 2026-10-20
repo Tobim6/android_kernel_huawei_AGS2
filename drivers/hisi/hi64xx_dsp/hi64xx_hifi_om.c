@@ -25,12 +25,8 @@
 #include <linux/rtc.h>
 #include <linux/time.h>
 #include <linux/stat.h>
-#include <linux/version.h>
 #include <linux/hisi/hi64xx/hi6403_dsp_regs.h>
 #include <hi64xx_hifi_interface.h>
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-#include <uapi/linux/sched/types.h>
-#endif
 
 #include "hi64xx_hifi_om.h"
 #include "hi64xx_hifi_debug.h"
@@ -180,16 +176,22 @@ struct hi64xx_om_priv {
 	unsigned short bandwidth;
 	unsigned short sponsor;
 	unsigned int dir_count;
-	unsigned int codec_type;
 	bool standby;
 	bool started;
 	bool is_eng;
 	bool should_deactive_slimbus;
 	unsigned short open_file_failed_cnt;
-	unsigned int slimbus_track_type;
-	slimbus_device_type_t slimbus_device_type;
 };
 
+static struct data_cfg slim_data_cfg[HOOK_CNT] = {
+	{.sample_rate = 192000, .resolution = 4, .channels = 1},  /* left */
+	{.sample_rate = 192000, .resolution = 4, .channels = 1},  /* right */
+};
+
+static struct hook_dma_cfg slim_dma_cfg[HOOK_CNT] = {
+	{.port = 0xe8051180, .config = 0x43322067, .channel = 7},  /* left */
+	{.port = 0xe80511c0, .config = 0x43322077, .channel = 8},  /* right */
+};
 
 static struct hook_pos_name pos_name[] = {
 	{HOOK_POS_IF0,              "IF0"},
@@ -223,6 +225,15 @@ static struct hook_pos_name pos_name[] = {
 
 static struct hi64xx_om_priv *om_priv = NULL;
 
+static unsigned int _get_data_size(struct data_cfg *config)
+{
+	uint32_t data_size = 0;
+
+	data_size = config->sample_rate * config->resolution *
+				config->channels * HOOK_AP_DMA_INTERVAL / 1000;
+
+	return data_size;
+}
 
 static unsigned int _get_verify_pos(void *data, unsigned int size)
 {
@@ -305,7 +316,94 @@ err_exit:
 	return ret;
 }
 /*lint +e429*/
+static int _alloc_hook_buffer_fama(unsigned int hook_id)
+{
+	struct hook_runtime *runtime = NULL;
+	struct hi64xx_om_priv *priv = om_priv;
 
+	BUG_ON(NULL == priv);
+
+	runtime = &priv->runtime[hook_id];
+
+	if (HOOK_LEFT == hook_id) {
+		runtime->buffer_phy[PCM_SWAP_BUFF_A] = (void *)LEFT_DMA_ADDR;
+		runtime->buffer_phy[PCM_SWAP_BUFF_B] = (void *)(unsigned long)(LEFT_DMA_ADDR + runtime->size);
+		runtime->lli_cfg_phy[PCM_SWAP_BUFF_A] = (void *)LEFT_DMA_CFG_ADDR;
+		runtime->lli_cfg_phy[PCM_SWAP_BUFF_B] =
+			(void *)(LEFT_DMA_CFG_ADDR + sizeof(struct dma_lli_cfg));
+
+		runtime->buffer[PCM_SWAP_BUFF_A] =
+			ioremap_wc(LEFT_DMA_ADDR, LEFT_DMA_SIZE);
+		runtime->buffer[PCM_SWAP_BUFF_B] =
+			(void __iomem*)((char *)runtime->buffer[PCM_SWAP_BUFF_A] + runtime->size);
+		runtime->lli_cfg[PCM_SWAP_BUFF_A] =
+			ioremap_wc(LEFT_DMA_CFG_ADDR, LEFT_DMA_CFG_SIZE);
+		runtime->lli_cfg[PCM_SWAP_BUFF_B] =
+			(void __iomem*)((char *)runtime->lli_cfg[PCM_SWAP_BUFF_A] + sizeof(struct dma_lli_cfg));
+	} else {
+		runtime->buffer_phy[PCM_SWAP_BUFF_A] = (void *)RIGHT_DMA_ADDR;
+		runtime->buffer_phy[PCM_SWAP_BUFF_B] = (void *)(unsigned long)(RIGHT_DMA_ADDR + runtime->size);
+		runtime->lli_cfg_phy[PCM_SWAP_BUFF_A] = (void *)RIGHT_DMA_CFG_ADDR;
+		runtime->lli_cfg_phy[PCM_SWAP_BUFF_B] =
+			(void *)(RIGHT_DMA_CFG_ADDR + sizeof(struct dma_lli_cfg));
+
+		runtime->buffer[PCM_SWAP_BUFF_A] =
+			ioremap_wc(RIGHT_DMA_ADDR, RIGHT_DMA_SIZE);
+		runtime->buffer[PCM_SWAP_BUFF_B] =
+			(void __iomem*)((char *)runtime->buffer[PCM_SWAP_BUFF_A] + runtime->size);
+		runtime->lli_cfg[PCM_SWAP_BUFF_A] =
+			ioremap_wc(RIGHT_DMA_CFG_ADDR, RIGHT_DMA_CFG_SIZE);
+		runtime->lli_cfg[PCM_SWAP_BUFF_B] =
+			(void __iomem*)((char *)runtime->lli_cfg[PCM_SWAP_BUFF_A] + sizeof(struct dma_lli_cfg));
+	}
+
+	/* must use ioremap_wc to remap */
+	memset((void*)runtime->buffer[PCM_SWAP_BUFF_A], 0, LEFT_DMA_SIZE);
+	memset((void*)runtime->lli_cfg[PCM_SWAP_BUFF_A], 0, LEFT_DMA_CFG_SIZE);
+
+	return 0;
+}
+
+static int _hook_runtime_config(unsigned int hook_id)
+{
+	struct hi64xx_om_priv *priv = om_priv;
+	struct dma_lli_cfg *lli_cfg_a = NULL;
+	struct dma_lli_cfg *lli_cfg_b = NULL;
+	struct hook_runtime *runtime = NULL;
+	struct data_cfg *data_cfg = NULL;
+	struct hook_dma_cfg *dma_cfg = NULL;
+
+	BUG_ON(NULL == priv);
+
+	runtime = &priv->runtime[hook_id];
+	data_cfg = &slim_data_cfg[hook_id];
+	dma_cfg = &slim_dma_cfg[hook_id];
+
+	runtime->size = _get_data_size(data_cfg);
+
+	_alloc_hook_buffer_fama(hook_id);
+
+	runtime->channel = dma_cfg->channel;
+	runtime->verify_state = VERIFY_DEFAULT;
+	runtime->parsed = false;
+
+	lli_cfg_a = (struct dma_lli_cfg*)runtime->lli_cfg[PCM_SWAP_BUFF_A];
+	lli_cfg_b = (struct dma_lli_cfg*)runtime->lli_cfg[PCM_SWAP_BUFF_B];
+
+	lli_cfg_a->a_count = runtime->size;
+	lli_cfg_a->src_addr = dma_cfg->port;
+	lli_cfg_a->des_addr = (unsigned int)((unsigned long)runtime->buffer_phy[PCM_SWAP_BUFF_A]);
+	lli_cfg_a->config = dma_cfg->config;
+	lli_cfg_a->lli = ASP_DMA_LLI_LINK(runtime->lli_cfg_phy[PCM_SWAP_BUFF_B]);
+
+	lli_cfg_b->a_count = runtime->size;
+	lli_cfg_b->src_addr = dma_cfg->port;
+	lli_cfg_b->des_addr = (unsigned int)((unsigned long)runtime->buffer_phy[PCM_SWAP_BUFF_B]);
+	lli_cfg_b->config = dma_cfg->config;
+	lli_cfg_b->lli = ASP_DMA_LLI_LINK(runtime->lli_cfg_phy[PCM_SWAP_BUFF_A]);
+
+	return 0;
+}
 
 static int _om_chown(char *path, uid_t user, gid_t group)
 {
@@ -402,6 +500,142 @@ static int _rm_hook_dir(char *path)
 	return ret;
 }
 
+static int _get_dir_count(char *path)
+{
+	int fd = -1;
+	char buf[1024];
+	int bufsize = 0;
+	struct linux_dirent *dirent = NULL;
+	struct kstat stat;
+	unsigned int count = 0, bpos = 0;
+
+	if (!path) {
+		HI64XX_DSP_ERROR("path is null.\n");
+		return -1;
+	}
+
+	fd = sys_open(path, O_RDONLY, 0770);
+	if (fd < 0) {
+		HI64XX_DSP_ERROR("open %s failed.\n", path);
+		return fd;
+	}
+
+	memset(&stat, 0, sizeof(struct kstat));
+	if (0 != vfs_stat(path, &stat))
+		HI64XX_DSP_WARNING("stat failed:%s.\n", path);
+
+	memset(&buf, 0, sizeof(buf));
+	bufsize = sys_getdents(fd, (struct linux_dirent *)buf, sizeof(buf));
+	if (0 >= bufsize) {
+		HI64XX_DSP_ERROR("sys_getdents end.\n");
+		goto out;
+	}
+
+	dirent = (struct linux_dirent *)(buf + bpos);
+	for (bpos = 0; bpos < (unsigned int)bufsize; bpos += dirent->d_reclen) {
+		dirent = (struct linux_dirent *)(buf + bpos);
+		count++;
+	}
+
+out:
+	if (fd >= 0)
+		sys_close(fd);
+
+	return count;
+}
+
+static long long _get_dir_size(char *path)
+{
+	int fd = -1;
+	char buf[1024];
+	int bufsize = 0;
+	struct linux_dirent *dirent = NULL;
+	char d_type;
+	char fullname[HOOK_PATH_MAX_LENGTH] = {0};
+	struct kstat stat;
+	unsigned int bpos = 0;
+	unsigned long long size = 0;
+
+	if (!path) {
+		HI64XX_DSP_ERROR("path is null.\n");
+		return -1;
+	}
+
+	fd = sys_open(path, O_RDONLY, 0770);
+	if (fd < 0) {
+		HI64XX_DSP_ERROR("open %s failed.\n", path);
+		return fd;
+	}
+
+	memset(&stat, 0, sizeof(struct kstat));
+	if (0 != vfs_stat(path, &stat))
+		HI64XX_DSP_WARNING("stat failed:%s.\n", path);
+
+	size += stat.size;
+
+	memset(&buf, 0, sizeof(buf));
+
+	for (;;) {
+		bufsize = sys_getdents(fd, (struct linux_dirent *)buf, sizeof(buf));
+		if (0 >= bufsize)
+			break;
+
+		dirent = (struct linux_dirent *)(buf + bpos);
+		for (bpos = 0; bpos < (unsigned int)bufsize; bpos += dirent->d_reclen) {
+			dirent = (struct linux_dirent *)(buf + bpos);
+			d_type = *(buf + bpos + dirent->d_reclen - 1);
+
+			memset(&stat, 0, sizeof(struct kstat));
+			snprintf(fullname, sizeof(fullname) - 1, "%s/%s", path, dirent->d_name);/* [false alarm] */
+
+			if (0 != vfs_stat(fullname, &stat))
+				HI64XX_DSP_WARNING("stat failed:%s.\n", fullname);
+
+			if (d_type == DT_DIR) {
+				if (!strncmp(dirent->d_name, ".", sizeof("."))
+					|| !strncmp(dirent->d_name, "..", sizeof(".."))
+					|| !strncmp(dirent->d_name, "...", sizeof("...")))
+					continue;
+
+				// cppcheck-suppress *
+				size += _get_dir_size(fullname);
+			} else if (d_type == DT_REG) {
+				size += stat.size;
+			} else {
+				HI64XX_DSP_WARNING("err dir type:%d.\n", d_type);
+			}
+		}
+	}
+
+	if (fd >= 0)
+		sys_close(fd);
+
+	return size;
+}
+
+static void _get_dir_name(char *dir_name, size_t size)
+{
+	struct rtc_time tm;
+	struct timeval tv;
+	struct hi64xx_om_priv *priv = om_priv;
+
+	BUG_ON(NULL == priv);
+	BUG_ON(NULL == dir_name);
+
+	memset(&tm, 0, sizeof(tm));
+	memset(&tv, 0, sizeof(tv));
+
+	do_gettimeofday(&tv);
+	tv.tv_sec -= (long)sys_tz.tz_minuteswest * 60;
+	rtc_time_to_tm(tv.tv_sec, &tm);
+
+	snprintf(dir_name, size, "%s%04d%02d%02d%02d%02d%02d/",/* [false alarm] */
+		priv->hook_path,
+		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+		tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+	return;
+}
 
 static int _create_dir(char *path)
 {
@@ -429,7 +663,7 @@ static int _create_dir(char *path)
 	return 0;
 }
 
-static int _create_full_dir(const char *path)
+static int _create_full_dir(char *path)
 {
 	char cur_path[HOOK_PATH_MAX_LENGTH];
 	int index = 0;
@@ -456,6 +690,86 @@ static int _create_full_dir(const char *path)
 	return 0;
 }
 
+static int _create_hook_dir(void)
+{
+	struct hi64xx_om_priv *priv = om_priv;
+	long long dir_size = 0;
+	int dir_count = 0;
+	char dir[HOOK_PATH_MAX_LENGTH] = {0};
+	mm_segment_t old_fs;
+	int ret = 0;
+
+	BUG_ON(NULL == priv);
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);/*lint !e501*/
+
+	if (_create_full_dir(priv->hook_path)) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	if (priv->sponsor != OM_SPONSOR_DEFAULT) {
+		if (0 > _rm_hook_dir(priv->hook_path)) {
+			ret = -EFAULT;
+			goto out;
+		}
+
+		if (_create_full_dir(priv->hook_path)) {
+			ret = -EFAULT;
+			goto out;
+		}
+
+		goto out;
+	}
+
+	dir_size = _get_dir_size(priv->hook_path);
+	if (0 > dir_size) {
+		ret = dir_size;
+		goto out;
+	}
+
+	HI64XX_DSP_INFO("dir size:%lld\n", dir_size);
+
+	dir_count = _get_dir_count(priv->hook_path);
+	if (0 > dir_count) {
+		ret = dir_count;
+		goto out;
+	}
+
+	HI64XX_DSP_INFO("dir count:%d, max dir count:%d\n",
+			dir_count, priv->dir_count);
+
+	if (dir_size > HOOK_MAX_DIR_SIZE
+		|| (unsigned int)dir_count > priv->dir_count) {
+		HI64XX_DSP_INFO("rm dirs, dir size:%lld, dir count:%d, max dir count:%d.\n",
+			dir_size, dir_count, priv->dir_count);
+
+		if (0 > _rm_hook_dir(priv->hook_path)) {
+			ret = -EFAULT;
+			goto out;
+		}
+
+		if (_create_full_dir(priv->hook_path)) {
+			ret = -EFAULT;
+			goto out;
+		}
+	}
+
+	/* generate dir name by system time */
+	_get_dir_name(dir, HOOK_PATH_MAX_LENGTH - 1);
+	if (_create_full_dir(dir)) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	strncpy(priv->hook_path, dir, sizeof(priv->hook_path) - 1);
+
+out:
+	set_fs(old_fs);
+
+	return ret;
+}
 
 int hi64xx_hifi_create_hook_dir(const char *path)
 {
@@ -470,7 +784,7 @@ int hi64xx_hifi_create_hook_dir(const char *path)
 
 	strncpy(tmp_path, path,  sizeof(tmp_path) -1);
 
-	old_fs = get_fs();/*lint !e501*/
+	old_fs = get_fs();
 	set_fs(KERNEL_DS);/*lint !e501*/
 
 	if (_create_full_dir(tmp_path)) {
@@ -494,8 +808,61 @@ out:
 	return ret;
 }
 
+static void _set_hook_path(void)
+{
+	struct hi64xx_om_priv *priv = om_priv;
 
-void hi64xx_hifi_dump_to_file(const char *buf, unsigned int size, char *path)
+	BUG_ON(NULL == priv);
+
+	switch (priv->sponsor) {
+	case OM_SPONSOR_BETA:
+		strncpy(priv->hook_path, HOOK_PATH_BETA_CLUB, sizeof(priv->hook_path));
+		break;
+	case OM_SPONSOR_TOOL:
+		strncpy(priv->hook_path, HOOK_PATH_VISUAL_TOOL, sizeof(priv->hook_path));
+		break;
+	default:
+		strncpy(priv->hook_path, HOOK_PATH_DEFAULT, sizeof(priv->hook_path));
+		break;
+	}
+}
+
+static void _dump_runtime(struct hook_runtime *runtime)
+{
+	struct dma_lli_cfg *lli_cfg_a = NULL;
+	struct dma_lli_cfg *lli_cfg_b = NULL;
+
+	if (!runtime)
+		return;
+
+	HI64XX_DSP_INFO("lli cfg:%pK, buffer:%pK\n",
+				runtime->lli_cfg[PCM_SWAP_BUFF_A], runtime->buffer[PCM_SWAP_BUFF_A]);
+
+	HI64XX_DSP_INFO("lli cfg phy:%pK, buffer phy:%pK\n",
+				runtime->lli_cfg_phy[PCM_SWAP_BUFF_A], runtime->buffer_phy[PCM_SWAP_BUFF_A]);
+
+	lli_cfg_a = (struct dma_lli_cfg*)runtime->lli_cfg[PCM_SWAP_BUFF_A];
+	lli_cfg_b = (struct dma_lli_cfg*)runtime->lli_cfg[PCM_SWAP_BUFF_B];
+	if (!lli_cfg_a || !lli_cfg_b)
+		return;
+
+	HI64XX_DSP_INFO("A::a count:0x%x, src addr:0x%pK, dest addr:0x%pK, config:0x%x, lli:0x%x\n",
+				lli_cfg_a->a_count, (void *)(unsigned long)(lli_cfg_a->src_addr), (void *)(unsigned long)(lli_cfg_a->des_addr),
+				lli_cfg_a->config, lli_cfg_a->lli);
+
+	HI64XX_DSP_INFO("B::a count:0x%x, src addr:0x%pK, dest addr:0x%pK, config:0x%x, lli:0x%x\n",
+				lli_cfg_b->a_count, (void *)(unsigned long)(lli_cfg_b->src_addr), (void *)(unsigned long)(lli_cfg_b->des_addr),
+				lli_cfg_b->config, lli_cfg_b->lli);
+
+	HI64XX_DSP_INFO("dma size:%d, dma channel:%d\n",
+				runtime->size, runtime->channel);
+
+	HI64XX_DSP_INFO("parsed:%d, verify state:%d\n",
+				runtime->parsed, runtime->verify_state);
+}
+
+
+void hi64xx_hifi_dump_to_file(char *buf, unsigned int size, char *path)
 {
 	struct file *fp = NULL;
 	int file_flag = O_RDWR;
@@ -503,7 +870,7 @@ void hi64xx_hifi_dump_to_file(const char *buf, unsigned int size, char *path)
 	mm_segment_t fs = 0;
 	struct hi64xx_om_priv *priv = om_priv;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	if (!path) {
 		HI64XX_DSP_ERROR("path is null.\n");
@@ -520,7 +887,7 @@ void hi64xx_hifi_dump_to_file(const char *buf, unsigned int size, char *path)
 		return;
 	}
 
-	fs = get_fs();/*lint !e501*/
+	fs = get_fs();
 	set_fs(KERNEL_DS); /*lint !e501*/
 
 	if (0 == vfs_stat(path, &file_stat) &&
@@ -564,14 +931,14 @@ END:
 }
 
 static void _dump_dsp_data_for_tool(hook_pos pos,
-				const void *data, unsigned int size, unsigned int hook_id)
+				void *data, unsigned int size, unsigned int hook_id)
 {
 	char path[HOOK_PATH_MAX_LENGTH + HOOK_FILE_NAME_MAX_LENGTH] = {0};
 	char new_path[HOOK_PATH_MAX_LENGTH + HOOK_FILE_NAME_MAX_LENGTH] = {0};
 	struct hi64xx_om_priv *priv = om_priv;
 	struct hook_runtime *runtime = NULL;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	if (HOOK_POS_LOG == pos) {
 		//todo:print dsp log
@@ -605,12 +972,12 @@ static void _dump_dsp_data_for_tool(hook_pos pos,
 }
 
 static void _dump_dsp_data(hook_pos pos,
-				const void *data, unsigned int size, unsigned int hook_id)
+				void *data, unsigned int size, unsigned int hook_id)
 {
 	char path[HOOK_PATH_MAX_LENGTH + HOOK_FILE_NAME_MAX_LENGTH] = {0};
 	struct hi64xx_om_priv *priv = om_priv;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	if (HOOK_POS_LOG == pos) {
 		//todo:print dsp log
@@ -637,7 +1004,7 @@ static void _parse_dsp_data(void *data, struct hook_runtime *runtime)
 	unsigned int data_size = 0;
 	unsigned int i = 0;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	if (VERIFY_FRAME_HEAD_MAGIC_NUM == *buffer) {
 		HI64XX_DSP_WARNING("throw away verify data.\n");
@@ -683,7 +1050,7 @@ static int _parse_pos_info(void *data, struct hook_runtime *runtime)
 	char log[HOOK_RECORD_MAX_LENGTH] = {0};
 	char path[HOOK_PATH_MAX_LENGTH + HOOK_FILE_NAME_MAX_LENGTH] = {0};
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	/*
 	 * pos info arrange:
@@ -747,6 +1114,7 @@ static void _data_verify(struct data_flow *data,
 	if (VERIFY_DEFAULT == runtime->verify_state) {
 		pos = _get_verify_pos(data->addr, runtime->size);
 		if (pos == runtime->size) {
+			HI64XX_DSP_INFO("do not find verify head.\n");
 			return;
 		}
 
@@ -806,10 +1174,18 @@ free_list_node:
 static void _hook_should_stop(void)
 {
 	slimbus_framer_type_t framer;
+	unsigned int s2_ctrl = 0;
+	bool s2_clk_en = false;
 
 	framer = slimbus_debug_get_framer();
 
-	if ((framer != SLIMBUS_FRAMER_CODEC) || hi64xx_check_i2s2_clk())
+	s2_ctrl = hi64xx_hifi_read_reg(HI64xx_DSP_S2_CTRL_L);
+	if (s2_ctrl & (0x1 << HI64xx_DSP_S2_CLK_EN_BIT)) {
+		HI64XX_DSP_INFO("S2 is enable, om hook can't start.\n");
+		s2_clk_en = true;
+	}
+
+	if ((framer != SLIMBUS_FRAMER_CODEC) || s2_clk_en)
 		hi64xx_stop_hook();
 
 	return;
@@ -821,7 +1197,7 @@ static int _left_data_parse_thread(void *p)
 	struct hi64xx_om_priv *priv = om_priv;
 	struct hook_runtime *runtime = NULL;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	runtime = &priv->runtime[HOOK_LEFT];
 
@@ -868,7 +1244,7 @@ static int _right_data_parse_thread(void *p)
 	struct hi64xx_om_priv *priv = om_priv;
 	struct hook_runtime *runtime = NULL;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	runtime = &priv->runtime[HOOK_RIGHT];
 
@@ -907,6 +1283,87 @@ static int _right_data_parse_thread(void *p)
 	return 0;
 }
 
+static int _left_dma_irq_handler(
+			unsigned short int_type,
+			unsigned long para,
+			unsigned int dma_channel)
+{
+	struct hi64xx_om_priv *priv = om_priv;
+	struct hook_runtime *runtime = NULL;
+
+	BUG_ON(NULL == priv);
+	UNUSED_PARAMETER(dma_channel);
+
+	if ((ASP_DMA_INT_TYPE_TC1 != int_type)
+		&& (ASP_DMA_INT_TYPE_TC2 != int_type)) {
+		HI64XX_DSP_ERROR("int type err:%d\n", int_type);
+		return -EINVAL;
+	}
+
+	runtime = &priv->runtime[HOOK_LEFT];
+	runtime->cookie = _get_idle_buffer_id(runtime);
+	up(&runtime->hook_proc_sema);
+
+	return 0;
+}
+
+static int _right_dma_irq_handler(
+			unsigned short int_type,
+			unsigned long para,
+			unsigned int dma_channel)
+{
+	struct hi64xx_om_priv *priv = om_priv;
+	struct hook_runtime *runtime = NULL;
+
+	BUG_ON(NULL == priv);
+	UNUSED_PARAMETER(dma_channel);
+
+	if ((ASP_DMA_INT_TYPE_TC1 != int_type)
+		&& (ASP_DMA_INT_TYPE_TC2 != int_type)) {
+		HI64XX_DSP_ERROR("int type err:%d\n", int_type);
+		return -EINVAL;
+	}
+
+	runtime = &priv->runtime[HOOK_RIGHT];
+	runtime->cookie = _get_idle_buffer_id(runtime);
+	up(&runtime->hook_proc_sema);
+
+	return 0;
+}
+
+static int _om_hook_start(unsigned int hook_id)
+{
+	struct hook_runtime *runtime = NULL;
+	struct hi64xx_om_priv *priv = om_priv;
+	callback_t callback = NULL;
+
+	BUG_ON(NULL == priv);
+
+	runtime = &priv->runtime[hook_id];
+
+	runtime->hook_file_cnt  = 0;
+	runtime->hook_file_size = 0;
+
+	_hook_runtime_config(hook_id);
+
+	_dump_runtime(runtime);
+
+	if (HOOK_LEFT == hook_id)
+		callback = _left_dma_irq_handler;
+	else
+		callback = _right_dma_irq_handler;
+
+	asp_dma_config(runtime->channel,
+				runtime->lli_cfg[PCM_SWAP_BUFF_A],
+				callback, (unsigned long)0);
+	asp_dma_start(runtime->channel,
+				runtime->lli_cfg[PCM_SWAP_BUFF_A]);
+
+	priv->started = true;
+	priv->standby = false;
+
+	return 0;
+}
 
 static void _om_hook_stop(unsigned int hook_id)
 {
@@ -915,7 +1372,7 @@ static void _om_hook_stop(unsigned int hook_id)
 	struct pos_infos *pos_infos = NULL;
 	struct hi64xx_om_priv *priv = om_priv;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	runtime = &priv->runtime[hook_id];
 
@@ -945,12 +1402,27 @@ static void _om_hook_stop(unsigned int hook_id)
 	up(&runtime->hook_stop_sema);
 }
 
+int _om_slimbus_callback(unsigned int type, void *params)
+{
+	struct hi64xx_om_priv *priv = om_priv;
+
+	BUG_ON(NULL == priv);
+	UNUSED_PARAMETER(params);
+
+	if (SLIMBUS_TRACK_DEBUG == type) {
+		priv->should_deactive_slimbus = false;
+
+	}
+
+	return 0;
+
+}
 
 int hi64xx_hifi_om_set_bw(unsigned short bandwidth)
 {
 	struct hi64xx_om_priv *priv = om_priv;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	if (bandwidth >= OM_BANDWIDTH_BUTT) {
 		HI64XX_DSP_ERROR("err om bw:%d.\n", bandwidth);
@@ -973,7 +1445,7 @@ int hi64xx_hifi_om_set_sponsor(unsigned short sponsor)
 {
 	struct hi64xx_om_priv *priv = om_priv;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	if (sponsor >= OM_SPONSOR_BUTT) {
 		HI64XX_DSP_ERROR("err om sponsor:%d.\n", sponsor);
@@ -996,7 +1468,7 @@ int hi64xx_hifi_om_set_hook_path(char *path, unsigned int size)
 {
 	struct hi64xx_om_priv *priv = om_priv;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	if (!path || size > (HOOK_PATH_MAX_LENGTH - 2)) {
 		HI64XX_DSP_ERROR("err para.\n");
@@ -1017,7 +1489,7 @@ int hi64xx_hifi_om_set_dir_count(unsigned int count)
 {
 	struct hi64xx_om_priv *priv = om_priv;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	if (priv->started || !priv->standby) {
 		HI64XX_DSP_ERROR("om is running, forbid set dir count:%d.\n", count);
@@ -1034,13 +1506,81 @@ int hi64xx_hifi_om_set_dir_count(unsigned int count)
 	return 0;
 }
 
+int hi64xx_hifi_om_hook_start(void)
+{
+	int ret = 0;
+	slimbus_framer_type_t framer;
+	struct hi64xx_om_priv *priv = om_priv;
+	slimbus_track_param_t slimbus_params;
+	struct data_cfg *data_cfg = &slim_data_cfg[HOOK_LEFT];
+
+	BUG_ON(NULL == priv);
+
+	if (!priv->is_eng)
+		return -EPERM;
+
+	if (priv->started || !priv->standby)
+		return -EBUSY;
+
+	/* slimbus clk must at codec to avoid frequency offset */
+	framer = slimbus_debug_get_framer();
+	if (framer != SLIMBUS_FRAMER_CODEC) {
+		HI64XX_DSP_ERROR( "slimbus framer is not codec, can not start om.\n");
+		return -EBUSY;
+	}
+
+	_set_hook_path();
+
+	ret = _create_hook_dir();
+	if (ret) {
+		HI64XX_DSP_ERROR( "create hook dir failed, ret:%d.\n", ret);
+		return -EBUSY;
+	}
+
+	ret = clk_prepare_enable(priv->asp_subsys_clk);
+	if (IS_ERR_VALUE(ret)) {
+		HI64XX_DSP_ERROR( "clk prepare enable failed.\n");
+		return -EBUSY;
+	}
+
+	memset(&slimbus_params, 0, sizeof(slimbus_params));
+	slimbus_params.rate = data_cfg->sample_rate;
+	if (OM_BANDWIDTH_12288 == priv->bandwidth) {
+		slimbus_params.channels = 2;
+	} else {
+		slimbus_params.channels = 1;
+	}
+	slimbus_params.callback = _om_slimbus_callback;
+
+	priv->should_deactive_slimbus = true;
+
+	ret = slimbus_track_activate(SLIMBUS_DEVICE_HI6403, SLIMBUS_TRACK_DEBUG, &slimbus_params);
+	if (ret) {
+		HI64XX_DSP_ERROR("slimbus activate failded, ret: %d.\n", ret);
+		return ret;
+	}
+
+	priv->open_file_failed_cnt = 0;
+
+	_om_hook_start(HOOK_LEFT);
+
+	HI64XX_DSP_INFO("left hook started\n");
+
+	if (OM_BANDWIDTH_12288 == priv->bandwidth) {
+		_om_hook_start(HOOK_RIGHT);
+
+		HI64XX_DSP_INFO("right hook started\n");
+	}
+
+	return 0;
+}
 
 void hi64xx_hifi_om_hook_stop(void)
 {
 	struct hi64xx_om_priv *priv = om_priv;
 	int ret = 0;
 
-	WARN_ON(NULL == priv);
+	BUG_ON(NULL == priv);
 
 	if (!priv->started || priv->standby)
 		return;
@@ -1055,9 +1595,8 @@ void hi64xx_hifi_om_hook_stop(void)
 		HI64XX_DSP_INFO("right hook stoped\n");
 	}
 
-	if (priv->should_deactive_slimbus) {
-		ret = slimbus_track_deactivate(priv->slimbus_device_type, priv->slimbus_track_type, NULL);
-	}
+	if (priv->should_deactive_slimbus)
+		ret = slimbus_track_deactivate(SLIMBUS_DEVICE_HI6403, SLIMBUS_TRACK_DEBUG, NULL);
 
 	if (ret)
 		HI64XX_DSP_WARNING("deactivate debug return ret %d\n", ret);
@@ -1067,7 +1606,7 @@ void hi64xx_hifi_om_hook_stop(void)
 	priv->sponsor = OM_SPONSOR_DEFAULT;
 }
 
-int hi64xx_hifi_om_init(struct hi64xx_irq *irqmgr, unsigned int codec_type)
+int hi64xx_hifi_om_init(struct hi64xx_irq *irqmgr)
 {
 	int ret = 0;
 	int i = 0;
@@ -1087,25 +1626,12 @@ int hi64xx_hifi_om_init(struct hi64xx_irq *irqmgr, unsigned int codec_type)
 	priv->sponsor = OM_SPONSOR_DEFAULT;
 	priv->bandwidth = OM_BANDWIDTH_6144;
 	priv->dir_count = HOOK_DEFAULT_SUBDIR_CNT;
-	priv->codec_type = codec_type;
-	if (HI64XX_CODEC_TYPE_6403 == codec_type)	{
-		priv->slimbus_device_type = SLIMBUS_DEVICE_HI6403;
-		priv->slimbus_track_type =  SLIMBUS_TRACK_DEBUG;
-	}
-	else {
-		HI64XX_DSP_ERROR("do not support codec_type %d\n", codec_type);
-		WARN_ON(true);
-		ret = -ENOMEM;
-		goto err_exit;
-	}
-
 
 	priv->is_eng = false;
 
 	priv->asp_subsys_clk = devm_clk_get(priv->dev, "clk_asp_subsys");
 	if ( IS_ERR(priv->asp_subsys_clk)) {
 		HI64XX_DSP_ERROR( "asp subsys clk fail.\n");
-		ret = -ENOMEM;
 		goto err_exit;
 	}
 

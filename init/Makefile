@@ -2,8 +2,6 @@
 # Makefile for the linux kernel.
 #
 
-ccflags-y := -fno-function-sections -fno-data-sections
-
 obj-y                          := main.o version.o mounts.o
 obj-y                          += noinitramfs.o
 obj-$(CONFIG_BLK_DEV_INITRD)   += initramfs.o
@@ -14,7 +12,7 @@ obj-y                          += init_task.o
 endif
 
 ifeq ($(TARGET_BUILD_VARIANT),eng)
-EXTRA_CFLAGS += -DCMDLINE_INFO_FILTER
+EXTRA_CFLAGS += -DHISI_SN_CMDLINE
 endif
 
 mounts-y			:= do_mounts.o

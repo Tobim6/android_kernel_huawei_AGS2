@@ -19,7 +19,6 @@
 #include <asm/sections.h>
 
 #ifdef CONFIG_DYNAMIC_FTRACE
-
 #ifdef CONFIG_DEBUG_RODATA
 #include "../mm/mm.h"
 #endif
@@ -164,7 +163,7 @@ void prepare_ftrace_return(unsigned long *parent, unsigned long self_addr,
 		return;
 
 	err = ftrace_push_return_trace(old, self_addr, &trace.depth,
-				       frame_pointer, NULL);
+				       frame_pointer);
 	if (err == -EBUSY)
 		return;
 	else

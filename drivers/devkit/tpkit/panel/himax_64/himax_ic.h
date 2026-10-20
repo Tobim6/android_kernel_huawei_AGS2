@@ -50,23 +50,16 @@
 #ifdef CONFIG_OF
 #include <linux/of_gpio.h>
 #endif
-#define UPDATE_FAIL		0
-#define UPDATE_PASS		1
-#define UPDATE_DONE		0
-#define UPDATE_ONGOING		1
-
 #define NOT_SUPPORT	0
 #define SUPPORT	1
 #define ID_NAME_LEN 3
 #define ID_ADDR_LEN 4
 #define FLASH_ADDR_LEN 14
 #define SMWP_EN 1
-#define SMWP_ON 1
-#define SMWP_OFF 0
 #define GLOVE_EN 1
 //use for write/read register
 #define CRC_LEN 							0x0099
-#define RESERVED_VALUE					0x00
+#define RESERVED_VALUE					0x00	
 #define ADDR_AHB						0x0D
 #define DATA_AHB						0x10
  #define DATA_AHB_AUTO					0x11
@@ -89,19 +82,19 @@
 
 //#define ADDR_IC_TYPE 				0x900000D0
 #define ADDR_READ_FW_VER 			0x10007004
-#define ADDR_READ_CONFIG_VER 		0x10007084
+#define ADDR_READ_CONFIG_VER 		0x10007084			
 #define ADDR_SET_DDREG_REQ			0x90000020
 #define ADDR_READ_CID_VER 			0x10007000
 #define ADDR_GLOVE_EN 				0x10007F14
 #define DATA_GLOVE_EN				0xA55AA55A
 #define ADDR_SMWP_EN 				0x10007F10
-#define DATA_SMWP_EN				0xA55AA55A
+#define DATA_SMWP_EN				0xA55AA55A		
 #define ADDR_RESET_TCON				0x800201E0
 #define DATA_RESET_TCON  			0x00000001
 #define ADDR_SENSE_ON 				0x90000098
 #define DATA_SENSE_ON 				0x00000053
 #define ADDR_AHBI2C_SYSRST 			0x90000018
-#define DATA_AHBI2C_SYSRST 			0x00000055
+#define DATA_AHBI2C_SYSRST 			0x00000055	
 #define ADDR_SCU_POWER_STATE 		0x900000A0
 #define ADDR_SPI_FORMAT 			0x80000010
 #define DATA_SPI_FORMAT 			0x00020780
@@ -118,14 +111,15 @@
 #define DATA_BLK_ERASE 				0x000000D8
 #define DATA_ERASE					0x000000C7
 #define ADDR_SPI_RESD_STATUS 		0x8000002C
-#define DATA_SPI_RESD_STATUS 		0xFFFFFFFF
-#define DATA_RETURN_SRAM_EVENT	0x11223344
+#define DATA_SPI_RESD_STATUS 		0xFFFFFFFF	
+#define DATA_RETURN_SRAM_EVENT		0x11223344
+#define ADDR_MODE_SWITCH 			0x100007FC
 #define DATA_NOR_MODE				0x00000099
 #define DATA_SORT_MODE 				0x0000AACC
-#define ADDR_READ_MODE_CHK 			0x900000A8
+#define ADDR_READ_MODE_CHK 			0x900000A8			
 #define ADDR_IDLE_MODE 				0x10007088
 #define ADDR_DIAG_REG_SET 			0x800204B4
-#define ADDR_MKEY 					0x100070E8
+#define ADDR_MKEY 					0x100070E8	
 #define ADDR_DSRAM_START 			0x10000000
 #define DATA_DSRAM_START 			0x00005AA5
 #define ADDR_READ_CFG_FW_STATUS 	0x10007F44
@@ -140,37 +134,21 @@
 #define ADDR_NFRAME_SEL 			0x10007294
 #define DATA_NFRAME_SEL 			0x0000000A
 #define DATA_SORT_MODE_NFRAME 		0x00000002
-/* change for hx83112 start*/
-#define ADDR_MODE_SWITCH_HX83102	 0x100007FC
-#define ADDR_MODE_SWITCH_HX83112	 0x10007F04 //0x10000704
-#define ADDR_HAND_SHAKING_HX83102 			0x100007F8
-#define ADDR_HAND_SHAKING_HX83112 			0x10007F18
-#define ADDR_STP_HNDSHKG 0x10000000
-#define ADDR_HW_STST_CHK 0x900000E4
-/* change for hx83112 end*/
+#define ADDR_HAND_SHAKING 			0x100007F8
 #define DATA_HAND_SHAKING 			0x00006AA6
 #define ADDR_SET_CRITERIA 			0x10007F1C
 #define DATA_SET_IIR_FRM 			0x00000190
-#define ADDR_SWITCH_FLASH_RLD		0x100072C0
-#define ADDR_SWITCH_FLASH_RLD_STS	0x10007F00
+#define ADDR_SWITCH_FLASH_RLD 		0x10007F00
 #define DATA_DISABLE_FLASH_RLD 		0x0000A55A
 #define ADDR_OS_TEST_RESULT 		0x10007F24
 #define DATA_INIT 					0x00000000
 #define ADDR_TXRX_INFO 				0x100070F4
 #define ADDR_XY_RVRS 				0x100070FA
-#define ADDR_TP_RES 				0x100070FC
+#define ADDR_TP_RES 				0x100070FC	
 
 #ifdef HX_EN_MUT_BUTTON
 	#define ADDR_BT_NUM 			0x080000E8
 #endif
-#define HX_ROI_ENABLE	1
-#define HX_ROI_DISABLE	0
-#define HX_ROI_EN_PSD	0x05
-
-#define SIZE_1ST_PKG	66
-#define SIZE_2ND_PKG	36
-#define SIZE_HX_HEADER	4
-#define IDX_PKG_NUM	2
 
 #define ENTER_SAVE_MODE 	0x0C
 #define NOR_READ_LENTH 	128
@@ -179,13 +157,13 @@
 #define FW_VENDOR_MAX_STR_LEN 128
 
 //use for parse dts
-#define HIMAX_DRIVER_VER "0.0.1.1"
-//#define HIMAX_CORE_NAME "Himax83102b"
+#define HIMAX_DRIVER_VER "0.0.1.0"
+#define HIMAX_CORE_NAME "Himax83102b"
 #define HIMAX_PRODUCT_NAME "Himax"
 #define STR_IC_VENDOR "HIMAX"
-//#define STR_IC_NAME "hx83102b"
-//#define MODULE_NAME "hlt"
-//#define PRODUCE_ID "lodn67260"
+#define STR_IC_NAME "hx83102b"
+#define MODULE_NAME "hlt"
+#define PRODUCE_ID "lodn67260"
 #define TS_WAKE_LOCK_TIMEOUT 5*HZ
 #define FLASH_DUMP_FILE "/data/user/Flash_Dump.bin"
 #define HX_FW_NAME "ts/touch_screen_firmware.bin"
@@ -196,13 +174,11 @@
 #define HX_ERR -1
 #define I2C_FAIL -1
 #define FW_NOT_READY 1
-#define MODE_ND_CHNG 1
 #define NORMAL_MODE 1
 #define SORTING_MODE 2
 #define HX_RECEIVE_BUF_MAX_SIZE 128
 #define CSV_PRODUCT_SYSTEM 1
 #define CSV_ODM_SYSTEM 2
-#define ALLC_MEM_ERR 0xFF
 
 #define HX_COORDS_MAX_SIZE 4
 #define HX_PROJECT_ID_LEN 9
@@ -224,11 +200,11 @@
 #define SPECIFIC_LETTER_C 			(0x05)
 #define LETTER_LOCUS_NUM 	6
 #define LINEAR_LOCUS_NUM 	2
-#define GEST_PTLG_ID_LEN    	4
-#define GEST_PTLG_HDR_LEN  	4
-#define GEST_PTLG_HDR_ID1   			 0xCC
-#define GEST_PTLG_HDR_ID2   			 0x44
-#define GEST_PT_MAX_NUM     			 128
+#define GEST_PTLG_ID_LEN    	4 
+#define GEST_PTLG_HDR_LEN  	4 
+#define GEST_PTLG_HDR_ID1   			 0xCC 
+#define GEST_PTLG_HDR_ID2   			 0x44 
+#define GEST_PT_MAX_NUM     			 128 
 #define IS_APP_ENABLE_GESTURE(x)  ((u32)(1<<x))
 
 enum himax_hand_shaking_result{
@@ -246,11 +222,6 @@ enum himax_HW_reset_eunm{
 	HX_INT_EN = true,
 	HX_INT_DISABLE = false,
 };
-#define RESET_LOW_TIME 30//20
-#define RESET_HIGH_TIME 30//20
-#define HX_SLEEP_6S         6000
-#define HX_SLEEP_2S         2000
-#define HX_SLEEP_1S         1000
 #define HX_SLEEP_200MS		200
 #define HX_SLEEP_120MS		120
 #define HX_SLEEP_100MS		100
@@ -279,19 +250,8 @@ R44:
 #define	HX83102_XY_REVERSE			false
 #define	HX83102_INT_IS_EDGE			false
 
-#define	HX83112_RX_NUM				36
-#define	HX83112_TX_NUM	 			18
-#define	HX83112_BT_NUM				0
-#define	HX83112_X_RES					720
-#define	HX83112_Y_RES					1520
-#define	HX83112_MAX_PT				10
-#define	HX83112_XY_REVERSE			false
-#define	HX83112_INT_IS_EDGE			false
-
-#define MUTUL_NUM_HX83102 (HX83102_RX_NUM * HX83102_TX_NUM)
-#define SELF_NUM_HX83102 (HX83102_RX_NUM + HX83102_TX_NUM)
-#define MUTUL_NUM_HX83112 (HX83112_RX_NUM * HX83112_TX_NUM)
-#define SELF_NUM_HX83112 (HX83112_RX_NUM + HX83112_TX_NUM)
+#define   MUTUL_NUM (32*18)
+#define   SELF_NUM (32 + 18)
 
 #if defined(CONFIG_TOUCHSCREEN_HIMAX_DEBUG)
 #define HX_TP_SYS_DIAG
@@ -320,15 +280,8 @@ R44:
 #define HX_83110B_SERIES_PWON		12
 #define HX_83111B_SERIES_PWON		13
 #define HX_83112A_SERIES_PWON		14
-/* change for hx83112 start*/
-#define HX_83102_ID_PART_1		0x83
-#define HX_83102_ID_PART_2		0x10
-#define HX_83102_ID_PART_3		0x2B
 
-#define HX_83112_ID_PART_1		0x83
-#define HX_83112_ID_PART_2		0x11
-#define HX_83112_ID_PART_3		0x2A
-/* change for hx83112 end*/
+
 #define HX_TP_BIN_CHECKSUM_SW	1
 #define HX_TP_BIN_CHECKSUM_HW	2
 #define HX_TP_BIN_CHECKSUM_CRC	3
@@ -336,9 +289,6 @@ R44:
 #define HX_KEY_MAX_COUNT		4
 #define DEFAULT_RETRY_CNT		3
 #define MAX_RETRY_CNT			10
-
-#define ON 1
-#define OFF 0
 
 #define HX_VKEY_0   KEY_BACK
 #define HX_VKEY_1   KEY_HOME
@@ -373,15 +323,20 @@ R44:
 #define LOAD_SENSORCONFIG_OK	1
 #define LOAD_SENSORCONFIG_RUN_FAIL	1
 
+
 #define CAL_CHECKSUM_RUN_FAIL	1
 #define MUTUAL_ALLOC_FAIL	1
 #define IC_PACK_CHECK_SUCC	true
 #define IC_PACK_CHECK_FAIL  false
-
+        
 #define INFO_FAIL	-1
 
 #define TP_DCLIENT_NO_EXIST	-1
 #define BUFFER_BUSY	-1
+
+
+#define RESET_LOW_TIME 30//20
+#define RESET_HIGH_TIME 30//20
 
 #define ESD_EVENT_ALL_ZERO 0x00
 #define ESD_EVENT_ALL_ED 0xED
@@ -464,11 +419,10 @@ struct himax_ts_data {
 	uint32_t pl_y_max;
 	uint32_t test_capacitance_via_csvfile;
 	uint32_t csvfile_use_system;
-	uint32_t p2p_test_sel;
-
+	
 	//uint32_t *hx_id_name;
 	//uint32_t *hx_id_addr;
-	//uint32_t *hx_flash_addr;
+	//uint32_t *hx_flash_addr;	
 
 	int (*power)(int on);
 	int pre_finger_data[10][2];
@@ -485,6 +439,14 @@ struct himax_ts_data {
 	struct workqueue_struct *flash_wq;
 	struct work_struct flash_work;
 #endif
+//#ifdef HX_RESEND_CMD
+	struct workqueue_struct *himax_resend_cmd_wq;
+	struct delayed_work resend_cmd_work;
+//#endif
+#ifdef HX_TP_SYS_DIAG
+		struct workqueue_struct *himax_diag_wq;
+		struct delayed_work himax_diag_delay_wrok;
+#endif
 
 	char smwp_enable;   //gesture switch
 
@@ -497,8 +459,7 @@ struct himax_ts_data {
 	char project_id[MAX_STR_LEN];
 	char module_vendor[MAX_STR_LEN];
 	bool firmware_updating;
-	unsigned char roi_data[ROI_DATA_READ_LENGTH];
-
+	
 };
 
 struct himax_touching_data
@@ -548,11 +509,6 @@ struct himax_touching_data
 #define HX_VER_FW_MIN					0x32
 #define HX_VER_FW_CFG				 	0x39
 #define HX_MAX_PRBUF_SIZE           	PIPE_BUF
-
-
-#define HX_FW_DATA_FW_STOP	0x000000A5
-#define HX_FW_ADDR_CTRL_FW	0x9000005c
-#define HX_FW_WAKING	0x05
 
 enum input_protocol_type {
 	PROTOCOL_TYPE_A	= 0x00,
@@ -619,7 +575,7 @@ extern unsigned long NC_CID_VER_MAJ_FLASH_ADDR;
 extern unsigned long NC_CID_VER_MIN_FLASH_ADDR;
 extern unsigned long CID_VER_MAJ_FLASH_LENG;
 extern unsigned long CID_VER_MIN_FLASH_LENG;
-
+                     
 extern unsigned char IC_NC_CHECKSUM;
 extern unsigned char IC_NC_TYPE;
 
@@ -643,9 +599,9 @@ extern int himax_nc_switch_mode(int mode);
 extern void himax_nc_read_TP_info(void);
 extern void himax_nc_flash_dump_func(uint8_t local_flash_command, int Flash_Size, uint8_t *flash_buffer);
 //need to check in detect
-extern int himax_nc_loadSensorConfig(void);
+extern int himax_nc_loadSensorConfig(void); 
 extern int hx_nc_fts_ctpm_fw_upgrade_with_fs(unsigned char *fw, int len, bool change_iref);
-extern uint8_t himax_nc_calculateChecksum(bool change_iref);
+extern uint8_t himax_nc_calculateChecksum(bool change_iref); 
 extern void himax_nc_get_information(void);
 //used in factory test
 extern int himax_nc_chip_self_test(void);

@@ -27,9 +27,6 @@
 #include <asm/cputype.h>
 #include <asm/irq_regs.h>
 
-#define USE_CPUHP_STATE CPUHP_AP_PERF_ARM_STARTING
-#define USE_CPUHP_STR "AP_PERF_ARM_STARTING"
-
 static DEFINE_PER_CPU(int, pmu_irq) = {0};
 
 static int
@@ -53,9 +50,6 @@ armpmu_map_cache_event(const unsigned (*cache_map)
 	if (cache_result >= PERF_COUNT_HW_CACHE_RESULT_MAX)
 		return -EINVAL;
 
-	if (!cache_map)
-		return -ENOENT;
-
 	ret = (int)(*cache_map)[cache_type][cache_op][cache_result];
 
 	if (ret == CACHE_OP_UNSUPPORTED)
@@ -71,9 +65,6 @@ armpmu_map_hw_event(const unsigned (*event_map)[PERF_COUNT_HW_MAX], u64 config)
 
 	if (config >= PERF_COUNT_HW_MAX)
 		return -EINVAL;
-
-	if (!event_map)
-		return -ENOENT;
 
 	mapping = (*event_map)[config];
 	return mapping == HW_OP_UNSUPPORTED ? -ENOENT : mapping;
@@ -142,12 +133,14 @@ int armpmu_event_set_period(struct perf_event *event)
 	 */
 	if (left > (armpmu->max_period >> 1))
 		left = armpmu->max_period >> 1;
+
 #ifdef CONFIG_HISI_HW_PERF_EVENTS
 	if (left < (s64)armpmu->min_period){
 		left = (s64)armpmu->min_period;
 		local64_set(&hwc->period_left, left);
 	}
 #endif
+
 	local64_set(&hwc->prev_count, (u64)-left);
 
 	armpmu->write_counter(event, (u64)(-left) & 0xffffffff);
@@ -338,16 +331,10 @@ validate_group(struct perf_event *event)
 	return 0;
 }
 
-static struct arm_pmu_platdata *armpmu_get_platdata(struct arm_pmu *armpmu)
-{
-	struct platform_device *pdev = armpmu->plat_device;
-
-	return pdev ? dev_get_platdata(&pdev->dev) : NULL;
-}
-
 static irqreturn_t armpmu_dispatch_irq(int irq, void *dev)
 {
 	struct arm_pmu *armpmu;
+	struct platform_device *plat_device;
 	struct arm_pmu_platdata *plat;
 	int ret;
 	u64 start_clock, finish_clock;
@@ -359,8 +346,8 @@ static irqreturn_t armpmu_dispatch_irq(int irq, void *dev)
 	 * dereference.
 	 */
 	armpmu = *(void **)dev;
-
-	plat = armpmu_get_platdata(armpmu);
+	plat_device = armpmu->plat_device;
+	plat = dev_get_platdata(&plat_device->dev);
 
 	start_clock = sched_clock();
 	if (plat && plat->handle_irq)
@@ -387,8 +374,6 @@ armpmu_reserve_hardware(struct arm_pmu *armpmu)
 		armpmu_release_hardware(armpmu);
 		return err;
 	}
-
-	armpmu->pmu_state = ARM_PMU_STATE_RUNNING;
 
 	return 0;
 }
@@ -466,11 +451,13 @@ __hw_perf_event_init(struct perf_event *event)
 		hwc->last_period    = hwc->sample_period;
 		local64_set(&hwc->period_left, hwc->sample_period);
 	}
+
 #ifdef CONFIG_HISI_HW_PERF_EVENTS
 	if (hwc->sample_period < armpmu->min_period){
 		hwc->sample_period = armpmu->min_period;
 	}
 #endif
+
 	if (event->group_leader != event) {
 		if (validate_group(event) != 0)
 			return -EINVAL;
@@ -562,24 +549,6 @@ static int armpmu_filter_match(struct perf_event *event)
 	return cpumask_test_cpu(cpu, &armpmu->supported_cpus);
 }
 
-static ssize_t armpmu_cpumask_show(struct device *dev,
-				   struct device_attribute *attr, char *buf)
-{
-	struct arm_pmu *armpmu = to_arm_pmu(dev_get_drvdata(dev));
-	return cpumap_print_to_pagebuf(true, buf, &armpmu->supported_cpus);
-}
-
-static DEVICE_ATTR(cpus, S_IRUGO, armpmu_cpumask_show, NULL);
-
-static struct attribute *armpmu_common_attrs[] = {
-	&dev_attr_cpus.attr,
-	NULL,
-};
-
-static struct attribute_group armpmu_common_attr_group = {
-	.attrs = armpmu_common_attrs,
-};
-
 static void armpmu_init(struct arm_pmu *armpmu)
 {
 	atomic_set(&armpmu->active_events, 0);
@@ -595,11 +564,15 @@ static void armpmu_init(struct arm_pmu *armpmu)
 		.stop		= armpmu_stop,
 		.read		= armpmu_read,
 		.filter_match	= armpmu_filter_match,
-		.attr_groups	= armpmu->attr_groups,
-		.events_across_hotplug = 1,
 	};
-	armpmu->attr_groups[ARMPMU_ATTR_GROUP_COMMON] =
-		&armpmu_common_attr_group;
+}
+
+int armpmu_register(struct arm_pmu *armpmu, int type)
+{
+	armpmu_init(armpmu);
+	pr_info("enabled with %s PMU driver, %d counters available\n",
+			armpmu->name, armpmu->num_events);
+	return perf_pmu_register(&armpmu->pmu, armpmu->name, type);
 }
 
 /* Set at runtime when we know what CPU type we are. */
@@ -649,16 +622,12 @@ static void cpu_pmu_free_irq(struct arm_pmu *cpu_pmu)
 	struct platform_device *pmu_device = cpu_pmu->plat_device;
 	struct pmu_hw_events __percpu *hw_events = cpu_pmu->hw_events;
 
-	cpu_pmu->pmu_state = ARM_PMU_STATE_GOING_DOWN;
-
 	irqs = min(pmu_device->num_resources, num_possible_cpus());
 
 	irq = platform_get_irq(pmu_device, 0);
-	if (irq > 0 && irq_is_percpu(irq)) {
-		on_each_cpu_mask(&cpu_pmu->supported_cpus,
-				 cpu_pmu_disable_percpu_irq, &irq, 1);
+	if (irq >= 0 && irq_is_percpu(irq)) {
+		on_each_cpu(cpu_pmu_disable_percpu_irq, &irq, 1);
 		free_percpu_irq(irq, &hw_events->percpu_pmu);
-		cpu_pmu->percpu_irq = -1;
 	} else {
 		for (i = 0; i < irqs; ++i) {
 			int cpu = i;
@@ -669,11 +638,10 @@ static void cpu_pmu_free_irq(struct arm_pmu *cpu_pmu)
 			if (!cpumask_test_and_clear_cpu(cpu, &cpu_pmu->active_irqs))
 				continue;
 			irq = platform_get_irq(pmu_device, i);
-			if (irq > 0)
+			if (irq >= 0)
 				free_irq(irq, per_cpu_ptr(&hw_events->percpu_pmu, cpu));
 		}
 	}
-	cpu_pmu->pmu_state = ARM_PMU_STATE_OFF;
 }
 
 static int cpu_pmu_request_irq(struct arm_pmu *cpu_pmu, irq_handler_t handler)
@@ -692,7 +660,7 @@ static int cpu_pmu_request_irq(struct arm_pmu *cpu_pmu, irq_handler_t handler)
 	}
 
 	irq = platform_get_irq(pmu_device, 0);
-	if (irq > 0 && irq_is_percpu(irq)) {
+	if (irq >= 0 && irq_is_percpu(irq)) {
 		err = request_percpu_irq(irq, handler, "arm-pmu",
 					 &hw_events->percpu_pmu);
 		if (err) {
@@ -700,10 +668,7 @@ static int cpu_pmu_request_irq(struct arm_pmu *cpu_pmu, irq_handler_t handler)
 				irq);
 			return err;
 		}
-
-		on_each_cpu_mask(&cpu_pmu->supported_cpus,
-				 cpu_pmu_enable_percpu_irq, &irq, 1);
-		cpu_pmu->percpu_irq = irq;
+		on_each_cpu(cpu_pmu_enable_percpu_irq, &irq, 1);
 	} else {
 		for (i = 0; i < irqs; ++i) {
 			int cpu = i;
@@ -728,16 +693,9 @@ static int cpu_pmu_request_irq(struct arm_pmu *cpu_pmu, irq_handler_t handler)
 				continue;
 			}
 
-/* Set IRQF_NO_SUSPEND to avoid a WARN in SR when Memlat enabled */
-#ifdef CONFIG_ARM_MEMLAT_MON
-			err = request_irq(irq, handler,
-					  IRQF_NOBALANCING | IRQF_NO_THREAD | IRQF_NO_SUSPEND, "arm-pmu",
-					  per_cpu_ptr(&hw_events->percpu_pmu, cpu));
-#else
 			err = request_irq(irq, handler,
 					  IRQF_NOBALANCING | IRQF_NO_THREAD, "arm-pmu",
 					  per_cpu_ptr(&hw_events->percpu_pmu, cpu));
-#endif
 			if (err) {
 				pr_err("unable to request IRQ%d for ARM PMU counters\n",
 					irq);
@@ -751,12 +709,35 @@ static int cpu_pmu_request_irq(struct arm_pmu *cpu_pmu, irq_handler_t handler)
 	return 0;
 }
 
-struct cpu_pm_pmu_args {
-	struct arm_pmu	*armpmu;
-	unsigned long	cmd;
-	int		cpu;
-	int		ret;
-};
+/*
+ * PMU hardware loses all context when a CPU goes offline.
+ * When a CPU is hotplugged back in, since some hardware registers are
+ * UNKNOWN at reset, the PMU must be explicitly reset to avoid reading
+ * junk values out of them.
+ */
+static int cpu_pmu_notify(struct notifier_block *b, unsigned long action,
+			  void *hcpu)
+{
+	int cpu = (unsigned long)hcpu;
+	struct arm_pmu *pmu = container_of(b, struct arm_pmu, hotplug_nb);
+	int irq =  per_cpu(pmu_irq, cpu);
+
+	if ((action & ~CPU_TASKS_FROZEN) != CPU_STARTING)
+		return NOTIFY_DONE;
+
+	if (!cpumask_test_cpu(cpu, &pmu->supported_cpus))
+		return NOTIFY_DONE;
+
+	if (irq)
+		irq_force_affinity(irq, cpumask_of(cpu));
+
+	if (pmu->reset)
+		pmu->reset(pmu);
+	else
+		return NOTIFY_DONE;
+
+	return NOTIFY_OK;
+}
 
 #ifdef CONFIG_CPU_PM
 static void cpu_pm_pmu_setup(struct arm_pmu *armpmu, unsigned long cmd)
@@ -774,15 +755,6 @@ static void cpu_pm_pmu_setup(struct arm_pmu *armpmu, unsigned long cmd)
 			continue;
 
 		event = hw_events->events[idx];
-		if (!event)
-			continue;
-
-		/*
-		 * Check if an attempt was made to free this event during
-		 * the CPU went offline.
-		 */
-		if (event->state == PERF_EVENT_STATE_ZOMBIE)
-			continue;
 
 		switch (cmd) {
 		case CPU_PM_ENTER:
@@ -813,19 +785,15 @@ static void cpu_pm_pmu_setup(struct arm_pmu *armpmu, unsigned long cmd)
 	}
 }
 
-static void cpu_pm_pmu_common(void *info)
+static int cpu_pm_pmu_notify(struct notifier_block *b, unsigned long cmd,
+			     void *v)
 {
-	struct cpu_pm_pmu_args *data	= info;
-	struct arm_pmu *armpmu		= data->armpmu;
-	unsigned long cmd		= data->cmd;
-	int cpu				= data->cpu;
+	struct arm_pmu *armpmu = container_of(b, struct arm_pmu, cpu_pm_nb);
 	struct pmu_hw_events *hw_events = this_cpu_ptr(armpmu->hw_events);
 	int enabled = bitmap_weight(hw_events->used_mask, armpmu->num_events);
 
-	if (!cpumask_test_cpu(cpu, &armpmu->supported_cpus)) {
-		data->ret = NOTIFY_DONE;
-		return;
-	}
+	if (!cpumask_test_cpu(smp_processor_id(), &armpmu->supported_cpus))
+		return NOTIFY_DONE;
 
 	/*
 	 * Always reset the PMU registers on power-up even if
@@ -834,12 +802,8 @@ static void cpu_pm_pmu_common(void *info)
 	if (cmd == CPU_PM_EXIT && armpmu->reset)
 		armpmu->reset(armpmu);
 
-	if (!enabled) {
-		data->ret = NOTIFY_OK;
-		return;
-	}
-
-	data->ret = NOTIFY_OK;
+	if (!enabled)
+		return NOTIFY_OK;
 
 	switch (cmd) {
 	case CPU_PM_ENTER:
@@ -847,29 +811,15 @@ static void cpu_pm_pmu_common(void *info)
 		cpu_pm_pmu_setup(armpmu, cmd);
 		break;
 	case CPU_PM_EXIT:
-	case CPU_PM_ENTER_FAILED:
 		cpu_pm_pmu_setup(armpmu, cmd);
+	case CPU_PM_ENTER_FAILED:
 		armpmu->start(armpmu);
 		break;
 	default:
-		data->ret = NOTIFY_DONE;
-		break;
+		return NOTIFY_DONE;
 	}
 
-	return;
-}
-
-static int cpu_pm_pmu_notify(struct notifier_block *b, unsigned long cmd,
-			     void *v)
-{
-	struct cpu_pm_pmu_args data = {
-		.armpmu	= container_of(b, struct arm_pmu, cpu_pm_nb),
-		.cmd	= cmd,
-		.cpu	= smp_processor_id(),
-	};
-
-	cpu_pm_pmu_common(&data);
-	return data.ret;
+	return NOTIFY_OK;
 }
 
 static int cpu_pm_pmu_register(struct arm_pmu *cpu_pmu)
@@ -882,86 +832,10 @@ static void cpu_pm_pmu_unregister(struct arm_pmu *cpu_pmu)
 {
 	cpu_pm_unregister_notifier(&cpu_pmu->cpu_pm_nb);
 }
-
 #else
 static inline int cpu_pm_pmu_register(struct arm_pmu *cpu_pmu) { return 0; }
 static inline void cpu_pm_pmu_unregister(struct arm_pmu *cpu_pmu) { }
-static void cpu_pm_pmu_common(void *info) { }
 #endif
-
-/*
- * PMU hardware loses all context when a CPU goes offline.
- * When a CPU is hotplugged back in, since some hardware registers are
- * UNKNOWN at reset, the PMU must be explicitly reset to avoid reading
- * junk values out of them.
- */
-static int arm_perf_starting_cpu(unsigned int cpu, struct hlist_node *node)
-{
-	struct arm_pmu *pmu = hlist_entry_safe(node, struct arm_pmu, node);
-	int ret;
-
-	struct cpu_pm_pmu_args data = {
-		.armpmu	= pmu,
-		.cpu	= (int)cpu,
-	};
-
-	if (!pmu || !cpumask_test_cpu(cpu, &pmu->supported_cpus))
-		return 0;
-
-	data.cmd    = CPU_PM_EXIT;
-	cpu_pm_pmu_common(&data);
-	if (data.ret == NOTIFY_DONE)
-		return 0;
-
-	if (data.armpmu->pmu_state != ARM_PMU_STATE_OFF &&
-		data.armpmu->plat_device) {
-		int irq = data.armpmu->percpu_irq;
-
-		if (irq > 0 && irq_is_percpu(irq))
-			cpu_pmu_enable_percpu_irq(&irq);
-
-		/* irq is not percpu */
-		if (irq == -1) {
-			irq = per_cpu(pmu_irq, cpu);
-
-			if (irq) {
-				ret = irq_force_affinity(irq, cpumask_of(cpu));
-				if (ret)
-					pr_err("%s:set irq%d on cpu%d err%d\n",
-					       __func__, irq, cpu, ret);
-			}
-		}
-	}
-
-	return 0;
-}
-
-static int arm_perf_stopping_cpu(unsigned int cpu, struct hlist_node *node)
-{
-	struct arm_pmu *pmu = hlist_entry_safe(node, struct arm_pmu, node);
-
-	struct cpu_pm_pmu_args data = {
-		.armpmu	= pmu,
-		.cpu	= (int)cpu,
-	};
-
-	if (!pmu || !cpumask_test_cpu(cpu, &pmu->supported_cpus))
-		return 0;
-
-	data.cmd = CPU_PM_ENTER;
-	cpu_pm_pmu_common(&data);
-	/* Disarm the PMU IRQ before disappearing. */
-	if (data.armpmu->pmu_state == ARM_PMU_STATE_RUNNING &&
-		data.armpmu->plat_device) {
-		int irq = data.armpmu->percpu_irq;
-
-		if (irq > 0 && irq_is_percpu(irq))
-			cpu_pmu_disable_percpu_irq(&irq);
-
-	}
-
-	return 0;
-}
 
 static int cpu_pmu_init(struct arm_pmu *cpu_pmu)
 {
@@ -973,14 +847,14 @@ static int cpu_pmu_init(struct arm_pmu *cpu_pmu)
 	if (!cpu_hw_events)
 		return -ENOMEM;
 
-	err = cpuhp_state_add_instance_nocalls(USE_CPUHP_STATE,
-					       &cpu_pmu->node);
+	cpu_pmu->hotplug_nb.notifier_call = cpu_pmu_notify;
+	err = register_cpu_notifier(&cpu_pmu->hotplug_nb);
 	if (err)
-		goto out_free;
+		goto out_hw_events;
 
 	err = cpu_pm_pmu_register(cpu_pmu);
 	if (err)
-		goto out_unreg_perf_starting;
+		goto out_unregister;
 
 	for_each_possible_cpu(cpu) {
 		struct pmu_hw_events *events = per_cpu_ptr(cpu_hw_events, cpu);
@@ -1001,20 +875,11 @@ static int cpu_pmu_init(struct arm_pmu *cpu_pmu)
 	if (!platform_get_irq(cpu_pmu->plat_device, 0))
 		cpu_pmu->pmu.capabilities |= PERF_PMU_CAP_NO_INTERRUPT;
 
-	/*
-	 * This is a CPU PMU potentially in a heterogeneous configuration (e.g.
-	 * big.LITTLE). This is not an uncore PMU, and we have taken ctx
-	 * sharing into account (e.g. with our pmu::filter_match callback and
-	 * pmu::event_init group validation).
-	 */
-	cpu_pmu->pmu.capabilities |= PERF_PMU_CAP_HETEROGENEOUS_CPUS;
-
 	return 0;
 
-out_unreg_perf_starting:
-	cpuhp_state_remove_instance_nocalls(USE_CPUHP_STATE,
-					    &cpu_pmu->node);
-out_free:
+out_unregister:
+	unregister_cpu_notifier(&cpu_pmu->hotplug_nb);
+out_hw_events:
 	free_percpu(cpu_hw_events);
 	return err;
 }
@@ -1022,8 +887,7 @@ out_free:
 static void cpu_pmu_destroy(struct arm_pmu *cpu_pmu)
 {
 	cpu_pm_pmu_unregister(cpu_pmu);
-	cpuhp_state_remove_instance_nocalls(USE_CPUHP_STATE,
-					    &cpu_pmu->node);
+	unregister_cpu_notifier(&cpu_pmu->hotplug_nb);
 	free_percpu(cpu_pmu->hw_events);
 }
 
@@ -1071,7 +935,7 @@ static int of_pmu_irq_cfg(struct arm_pmu *pmu)
 
 		/* Check the IRQ type and prohibit a mix of PPIs and SPIs */
 		irq = platform_get_irq(pdev, i);
-		if (irq > 0) {
+		if (irq >= 0) {
 			bool spi = !irq_is_percpu(irq);
 
 			if (i > 0 && spi != using_spi) {
@@ -1107,35 +971,23 @@ static int of_pmu_irq_cfg(struct arm_pmu *pmu)
 
 		/* For SPIs, we need to track the affinity per IRQ */
 		if (using_spi) {
-			if (i >= pdev->num_resources)
+			if (i >= pdev->num_resources) {
+				of_node_put(dn);
 				break;
+			}
 
 			irqs[i] = cpu;
 		}
 
 		/* Keep track of the CPUs containing this PMU type */
 		cpumask_set_cpu(cpu, &pmu->supported_cpus);
+		of_node_put(dn);
 		i++;
 	} while (1);
 
-	/* If we didn't manage to parse anything, try the interrupt affinity */
-	if (cpumask_weight(&pmu->supported_cpus) == 0) {
-		int irq = platform_get_irq(pdev, 0);
-
-		if (irq > 0 && irq_is_percpu(irq)) {
-			/* If using PPIs, check the affinity of the partition */
-			int ret;
-
-			ret = irq_get_percpu_devid_partition(irq, &pmu->supported_cpus);
-			if (ret) {
-				kfree(irqs);
-				return ret;
-			}
-		} else {
-			/* Otherwise default to all CPUs */
-			cpumask_setall(&pmu->supported_cpus);
-		}
-	}
+	/* If we didn't manage to parse anything, claim to support all CPUs */
+	if (cpumask_weight(&pmu->supported_cpus) == 0)
+		cpumask_setall(&pmu->supported_cpus);
 
 	/* If we matched up the IRQ affinities, use them to route the SPIs */
 	if (using_spi && i == pdev->num_resources)
@@ -1151,7 +1003,7 @@ int arm_pmu_device_probe(struct platform_device *pdev,
 			 const struct pmu_probe_info *probe_table)
 {
 	const struct of_device_id *of_id;
-	int (*init_fn)(struct arm_pmu *);
+	const int (*init_fn)(struct arm_pmu *);
 	struct device_node *node = pdev->dev.of_node;
 	struct arm_pmu *pmu;
 	int ret = -ENODEV;
@@ -1162,76 +1014,41 @@ int arm_pmu_device_probe(struct platform_device *pdev,
 		return -ENOMEM;
 	}
 
-	armpmu_init(pmu);
+	if (!__oprofile_cpu_pmu)
+		__oprofile_cpu_pmu = pmu;
 
 	pmu->plat_device = pdev;
 
 	if (node && (of_id = of_match_node(of_table, pdev->dev.of_node))) {
 		init_fn = of_id->data;
 
-		pmu->secure_access = of_property_read_bool(pdev->dev.of_node,
-							   "secure-reg-access");
-
-		/* arm64 systems boot only as non-secure */
-		if (IS_ENABLED(CONFIG_ARM64) && pmu->secure_access) {
-			pr_warn("ignoring \"secure-reg-access\" property for arm64\n");
-			pmu->secure_access = false;
-		}
-
 		ret = of_pmu_irq_cfg(pmu);
 		if (!ret)
 			ret = init_fn(pmu);
-	} else if (probe_table) {
-		cpumask_setall(&pmu->supported_cpus);
+	} else {
 		ret = probe_current_pmu(pmu, probe_table);
+		cpumask_setall(&pmu->supported_cpus);
 	}
 
 	if (ret) {
-		pr_info("%s: failed to probe PMU!\n", of_node_full_name(node));
+		pr_info("failed to probe PMU!\n");
 		goto out_free;
 	}
-
 
 	ret = cpu_pmu_init(pmu);
 	if (ret)
 		goto out_free;
 
-	ret = perf_pmu_register(&pmu->pmu, pmu->name, -1);
+	ret = armpmu_register(pmu, -1);
 	if (ret)
 		goto out_destroy;
-
-	if (!__oprofile_cpu_pmu)
-		__oprofile_cpu_pmu = pmu;
-
-	pmu->pmu_state  = ARM_PMU_STATE_OFF;
-	pmu->percpu_irq = -1;
-
-	pr_info("enabled with %s PMU driver, %d counters available\n",
-			pmu->name, pmu->num_events);
 
 	return 0;
 
 out_destroy:
 	cpu_pmu_destroy(pmu);
 out_free:
-	pr_info("%s: failed to register PMU devices!\n",
-		of_node_full_name(node));
-	kfree(pmu->irq_affinity);
+	pr_info("failed to register PMU devices!\n");
 	kfree(pmu);
 	return ret;
 }
-
-static int arm_pmu_hp_init(void)
-{
-	int ret;
-
-	ret = cpuhp_setup_state_multi(USE_CPUHP_STATE,
-					USE_CPUHP_STR,
-					arm_perf_starting_cpu,
-					arm_perf_stopping_cpu);
-	if (ret)
-		pr_err("CPU hotplug ARM PMU STOPPING registering failed: %d\n",
-		       ret);
-	return ret;
-}
-subsys_initcall(arm_pmu_hp_init);

@@ -54,8 +54,8 @@
 /*cs conversion ratio*/
 #define MULTIPLE				(1000/HZ)
 /*data service string length*/
-#define WEB_DS_NET				("rmnet")
-#define WEB_DS_NET_LEN			(5)
+#define DS_NET					("rmnet")
+#define DS_NET_LEN				(5)
 
 #define SYN_NO_ACK_REPORT_TIME	(60*HZ)
 #define WEB_NO_ACK_REPORT_TIME	(60*HZ)
@@ -71,12 +71,6 @@
 #define RMNET_INTERFACE (0)
 #define WLAN_INTERFACE (1)
 #define RNT_STAT_SIZE (2)
-#define MAX_JIFFIES	(0xFFFFFFFFFFFFFFFF)
-#define MAX_VALID_U16     (65534)
-#define NS_CONVERT_TO_MS  (1000000)
-#define FILTER_TIME_LIMIT (HZ/4)
-#define ALPHA_FILTER_PARA (8)
-#define MAX_VALID_NS (65534000000L)
 
 /*response and report type*/
 enum {
@@ -123,13 +117,9 @@ struct http_stream {
 	u32 uid;
 	u32 resp_code;
 	u8 interface;
-	unsigned long ack_time_stamp;
 };
 
 #define CHR_MAX_REPORT_APP_COUNT (10)
-
-#define DATA_REG_TECH_TAG (20)
-#define GET_AP_REPORT_TAG (21)
 
 struct report_app_stat {
 	u32 tcp_rtt;
@@ -178,30 +168,6 @@ struct http_return {
 	u32 uid;
 	u32 http_resp;
 	struct report_app_stat report_app_stat_list[CHR_MAX_REPORT_APP_COUNT];
-	u32 highest_tcp_rtt;
-	u32 lowest_tcp_rtt;
-	u32 last_tcp_rtt;
-	u32 highest_web_delay;
-	u32 lowest_web_delay;
-	u32 last_web_delay;
-	u32 server_addr;
-	u32 rtt_abn_server_addr;
-	u32 vod_avg_speed;
-	u32 vod_freez_num;
-	u32 vod_time;
-	u32 uvod_avg_speed;
-	u32 uvod_freez_num;
-	u32 uvod_time;
-	u32 tcp_handshake_delay;
-	u32 http_get_delay;
-	u32 http_send_get_num;
-	u32 exception_cnt;
-	u32 data_direct;
-	u32 transport_delay;
-	u32 ip_delay;
-	u32 hmac_delay;
-	u32 driver_delay;
-	u32 android_uid;
 };
 
 /*this is temporarily stores the RTT*/
@@ -209,30 +175,9 @@ struct rtt_from_stack {
 	u32 tcp_rtt;
 	u32 is_valid;
 	u32 uid;
-	u32 rtt_dst_addr;
 };
-
-typedef struct delay_chr_report{
-	u32 exception_cnt;
-	u32 data_direct;
-	u32 transport_delay;
-	u32 ip_delay;
-	u32 hmac_delay;
-	u32 driver_delay;
-	u32 android_uid;
-}DELAY_CHR_REPROT_T;
-
-/*CHR Key parameters*/
-struct chr_key_val {
-	atomic64_t tcp_buf_time;
-	atomic64_t udp_buf_time;
-	volatile unsigned long tcp_last;
-	volatile unsigned long udp_last;
-};
-
-
 void wifi_disconnect_report(void);
 int set_report_app_uid(int index, u32 uid);
-extern void wifi_kernel_delay_report(DELAY_CHR_REPROT_T *p_delay_chr);
+
 #endif /*_WEB_HW_HOOK*/
 

@@ -101,13 +101,6 @@ typedef enum bfr_recovery_method
 
     FRM_FACTORY_RESET_AFTER_DOWNLOAD_RECOVERY,
 
-    FRM_BOPD,
-    FRM_STORAGE_RDONLY_BOPD,
-    FRM_HARDWARE_DEGRADE_BOPD,
-    FRM_STORAGE_RDONLY_HARDWARE_DEGRADE_BOPD,
-    FRM_BOPD_AFTER_DOWNLOAD,
-    FRM_HARDWARE_DEGRADE_BOPD_AFTER_DOWNLOAD,
-
     FRM_RECOVERY_METHOD_MAX_COUNT
 } bfr_recovery_method_e;
 
@@ -163,6 +156,33 @@ typedef enum bfr_boot_fail_stage
     BFS_APP,
 } bfr_boot_fail_stage_e;
 
+typedef struct bfr_rrecord_misc_msg_param
+{
+    /* "boot-erecovery" */
+    char command[32];
+
+    /* main reason*/
+    bfr_enter_erecovery_reason_e enter_erecovery_reason;
+
+    /* sub reason need for BI */
+    int enter_erecovery_reason_number;
+
+    /* boot stage when boot fail occurs */
+    bfr_boot_fail_stage_e boot_fail_stage_for_erecovery;
+
+    /* boot fail no */
+    unsigned int boot_fail_no;
+
+    /* recovery method */
+    unsigned int recovery_method;
+
+    /* mark if the misc write success,yes:0xAA55AA55 */
+    unsigned int sync_misc_flag;
+
+    /* reserved for future usage */
+    char reserved[968];
+} bfr_rrecord_misc_msg_param_t;
+
 typedef struct bfr_boot_fail_no_range
 {
     unsigned int start;
@@ -200,8 +220,6 @@ typedef enum bfr_recovery_method_running_status
     RMRSC_ERECOVERY_START_INSTALL_PACKAGES,
     RMRSC_ERECOVERY_INSTALL_PACKAGES_SUCCESS,
     RMRSC_ERECOVERY_INSTALL_PACKAGES_FAILED,
-    RMRSC_ERECOVERY_MOUNT_USERDATA_FAILED,
-    RMRSC_ERECOVERY_MOUNT_USERDATA_SUCCESS,
 } bfr_recovery_method_running_status_e;
 
 typedef enum bfr_recovery_method_run_result
@@ -227,7 +245,7 @@ typedef struct bfr_recovery_record_header
     int record_count_before_boot_success; /* this field shouid be set as 0 when boot success */
     unsigned int safe_mode_enable_flag; /* if this fiels is 0x656e736d means safe mode has been enabled */
     char reserved[96];
-} __attribute__((packed)) bfr_recovery_record_header_t;
+} bfr_recovery_record_header_t;
 
 typedef struct bfr_recovery_record
 {
@@ -239,11 +257,8 @@ typedef struct bfr_recovery_record
     bfr_recovery_method_run_result_e method_run_result;
     bfr_boot_fail_recovery_result_e recovery_result;
     unsigned int factory_reset_flag;
-    unsigned int recovery_method_original;
-    unsigned int boot_fail_time; /* boot time when bootfail happened */
-    char bootfail_detail[16];
-    char reserved[68];
-} __attribute__((packed)) bfr_recovery_record_t;
+    char reserved[92];
+} bfr_recovery_record_t;
 
 typedef struct bfr_recovery_record_param
 {
@@ -256,12 +271,7 @@ typedef struct bfr_recovery_record_param
 
 typedef struct
 {
-    unsigned int boot_fail_rtc_time[BFM_LOG_MAX_COUNT];
-    unsigned int boot_fail_time[BFM_LOG_MAX_COUNT];
-    unsigned int boot_fail_no[BFM_LOG_MAX_COUNT];
-    unsigned int boot_fail_stage[BFM_LOG_MAX_COUNT];
     unsigned int recovery_method[BFM_LOG_MAX_COUNT];
-    unsigned int recovery_method_original[BFM_LOG_MAX_COUNT];
     int record_count;
 } bfr_real_recovery_info_t;
 
@@ -272,91 +282,29 @@ typedef enum bfr_misc_cmd
     BFR_MISC_CMD_MAX_COUNT,
 } bfr_misc_cmd_e;
 
-typedef enum
-{
-    SH_BL1_REBOOT = 400000000,
-    SH_BL1_FACTORY_RESET = 400000002,
-    SH_BL1_SAFE_MODE = 400000003,
-    SH_BL1_DOWNLOAD_VERSION = 400000004,
-    SH_BL1_SELFHEAL = 400000019,
-    SH_BL2_REBOOT = 400001000,
-    SH_BL2_FACTORY_RESET = 400001002,
-    SH_BL2_SAFE_MODE = 400001003,
-    SH_BL2_DOWNLOAD_VERSION = 400001004,
-    SH_BL2_SELFHEAL = 400001019,
-    SH_KERNEL_REBOOT = 400002000,
-    SH_KERNEL_FACTORY_RESET = 400002002,
-    SH_KERNEL_SAFE_MODE = 400002002,
-    SH_KERNEL_DOWNLOAD_VERSION = 400002004,
-    SH_KERNEL_BOPD = 400002014,
-    SH_KERNEL_STORAGE_RDONLY_BOPD = 400002015,
-    SH_KERNEL_HARDWARE_DEGRADE_BOPD = 400002016,
-    SH_KERNEL_BOPD_AFTER_DOWNLOAD = 400002017,
-    SH_KERNEL_HARDWARE_DEGRADE_BOPD_AFTER_DOWNLOAD = 400002018,
-    SH_KERNEL_SELFHEAL = 400002019,
-    SH_NATIVE_REBOOT = 400003000,
-    SH_NATIVE_FACTORY_RESET = 400003002,
-    SH_NATIVE_SAFE_MODE = 400003003,
-    SH_NATIVE_DOWNLOAD_VERSION = 400003004,
-    SH_NATIVE_BOPD = 400003014,
-    SH_NATIVE_STORAGE_RDONLY_BOPD = 400003015,
-    SH_NATIVE_HARDWARE_DEGRADE_BOPD = 400003016,
-    SH_NATIVE_BOPD_AFTER_DOWNLOAD = 400003017,
-    SH_NATIVE_HARDWARE_DEGRADE_BOPD_AFTER_DOWNLOAD = 400003018,
-    SH_NATIVE_SELFHEAL = 400003019,
-    SH_FRAMEWORK_REBOOT= 400004000,
-    SH_FRAMEWORK_FACTORY_RESET = 400004002,
-    SH_FRAMEWORK_SAFE_MODE = 400004003,
-    SH_FRAMEWORK_DOWNLOAD_VERSION = 400004004,
-    SH_FRAMEWORK_BOPD = 400004014,
-    SH_FRAMEWORK_STORAGE_RDONLY_BOPD = 400004015,
-    SH_FRAMEWORK_HARDWARE_DEGRADE_BOPD = 400004016,
-    SH_FRAMEWORK_BOPD_AFTER_DOWNLOAD = 400004017,
-    SH_FRAMEWORK_HARDWARE_DEGRADE_BOPD_AFTER_DOWNLOAD = 400004018,
-    SH_FRAMEWORK_SELFHEAL = 400004019,
-    SH_UNKNOW = 400004999,
-} bfmr_selfheal_code_e;
 
 /*----export macroes-----------------------------------------------------------------*/
 
 #define BFR_ENTER_ERECOVERY_CMD  "boot-erecovery"
 #define BFR_ENTER_RECOVERY_CMD  "boot-recovery"
 #define BFR_ENTER_SAFE_MODE_CMD "boot-safemode"
-#define BFR_ENTER_BOPD_MODE_CMD "boot-bopd"
 #define BFR_MISC_PART_NAME "misc"
-#define BFR_VALID_LONG_PRESS_LOG "valid_long_press"
 
 /* 0x72656364-'r' 'e' 'c' 'd' */
 #define BFR_RRECORD_MAGIC_NUMBER ((unsigned int)0x72656364)
 
-#define BFR_ENTER_ERECOVERY_REASON_SIZE (sizeof(bfmr_rrecord_misc_msg_param_t))
+#define BFR_ENTER_ERECOVERY_REASON_SIZE (sizeof(bfr_rrecord_misc_msg_param_t))
 #define BFR_EACH_RECORD_PART_SIZE ((unsigned int)0x100000)
-#define BFR_ENTER_ERECOVERY_REASON_OFFSET (BFR_MISC_PART_OFFSET)
+#define BFR_ENTER_ERECOVERY_REASON_OFFSET ((unsigned int)0x0)
 #define BFR_RRECORD_FIRST_PART_OFFSET (BFR_ENTER_ERECOVERY_REASON_SIZE)
 #define BFR_RRECORD_SECOND_PART_OFFSET (BFR_RRECORD_FIRST_PART_OFFSET + BFR_EACH_RECORD_PART_SIZE)
 #define BFR_RRECORD_THIRD_PART_OFFSET (BFR_RRECORD_SECOND_PART_OFFSET + BFR_EACH_RECORD_PART_SIZE)
 #define BFR_SAFE_MODE_ENABLE_FLAG ((unsigned int)0x656e736d) /*ensm*/
 #define BFR_FACTORY_RESET_DONE ((unsigned int)0x6672646e) /*frdn*/
-#define BFR_FSCK_BEFORE_FORMAT_DATA ((unsigned int)0x6673666d) /* fsfm */
-#define BFR_FORMAT_DATA_WITHOUT_FSCK ((unsigned int)0x666d6474) /* fmdt */
 #define bfr_is_download_recovery_method(recovery_method) \
     (((unsigned int)FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY == recovery_method) \
     || ((unsigned int)FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_DEL_FILES == recovery_method) \
     || ((unsigned int)FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_FACTORY_RESET == recovery_method))
-
-#define BOPD_BEFORE_DOWNLOAD ((unsigned long long)0x2)
-#define BOPD_WITH_STORAGE_RDONLY_BEFORE_DOWNLOAD ((unsigned long long)0x3)
-#define BOPD_WITH_HARDWARE_DEGRADE_BEFORE_DOWNLOAD ((unsigned long long)0x6)
-#define BOPD_WITH_STORAGE_RDONLY_HARDWARE_DEGRADE_BEFORE_DOWNLOAD ((unsigned long long)0x7)
-#define BOPD_AFTER_DOWNLOAD ((unsigned long long)0xa)
-#define BOPD_WITH_HARDWARE_DEGRADE_AFTER_DOWNLOAD ((unsigned long long)0xe)
-#define bfr_is_bopd_mode(bopd_mode_value) \
-    ((BOPD_BEFORE_DOWNLOAD == bopd_mode_value) \
-    || (BOPD_WITH_STORAGE_RDONLY_BEFORE_DOWNLOAD == bopd_mode_value) \
-    || (BOPD_WITH_HARDWARE_DEGRADE_BEFORE_DOWNLOAD == bopd_mode_value) \
-    || (BOPD_WITH_STORAGE_RDONLY_HARDWARE_DEGRADE_BEFORE_DOWNLOAD == bopd_mode_value) \
-    || (BOPD_AFTER_DOWNLOAD == bopd_mode_value) \
-    || (BOPD_WITH_HARDWARE_DEGRADE_AFTER_DOWNLOAD == bopd_mode_value))
 
 
 /*----global variables-----------------------------------------------------------------*/
@@ -365,7 +313,6 @@ typedef enum
 /*----export function prototypes--------------------------------------------------------*/
 
 #ifdef CONFIG_USE_BOOTFAIL_RECOVERY_SOLUTION
-int bfr_get_hardware_fault_times(bfmr_get_hw_fault_info_param_t *pfault_info_param);
 int bfr_get_real_recovery_info(bfr_real_recovery_info_t *preal_recovery_info);
 char* bfr_get_recovery_method_desc(int recovery_method);
 
@@ -420,11 +367,6 @@ bfr_recovery_method_e try_to_recovery(
 */
 int bfr_init(void);
 #else
-static inline int bfr_get_hardware_fault_times(bfmr_get_hw_fault_info_param_t *pfault_info_param)
-{
-    return -1;
-}
-
 static inline int bfr_get_real_recovery_info(bfr_real_recovery_info_t *preal_recovery_info)
 {
     return 0;

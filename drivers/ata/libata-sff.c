@@ -1279,8 +1279,7 @@ fsm_start:
 		break;
 	default:
 		poll_next = 0;
-		WARN(true, "ata%d: SFF host state machine in invalid state %d",
-		     ap->print_id, ap->hsm_task_state);
+		BUG();
 	}
 
 	return poll_next;
@@ -1481,6 +1480,7 @@ unsigned int ata_sff_qc_issue(struct ata_queued_cmd *qc)
 		break;
 
 	default:
+		WARN_ON_ONCE(1);
 		return AC_ERR_SYSTEM;
 	}
 

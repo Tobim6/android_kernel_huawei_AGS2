@@ -19,9 +19,8 @@
 #ifndef _AUDIO_AUTO_SOUNDTRIGGER_DMA_DRV_H
 #define _AUDIO_AUTO_SOUNDTRIGGER_DMA_DRV_H
 
-#include "soc_acpu_baseaddr_interface.h"
 /*slimbus register addr*/
-#define HI3xxx_SLIMBUS_BASE_REG 							(SOC_ACPU_SLIMBUS_BASE_ADDR)
+#define HI3xxx_SLIMBUS_BASE_REG 							(0xE8050000)
 #define HI3xxx_SLIMBUS_REG_SIZE 							(100)
 #define HI3xxx_SLIMBUS_PORT0_REG_0							(0x100)
 #define HI3xxx_SLIMBUS_PORT0_REG_1							(0x104)
@@ -79,9 +78,6 @@ typedef int ST_IRQ_STATE_INT32;
 enum codec_hifi_type {
 	CODEC_HI6402 = 0,
 	CODEC_HI6403,
-#ifdef CONFIG_SND_SOC_HI6405
-	CODEC_HI6405,
-#endif
 	CODEC_HI640X_MAX,
 } ;
 
@@ -140,7 +136,7 @@ struct st_fast_status{
 #define SOUNDTRIGGER_CMD_DMA_READY  _IO('S',  0x3)
 
 int32_t hi64xx_soundtrigger_init(enum codec_hifi_type type);
-void hi64xx_soundtrigger_dma_close(void);
+int32_t hi64xx_soundtrigger_dma_close(void);
 
 #endif /* end of _AUDIO_AUTO_TEST_ASP_CFG_H */
 

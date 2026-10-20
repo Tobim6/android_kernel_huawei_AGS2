@@ -31,8 +31,6 @@
 #include <linux/hisi/util.h>
 #include <linux/hisi/reset.h>
 #include <linux/clk.h>
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_NOC_TAG
 
 #include "hisi_noc.h"
 #include "hisi_noc_err_probe.h"
@@ -58,7 +56,8 @@ static int noc_dump_err_log_parse(struct err_probe_msg *pt_err_msg)
 		    pt_err_msg->target_flow.pt_str);
 	NOC_L_D_PRT("[target_subrange]: %d\n", pt_err_msg->targetsubrange);
 	/* ERR LOG 3,4 */
-	NOC_L_D_PRT("ADDRESS_LOW = 0x%x\n",
+	NOC_L_D_PRT("ADDRESS_LOW = 0x%llx  (0x%x)\n",
+		    pt_err_msg->addr_low + pt_err_msg->base_addr,
 		    pt_err_msg->addr_low);
 	NOC_L_D_PRT("ADDRESS_HIGH = 0x%x\n", pt_err_msg->addr_high);
 	NOC_L_D_PRT("adjusted ADDRESS = 0x%llx\n",
@@ -186,27 +185,23 @@ static int noc_dump(void *dump_addr, unsigned int size)
 	uint *ptr;
 	u8 __iomem *iobase;
 	uint ret_size = 0;
-	unsigned int node_idx = 0;
-	unsigned int reg_num = 0;
+    unsigned int node_idx = 0;
+    unsigned int reg_num = 0;
 	unsigned int uPERI_INT0_STAT, uSCPERSTATUS6;
 
-	if (NULL == pt_dump) {
-                pr_err("noc_dump: pt_dump malloc error\n");
-                return 0;
-	}
-
-	pr_info("noc_dump:addr=0x%lx,size=[0x%x/0x%x]",
-		(uintptr_t)dump_addr, (unsigned int)sizeof(*pt_dump),
+	pr_info("noc_dump:addr=0x%llx,size=[0x%x/0x%x]",
+		(unsigned long long)dump_addr, (unsigned int)sizeof(*pt_dump),
 		size);
 
-	for (i = 0; i < (NOC_DUMP_SYNC_LEN - 2); i++) {
+	if (pt_dump == NULL) {
+		pr_err("noc_dump: pt_dump malloc error\n");
+		goto malloc_free;
+	}
+
+	for (i = 0; i < (NOC_DUMP_SYNC_LEN - 1); i++) {
 		/* sync head 1 */
 		pt_dump->sync[i] = NOC_DUMP_SYNC_HEAD1;
 	}
-
-	/* save max number of register that noc dump in ap */
-	pt_dump->sync[i++] = NOC_DUMP_MAX_REG_NUM;
-
 	/* sync head 2 */
 	pt_dump->sync[i] = ((NOC_DUMP_SYNC_HEAD2 & 0xFFFFFF00) |
 				(g_noc_dump_info.noc_device_ptr->noc_property->platform_id & 0xFF));
@@ -308,6 +303,13 @@ ERR_PROBE_DUMP_END:
 	/* COPY data to RDR module */
 	memcpy(dump_addr, pt_dump, (unsigned long)ret_size);/*[false alarm]:ret_size alredy checked.*/
 
+	/* Check buffer data */
+	ptr = (uint *) pt_dump;
+	for (i = 0; i < sizeof(*pt_dump) / 16; i++) {
+		pr_info("(%03d~%03d)%08x %08x %08x %08x\n", 4 * i, 4 * i + 3,
+			ptr[4 * i], ptr[4 * i + 1], ptr[4 * i + 2],
+			ptr[4 * i + 3]); /*lint !e679*/
+	}
 
 malloc_free:
 	/* kmalloc free */
@@ -362,9 +364,9 @@ int noc_dump_init(void)
 	if (g_noc_dump_info.noc_device_ptr->noc_property->noc_debug) {
 		pr_err("[%s] NoC Bus Dump Info:\n", __func__);
 		pr_err("noc_device_ptr=%lx\n",
-				(uintptr_t)g_noc_dump_info.noc_device_ptr);
+				(unsigned long)g_noc_dump_info.noc_device_ptr);
 		pr_err("noc_node_ptr=%lx\n",
-				(uintptr_t)g_noc_dump_info.noc_bus_node_info.noc_node_pptr);
+				(unsigned long)g_noc_dump_info.noc_bus_node_info.noc_node_pptr);
 		pr_err("noc_node_idx=%d\n",
 				g_noc_dump_info.noc_bus_node_info.noc_node_idx);
 	}

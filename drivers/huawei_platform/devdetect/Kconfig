@@ -2,7 +2,7 @@
 # detect devices
 #
 
-menuconfig HUAWEI_HW_DEV_DCT
+config HUAWEI_HW_DEV_DCT
     default n
     bool "HUAWEI DEVICE DETECT"
     help

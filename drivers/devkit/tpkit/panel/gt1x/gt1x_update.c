@@ -116,12 +116,9 @@ static int gt1x_burn_subsystem(struct fw_subsystem_info *subsystem);
 static u16 gt1x_calc_checksum(u8 * fw, u32 length);
 static int gt1x_recall_check(u8 * chk_src, u16 start_rd_addr, u16 chk_length);
 static void gt1x_update_cleanup(void);
-#if GTP_FW_UPDATE_VERIFY
 static int gt1x_check_subsystem_in_flash(struct fw_subsystem_info *subsystem);
 static int gt1x_read_flash(u32 addr, int length);
 static int gt1x_error_erase(void);
-#endif
-
 
 
 int gt1x_update_firmware(void);
@@ -133,8 +130,8 @@ void gt1x_leave_update_mode(void);
 
 static int gt1x_i2c_write_with_readback(u16 addr, u8 * buffer, int length)
 {
-	u8 buf[100] = {0};
-	int ret = 0;
+	u8 buf[100];
+	int ret;
 	if (buffer == NULL || length > sizeof(buf)) {
 	   return  ERROR_CHECK;
 	}
@@ -178,10 +175,8 @@ static void gt1x_select_addr(void)
 int gt1x_update_firmware(void)
 {
 	int i = 0;
-	int ret;
-	int rc;
-	const u8 *subsystem_info = NULL;
-
+	int ret = 0;
+	u8 *subsystem_info=NULL;
 	TS_LOG_INFO("%s:Start auto update thread...\n", __func__);
 	if (update_info.status != UPDATE_STATUS_IDLE) {
 		TS_LOG_ERR("%s:Update process is running!\n", __func__);
@@ -233,8 +228,7 @@ int gt1x_update_firmware(void)
 	}
 	update_info.progress++; 			// 3
 
-	ret = gt1x_run_ss51_isp((u8 *)subsystem_info,
-		update_info.firmware_info->subsystem[0].length);
+	ret = gt1x_run_ss51_isp( subsystem_info , update_info.firmware_info->subsystem[0].length);
 	if (ret) {
 		TS_LOG_ERR("%s:run isp fail\n", __func__);
 		goto  update_exit;
@@ -266,8 +260,7 @@ int gt1x_update_firmware(void)
 	}
 	update_info.progress++;
 
-	ret = gt1x_run_ss51_isp((u8 *)subsystem_info,
-		update_info.firmware_info->subsystem[0].length);
+	ret = gt1x_run_ss51_isp(subsystem_info, update_info.firmware_info->subsystem[0].length);
 	if (ret) {
 		TS_LOG_ERR("%s:run isp fail\n", __func__);
 		goto  update_exit;
@@ -292,9 +285,7 @@ int gt1x_update_firmware(void)
 update_exit:
 	gt1x_update_cleanup();
 	gt1x_leave_update_mode();
-	rc = gt1x_read_version(&gt1x_ts->hw_info);
-	if (rc < 0)
-		TS_LOG_INFO("%s:Get IC's version info failed, force update!\n", __func__);
+	gt1x_read_version(&gt1x_ts->hw_info);
 	if (ret) {
 		update_info.progress = 2 * update_info.max_progress;
 		gt1x_ts->fw_update_ok = false;
@@ -389,15 +380,14 @@ static int gt1x_check_firmware(void)
 {
 	u16 checksum;
 	u16 checksum_in_header;
-	const u8 *subsystem_info = NULL;
+	u8 *subsystem_info = NULL;
 	struct fw_info *firmware_tmpinfo = NULL;
 	int i;
 	int offset;
 
 	// compare file length with the length field in the firmware header
 	if (update_info.fw->size < FW_HEAD_SIZE) {
-		TS_LOG_ERR("%s:Bad firmware!(file_size: %lu)\n",
-			__func__, update_info.fw->size);
+		TS_LOG_ERR("%s:Bad firmware!(file_size: %d)\n", __func__, update_info.fw->size);
 		return ERROR_CHECK;
 	}
 	
@@ -407,9 +397,8 @@ static int gt1x_check_firmware(void)
 	}
 
 	if (getU32(update_info.fw->data) + FW_START_LOCAL != update_info.fw->size) {
-		TS_LOG_ERR("%s:Bad FW!(file length: %lu, header define: %d)\n",
-			__func__, update_info.fw->size,
-			getU32(update_info.fw->data));
+		TS_LOG_ERR("%s:Bad firmware!(file length: %d, header define: %d)\n", 
+				__func__, update_info.fw->size, getU32(update_info.fw->data));
 		return ERROR_CHECK;
 	}
 	// check firmware's checksum
@@ -418,7 +407,7 @@ static int gt1x_check_firmware(void)
 	for (i = FW_START_LOCAL; i < update_info.fw->size; i++) 
 		checksum += update_info.fw->data[i];
 	if (checksum != checksum_in_header) {
-		TS_LOG_ERR("%s:Bad FW!(checksum: 0x%04X, header define: 0x%04X)\n",
+		TS_LOG_ERR("%s:Bad firmware!(checksum: 0x%04X, header define: 0x%04X)\n", 
 				__func__, checksum, checksum_in_header);
 		return ERROR_CHECK;
 	}
@@ -441,7 +430,7 @@ static int gt1x_check_firmware(void)
 	}
 
 	// print update information
-	TS_LOG_INFO("Firmware length: %lu\n", update_info.fw->size);
+	TS_LOG_INFO("Firmware length: %d\n", update_info.fw->size);
 	TS_LOG_INFO("Firmware product: GT%s\n", update_info.firmware_info->pid);
 	TS_LOG_INFO("Firmware patch: %02X%02X%02X\n", update_info.firmware_info->version[0], update_info.firmware_info->version[1], update_info.firmware_info->version[2]);
 	TS_LOG_INFO("Firmware chip: 0x%02X\n", update_info.firmware_info->chip_type);
@@ -676,9 +665,6 @@ static int gt1x_run_ss51_isp(u8 * ss51_isp, int length)
 	//clear version
 	memset(buffer, 0xAA, 10);
 	ret = gt1x_i2c_write_with_readback(GTP_REG_VERSION, buffer, 10);
-	if (ret) {
-		TS_LOG_ERR("gt1x_i2c_write_with_readback fail!\n");
-	}
 
 	// disable patch area access
 	buffer[0] = 0x00;
@@ -731,7 +717,7 @@ static u16 gt1x_calc_checksum(u8 * fw, u32 length)
 
 static int gt1x_recall_check(u8 * chk_src, u16 start_addr, u16 chk_length)
 {
-	u8 rd_buf[PACK_SIZE] = {0};
+	u8 rd_buf[PACK_SIZE];
 	s32 ret = 0;
 	u16 len = 0;
 	u32 compared_length = 0;
@@ -771,7 +757,7 @@ static int gt1x_burn_subsystem(struct fw_subsystem_info *subsystem)
 	int wait_time;
 	int burn_state;
 	int retry = 5;
-	const u8 *fw = NULL;
+	u8 *fw = NULL;
 
 	TS_LOG_INFO("Subsystem: %d\n", subsystem->type);
 	TS_LOG_INFO("Length: %d\n", subsystem->length);
@@ -783,13 +769,17 @@ static int gt1x_burn_subsystem(struct fw_subsystem_info *subsystem)
 		block_len = length > 1024 * 4 ? 1024 * 4 : length;
 
 		TS_LOG_INFO("Burn block ==> length: %d, address: 0x%08X\n", block_len, subsystem->address + burn_len);
-		fw = &update_info.fw->data[subsystem->offset + burn_len];
+		fw = &update_info.fw->data[subsystem->offset + burn_len];    
+		if (fw == NULL) {
+			return ERROR_FW;
+		}
+		
 		cur_addr = ((subsystem->address + burn_len) >> 8);
 
 		checksum = 0;
 		checksum += block_len;
 		checksum += cur_addr;
-		checksum += gt1x_calc_checksum((u8 *)fw, block_len);
+		checksum += gt1x_calc_checksum(fw, block_len);
 		checksum = (0 - checksum);
 
 		buffer[0] = ((block_len >> 8) & 0xFF);
@@ -803,7 +793,7 @@ static int gt1x_burn_subsystem(struct fw_subsystem_info *subsystem)
 			continue;
 		}
 		//write block data
-		ret = gt1x_i2c_write(0x8100 + 4, (u8 *)fw, block_len);
+		ret = gt1x_i2c_write(0x8100 + 4, fw, block_len);
 		if (ret) {
 			TS_LOG_ERR("write fw data fail!\n");
 			continue;
@@ -882,7 +872,6 @@ static int gt1x_burn_subsystem(struct fw_subsystem_info *subsystem)
 	}
 }
 
-#if GTP_FW_UPDATE_VERIFY
 static int gt1x_check_subsystem_in_flash(struct fw_subsystem_info *subsystem)
 {
 	int block_len;
@@ -890,16 +879,19 @@ static int gt1x_check_subsystem_in_flash(struct fw_subsystem_info *subsystem)
 	u32 length = subsystem->length;
 	int ret;
 	int check_state = 0;
-	const u8 *fw = NULL;
+	u8 *fw;
 
-	TS_LOG_INFO("Subsystem: %d, Length: %d, Address: 0x%08X\n",
+	TS_LOG_INFO("Subsystem: %d, Length: %d, Address: 0x%08X\n", 
 			subsystem->type, subsystem->length, subsystem->address);
 
 	while (length > 0) {
 		block_len = length > 1024 * 4 ? 1024 * 4 : length;
 
 		TS_LOG_INFO("Check block ==> length: %d, address: 0x%08X\n", block_len, subsystem->address + checked_len);
-		fw = &update_info.fw->data[subsystem->offset + checked_len];
+		fw =	&update_info.fw->data[subsystem->offset + checked_len];			
+		if (fw == NULL) {
+			return ERROR_FW;
+		}
 		ret = gt1x_read_flash(subsystem->address + checked_len, block_len);
 		if (ret) {
 			check_state |= ret;
@@ -979,7 +971,7 @@ static int gt1x_error_erase(void)
 	int wait_time;
 	int burn_state = ERROR;
 	int retry = 5;
-	const u8 *fw = NULL;
+	u8 *fw = NULL;
 
 	TS_LOG_INFO("Erase flash area of ss51.\n");
 	gt1x_chip_reset();
@@ -1094,7 +1086,6 @@ static int gt1x_error_erase(void)
 		return ERROR_RETRY;
 	}
 }
-#endif
 
 void gt1x_leave_update_mode(void)
 {

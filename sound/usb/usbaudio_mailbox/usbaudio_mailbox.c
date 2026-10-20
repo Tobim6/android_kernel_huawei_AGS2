@@ -9,10 +9,6 @@
 #include <linux/kernel.h>
 #include <linux/hisi/usb/hisi_usb.h>
 #include <linux/wakelock.h>
-#include <linux/version.h>
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-#include <uapi/linux/sched/types.h>
-#endif
 #include "../hifi/usbaudio_setinterface.h"
 #include "../hifi/usbaudio_ioctl.h"
 #ifdef CONFIG_HIFI_MAILBOX
@@ -35,7 +31,6 @@ struct interface_set_mesg
 	unsigned int dir;
 	unsigned int running;
 	unsigned int rate;
-	unsigned int period;
 	struct list_head node;
 };
 
@@ -69,7 +64,7 @@ int usbaudio_mailbox_send_data(void *pmsg_body, unsigned int msg_len, unsigned i
 }
 
 static void usbaudio_mailbox_msg_add(unsigned int dir,
-				unsigned int running, unsigned int rate, unsigned int period)
+				unsigned int running, unsigned int rate)
 {
 	struct interface_set_mesg *interface_msg;/*lint -e429 */
 	interface_msg = kzalloc(sizeof(*interface_msg), GFP_ATOMIC);
@@ -77,7 +72,6 @@ static void usbaudio_mailbox_msg_add(unsigned int dir,
 		interface_msg->running = running;
 		interface_msg->dir = dir;
 		interface_msg->rate = rate;
-		interface_msg->period = period;
 		list_add_tail(&interface_msg->node, &msg_proc.interface_msg_list.node);
 		up(&msg_proc.proc_sema);
 	} else {
@@ -119,19 +113,19 @@ static irq_rt_t usbaudio_mailbox_recv_isr(void *usr_para, void *mail_handle, uns
 			break;
 		case USBAUDIO_CHN_MSG_PIPEOUTINTERFACE_ON_RCV:
 			pr_info("receive message: pipout on \n");
-			usbaudio_mailbox_msg_add(DOWNLINK_STREAM, START_STREAM, rcv_msg.rate, rcv_msg.period);
+			usbaudio_mailbox_msg_add(DOWNLINK_STREAM, START_STREAM, rcv_msg.ret_val);
 			break;
 		case USBAUDIO_CHN_MSG_PIPEOUTINTERFACE_OFF_RCV:
 			pr_info("receive message: pipout off \n");
-			usbaudio_mailbox_msg_add(DOWNLINK_STREAM, STOP_STREAM, rcv_msg.rate, rcv_msg.period);
+			usbaudio_mailbox_msg_add(DOWNLINK_STREAM, STOP_STREAM, rcv_msg.ret_val);
 			break;
 		case USBAUDIO_CHN_MSG_PIPEININTERFACE_ON_RCV:
 			pr_info("receive message: pipein on.\n");
-			usbaudio_mailbox_msg_add(UPLINK_STREAM, START_STREAM, rcv_msg.rate, rcv_msg.period);
+			usbaudio_mailbox_msg_add(UPLINK_STREAM, START_STREAM, rcv_msg.ret_val);
 			break;
 		case USBAUDIO_CHN_MSG_PIPEININTERFACE_OFF_RCV:
 			pr_info("receive message: pipein off.\n");
-			usbaudio_mailbox_msg_add(UPLINK_STREAM, STOP_STREAM, rcv_msg.rate, rcv_msg.period);
+			usbaudio_mailbox_msg_add(UPLINK_STREAM, STOP_STREAM, rcv_msg.ret_val);
 			break;
 		default:
 			pr_err("msg_type 0x%x.\n", rcv_msg.msg_type);
@@ -173,22 +167,6 @@ int usbaudio_setinterface_complete_msg(int dir,int val, int retval, unsigned int
 	return ret;
 }
 
-int usbaudio_nv_is_ready(void)
-{
-	int ret = 1;
-	if (atomic_read(&nv_check_ref) >= 1)
-		ret = 0;
-
-	return ret;
-}
-
-void usbaudio_set_nv_ready(void)
-{
-	pr_info("nv_check_set \n");
-	atomic_set(&nv_check_ref, 0);
-	atomic_inc(&nv_check_ref);
-}
-
 int usbaudio_nv_check(void)
 {
 	int ret;
@@ -228,7 +206,7 @@ int usbaudio_probe_msg(struct usbaudio_pcms *pcms)
 	init_completion(&probe_msg_complete);
 
 	probe_msg.msg_type = (unsigned short)USBAUDIO_CHN_MSG_PROBE;
-	for (i=0; i<USBAUDIO_PCM_NUM; i++) {
+	for (i=0; i<2; i++) {
 		probe_msg.pcms.fmts[i].formats = pcms->fmts[i].formats;
 		probe_msg.pcms.fmts[i].channels = pcms->fmts[i].channels;
 		probe_msg.pcms.fmts[i].fmt_type = pcms->fmts[i].fmt_type;
@@ -314,12 +292,11 @@ static int interface_msg_proc_thread(void *p)
 		} else {
 			set_mesg = list_entry(msg_proc.interface_msg_list.node.next, struct interface_set_mesg, node);
 			if (set_mesg) {
-				pr_info("[0:out 1:in]%d [0:start 1:stop]%d rate: %d period: %d\n",
-					set_mesg->dir, set_mesg->running, set_mesg->rate, set_mesg->period);
+				pr_err("[0:out 1:in]%d [0:start 1:stop]%d \n", set_mesg->dir, set_mesg->running);
 				if (set_mesg->dir == 0)
 					usbaudio_ctrl_set_pipeout_interface(set_mesg->running, set_mesg->rate);
 				else
-					usbaudio_ctrl_set_pipein_interface(set_mesg->running, set_mesg->rate, set_mesg->period);
+					usbaudio_ctrl_set_pipein_interface(set_mesg->running, set_mesg->rate);
 				list_del(&set_mesg->node);
 				kfree(set_mesg);
 			} else {

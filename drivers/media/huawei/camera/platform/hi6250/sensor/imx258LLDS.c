@@ -14,7 +14,6 @@
 
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 #define SENSOR_REG_SETTING_DELAY_1_MS 1
 
 static hwsensor_vtbl_t s_imx258LLDS_vtbl;
@@ -231,12 +230,12 @@ struct mutex imx258LLDS_power_lock;
 static sensor_t s_imx258LLDS =
 {
     .intf = { .vtbl = &s_imx258LLDS_vtbl, },
-    .power_setting_array =
+    .power_setting_array = 
     {
         .size          = ARRAY_SIZE(hw_imx258LLDS_power_up_setting),
         .power_setting = hw_imx258LLDS_power_up_setting,
     },
-    .power_down_setting_array =
+    .power_down_setting_array = 
     {
         .size          = ARRAY_SIZE(hw_imx258LLDS_power_down_setting),
         .power_setting = hw_imx258LLDS_power_down_setting,
@@ -275,7 +274,7 @@ char const* imx258LLDS_get_name(hwsensor_intf_t* si)
         cam_err("%s. si is null.", __func__);
         return NULL;
     }
-
+    
     sensor = I2S(si);
     if (NULL == sensor || NULL == sensor->board_info || NULL == sensor->board_info->name) {
         cam_err("%s. sensor or board_info->name is NULL.", __func__);
@@ -308,20 +307,20 @@ int imx258LLDS_power_up(hwsensor_intf_t* si)
         cam_err("%s. power up config fail.", __func__);
         return ret;
     }
-
+    
     if (hw_is_fpga_board()) {
         ret = do_sensor_power_on(sensor->board_info->sensor_index, sensor->board_info->name);
     } else {
         ret = hw_sensor_power_up(sensor);
     }
-
+    
     if (0 == ret){
         cam_info("%s. power up sensor success.", __func__);
     }
     else{
         cam_err("%s. power up sensor fail.", __func__);
     }
-
+    
     return ret;
 }
 
@@ -354,9 +353,9 @@ int imx258LLDS_power_down(hwsensor_intf_t* si)
     else{
         cam_err("%s. power down sensor fail.", __func__);
     }
-
+    
     hw_sensor_power_down_config(sensor->board_info);
-
+    
     return ret;
 }
 
@@ -459,7 +458,18 @@ int imx258LLDS_config(hwsensor_intf_t* si, void  *argp)
             mutex_unlock(&imx258LLDS_power_lock);
             /*lint -e455 +esym(455,*)*/
             break;
-
+        case SEN_CONFIG_WRITE_REG:
+            break;
+        case SEN_CONFIG_READ_REG:
+            break;
+        case SEN_CONFIG_WRITE_REG_SETTINGS:
+            break;
+        case SEN_CONFIG_READ_REG_SETTINGS:
+            break;
+        case SEN_CONFIG_ENABLE_CSI:
+            break;
+        case SEN_CONFIG_DISABLE_CSI:
+            break;
         case SEN_CONFIG_MATCH_ID:
             if(NULL == si->vtbl->match_id){
                 cam_err("%s. si->vtbl->match_id is null.", __func__);
@@ -485,7 +495,7 @@ static int32_t imx258LLDS_platform_probe(struct platform_device* pdev)
         cam_err("%s pdev is null.\n", __func__);
         return -1;
     }
-
+    
     cam_info("enter %s",__func__);
     if (pdev->dev.of_node) {
         rc = hw_sensor_get_dt_data(pdev, &s_imx258LLDS);
@@ -505,11 +515,11 @@ static int32_t imx258LLDS_platform_probe(struct platform_device* pdev)
         cam_err("%s hwsensor_register fail.\n", __func__);
         goto imx258LLDS_sensor_probe_fail;
     }
-
+    
     rc = rpmsg_sensor_register(pdev, (void *)&s_imx258LLDS);
     if (0 != rc){
         cam_err("%s rpmsg_sensor_register fail.\n", __func__);
-        hwsensor_unregister(Sensor2Pdev(s_imx258LLDS));
+        hwsensor_unregister(&s_imx258LLDS.intf);
         goto imx258LLDS_sensor_probe_fail;
     }
 
@@ -526,7 +536,7 @@ static int __init imx258LLDS_init_module(void)
 static void __exit imx258LLDS_exit_module(void)
 {
     rpmsg_sensor_unregister((void *)&s_imx258LLDS);
-    hwsensor_unregister(Sensor2Pdev(s_imx258LLDS));
+    hwsensor_unregister(&s_imx258LLDS.intf);
     platform_driver_unregister(&s_imx258LLDS_driver);
 }
 //lint -restore

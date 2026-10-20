@@ -16,7 +16,6 @@
 #include <linux/mmc/dw_mmc.h>
 #include "dw_mmc_hisi.h"
 #define DW_MMC_240A		0x240a
-#define DW_MMC_280A		0x280a
 
 #define SDMMC_CTRL		0x000
 #define SDMMC_PWREN		0x004
@@ -48,7 +47,6 @@
 #define SDMMC_VERID		0x06c
 #define SDMMC_HCON		0x070
 #define SDMMC_UHS_REG		0x074
-#define SDMMC_RST_N		0x078
 #define SDMMC_BMOD		0x080
 #define SDMMC_PLDMND		0x084
 #define SDMMC_DBADDR		0x088
@@ -78,7 +76,6 @@
 /*Flag that we need to chang sd clk to ppll3*/
 #ifdef CONFIG_SD_SDIO_CRC_RETUNING
 #define SD_RETUNING_ON  0x1
-#define SD_RETUNING_OFF  0x0
 #endif
 
 /*
@@ -164,7 +161,7 @@
 #define SDMMC_SET_FIFOTH(m, r, t)	(((m) & 0x7) << 28 | \
 					 ((r) & 0xFFF) << 16 | \
 					 ((t) & 0xFFF))
-#define SDMMC_SET_RD_THLD(v, x)         (((v) & 0x1FFF) << 16 | (x))
+
 /* HCON register defines */
 #define DMA_INTERFACE_IDMA		(0x0)
 #define DMA_INTERFACE_DWDMA		(0x1)
@@ -187,15 +184,10 @@
 #define SDMMC_IDMAC_ENABLE		BIT(7)
 #define SDMMC_IDMAC_FB			BIT(1)
 #define SDMMC_IDMAC_SWRESET		BIT(0)
-/* H/W reset */
-#define SDMMC_RST_HWACTIVE		0x1
 /* Version ID register define */
 #define SDMMC_GET_VERID(x)		((x) & 0xFFFF)
 /* Card read threshold */
-#define SDMMC_SET_THLD(v, x)		(((v) & 0xFFF) << 16 | (x))
-#define SDMMC_CARD_WR_THR_EN		BIT(2)
-#define SDMMC_CARD_RD_THR_EN		BIT(0)
-/* UHS-1 register defines */
+#define SDMMC_SET_RD_THLD(v, x)		(((v) & 0xFFF) << 16 | (x))
 #define SDMMC_UHS_18V			BIT(0)
 /* All ctrl reset bits */
 #define SDMMC_CTRL_ALL_RESET_FLAGS \
@@ -277,8 +269,9 @@ extern int dw_mci_resume(struct dw_mci *host);
  * @queue_node: List node for placing this node in the @queue list of
  *	&struct dw_mci.
  * @clock: Clock rate configured by set_ios(). Protected by host->lock.
- * @__clk_old: The last clock value that was requested from core.
- *	Keeping track of this helps us to avoid spamming the console.
+ * @__clk_old: The last updated clock with reflecting clock divider.
+ *	Keeping track of this helps us to avoid spamming the console
+ *	with CONFIG_MMC_CLKGATE.
  * @flags: Random state bits associated with the slot.
  * @id: Number of this slot.
   * @sdio_id: Number of this slot in the SDIO interrupt registers.
@@ -300,8 +293,7 @@ struct dw_mci_slot {
 #define DW_MMC_CARD_PRESENT	0
 #define DW_MMC_CARD_NEED_INIT	1
 #define DW_MMC_CARD_NO_LOW_PWR	2
-#define DW_MMC_CARD_NO_USE_HOLD 3
-	unsigned int		id;
+	unsigned int			id;
 	int			last_detect_state;
 	int         sdio_wakelog_switch;
 };
@@ -310,6 +302,8 @@ struct dw_mci_slot {
  * dw_mci driver data - dw-mshc implementation specific driver data.
  * @caps: mmc subsystem specified capabilities of the controller(s).
  * @init: early implementation specific initialization.
+ * @setup_clock: implementation specific clock configuration.
+ * @prepare_command: handle CMD register extensions.
  * @set_ios: handle bus specific extensions.
  * @parse_dt: parse implementation specific device tree properties.
  *

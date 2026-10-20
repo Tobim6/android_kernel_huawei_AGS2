@@ -1,20 +1,15 @@
 /*
- * bq2429x_charger.c
+ * drivers/power/bq2429x_charger.c
  *
- * bq2429x driver
+ * bq2429x/1/2/3/4 charging driver
  *
- * Copyright (c) 2012-2018 Huawei Technologies Co., Ltd.
+ * Copyright (C) 2012-2015 HUAWEI, Inc.
+ * Author: HUAWEI, Inc.
  *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- */
+ * This package is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+*/
 
 #include <linux/init.h>
 #include <linux/module.h>
@@ -37,53 +32,51 @@
 #include <linux/irq.h>
 #include <linux/notifier.h>
 #include <linux/mutex.h>
-#include <linux/raid/pq.h>
-
 #include <linux/hisi/usb/hisi_usb.h>
 #include <huawei_platform/log/hw_log.h>
 #ifdef CONFIG_HUAWEI_HW_DEV_DCT
 #include <huawei_platform/devdetect/hw_dev_dec.h>
 #endif
+#include <linux/raid/pq.h>
 #include <huawei_platform/power/huawei_charger.h>
-#ifdef CONFIG_HISI_BCI_BATTERY
 #include <linux/power/hisi/hisi_bci_battery.h>
-#endif
 #include <bq2429x_charger.h>
-
-#ifdef HWLOG_TAG
-#undef HWLOG_TAG
-#endif
 
 #define HWLOG_TAG bq2429x_charger
 HWLOG_REGIST();
 
 struct bq2429x_device_info *g_bq2429x_dev;
-
-#define MSG_LEN                      (2)
-#define BUF_LEN                      (26)
-
+/**********************************************************
+*  Function:       params_to_reg
+*  Discription:    turn the setting parameter to register value
+*  Parameters:   const int tbl[], int tbl_size, int val
+*  return value:  register value
+**********************************************************/
 static int params_to_reg(const int tbl[], int tbl_size, int val)
 {
 	int i;
 
 	for (i = 1; i < tbl_size; i++) {
 		if (val < tbl[i])
-			return (i - 1);
+			return i - 1;
 	}
-
 	return (tbl_size - 1);
 }
 
-static int bq2429x_write_block(struct bq2429x_device_info *di,
-	u8 *value, u8 reg, unsigned int num_bytes)
+/**********************************************************
+*  Function:       bq2429x_write_block
+*  Discription:    register write block interface
+*  Parameters:   di:bq2429x_device_info
+*                      value:register value
+*                      reg:register name
+*                      num_bytes:bytes number
+*  return value:  0-sucess or others-fail
+**********************************************************/
+static int bq2429x_write_block(struct bq2429x_device_info *di, u8 *value,
+			       u8 reg, unsigned num_bytes)
 {
 	struct i2c_msg msg[1];
 	int ret = 0;
-
-	if (di == NULL || value == NULL) {
-		hwlog_err("di is null or value is null\n");
-		return -EIO;
-	}
 
 	*value = reg;
 
@@ -96,7 +89,7 @@ static int bq2429x_write_block(struct bq2429x_device_info *di,
 
 	/* i2c_transfer returns number of messages transferred */
 	if (ret != 1) {
-		hwlog_err("write_block failed[%x]\n", reg);
+		hwlog_err("i2c_write failed to transfer all messages\n");
 		if (ret < 0)
 			return ret;
 		else
@@ -106,17 +99,21 @@ static int bq2429x_write_block(struct bq2429x_device_info *di,
 	}
 }
 
-static int bq2429x_read_block(struct bq2429x_device_info *di,
-	u8 *value, u8 reg, unsigned int num_bytes)
+/**********************************************************
+*  Function:       bq2429x_read_block
+*  Discription:    register read block interface
+*  Parameters:   di:bq2429x_device_info
+*                      value:register value
+*                      reg:register name
+*                      num_bytes:bytes number
+*  return value:  0-sucess or others-fail
+**********************************************************/
+static int bq2429x_read_block(struct bq2429x_device_info *di, u8 *value,
+			      u8 reg, unsigned num_bytes)
 {
-	struct i2c_msg msg[MSG_LEN];
+	struct i2c_msg msg[2];
 	u8 buf = 0;
 	int ret = 0;
-
-	if (di == NULL || value == NULL) {
-		hwlog_err("di is null or value is null\n");
-		return -EIO;
-	}
 
 	buf = reg;
 
@@ -130,11 +127,11 @@ static int bq2429x_read_block(struct bq2429x_device_info *di,
 	msg[1].buf = value;
 	msg[1].len = num_bytes;
 
-	ret = i2c_transfer(di->client->adapter, msg, MSG_LEN);
+	ret = i2c_transfer(di->client->adapter, msg, 2);
 
 	/* i2c_transfer returns number of messages transferred */
-	if (ret != MSG_LEN) {
-		hwlog_err("read_block failed[%x]\n", reg);
+	if (ret != 2) {
+		hwlog_err("i2c_write failed to transfer all messages\n");
 		if (ret < 0)
 			return ret;
 		else
@@ -144,17 +141,31 @@ static int bq2429x_read_block(struct bq2429x_device_info *di,
 	}
 }
 
+/**********************************************************
+*  Function:       bq2429x_write_byte
+*  Discription:    register write byte interface
+*  Parameters:   reg:register name
+*                      value:register value
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_write_byte(u8 reg, u8 value)
 {
 	struct bq2429x_device_info *di = g_bq2429x_dev;
 	/* 2 bytes offset 1 contains the data offset 0 is used by i2c_write */
-	u8 temp_buffer[MSG_LEN] = {0};
+	u8 temp_buffer[2] = { 0 };
 
 	/* offset 1 contains the data */
 	temp_buffer[1] = value;
 	return bq2429x_write_block(di, temp_buffer, reg, 1);
 }
 
+/**********************************************************
+*  Function:       bq2429x_read_byte
+*  Discription:    register read byte interface
+*  Parameters:   reg:register name
+*                      value:register value
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_read_byte(u8 reg, u8 *value)
 {
 	struct bq2429x_device_info *di = g_bq2429x_dev;
@@ -162,7 +173,16 @@ static int bq2429x_read_byte(u8 reg, u8 *value)
 	return bq2429x_read_block(di, value, reg, 1);
 }
 
-static int bq2429x_write_mask(u8 reg, u8 mask, u8 shift, u8 value)
+/**********************************************************
+*  Function:       bq2429x_write_mask
+*  Discription:    register write mask interface
+*  Parameters:   reg:register name
+*                      MASK:mask value of the function
+*                      SHIFT:shift number of the function
+*                      value:register value
+*  return value:  0-sucess or others-fail
+**********************************************************/
+static int bq2429x_write_mask(u8 reg, u8 MASK, u8 SHIFT, u8 value)
 {
 	int ret = 0;
 	u8 val = 0;
@@ -171,15 +191,24 @@ static int bq2429x_write_mask(u8 reg, u8 mask, u8 shift, u8 value)
 	if (ret < 0)
 		return ret;
 
-	val &= ~mask;
-	val |= ((value << shift) & mask);
+	val &= ~MASK;
+	val |= ((value << SHIFT) & MASK);
 
 	ret = bq2429x_write_byte(reg, val);
 
 	return ret;
 }
 
-static int bq2429x_read_mask(u8 reg, u8 mask, u8 shift, u8 *value)
+/**********************************************************
+*  Function:       bq2429x_read_mask
+*  Discription:    register read mask interface
+*  Parameters:   reg:register name
+*                      MASK:mask value of the function
+*                      SHIFT:shift number of the function
+*                      value:register value
+*  return value:  0-sucess or others-fail
+**********************************************************/
+static int bq2429x_read_mask(u8 reg, u8 MASK, u8 SHIFT, u8 *value)
 {
 	int ret = 0;
 	u8 val = 0;
@@ -187,9 +216,8 @@ static int bq2429x_read_mask(u8 reg, u8 mask, u8 shift, u8 *value)
 	ret = bq2429x_read_byte(reg, &val);
 	if (ret < 0)
 		return ret;
-
-	val &= mask;
-	val >>= shift;
+	val &= MASK;
+	val >>= SHIFT;
 	*value = val;
 
 	return 0;
@@ -202,24 +230,26 @@ static int bq2429x_read_mask(u8 reg, u8 mask, u8 shift, u8 *value)
  * Provide sysfs access to them so they can be examined and possibly modified
  * on the fly.
  */
-#define BQ2429X_SYSFS_FIELD(_name, r, f, m, store) \
-{ \
-	.attr = __ATTR(_name, m, bq2429x_sysfs_show, store), \
-	.reg = BQ2429X_REG_##r, \
-	.mask = BQ2429X_REG_##r##_##f##_MASK, \
-	.shift = BQ2429X_REG_##r##_##f##_SHIFT, \
+
+#define BQ2429X_SYSFS_FIELD(_name, r, f, m, store)                  \
+{                                                   \
+    .attr = __ATTR(_name, m, bq2429x_sysfs_show, store),    \
+    .reg = BQ2429X_REG_##r,                      \
+    .mask = BQ2429X_REG_##r##_##f##_MASK,                       \
+    .shift = BQ2429X_REG_##r##_##f##_SHIFT,                     \
 }
 
-#define BQ2429X_SYSFS_FIELD_RW(_name, r, f) \
-	BQ2429X_SYSFS_FIELD(_name, r, f, 0644, bq2429x_sysfs_store)
+#define BQ2429X_SYSFS_FIELD_RW(_name, r, f)                     \
+	BQ2429X_SYSFS_FIELD(_name, r, f, S_IWUSR | S_IRUGO, bq2429x_sysfs_store)
 
-#define BQ2429X_SYSFS_FIELD_RO(_name, r, f) \
-	BQ2429X_SYSFS_FIELD(_name, r, f, 0444, NULL)
+#define BQ2429X_SYSFS_FIELD_RO(_name, r, f)                         \
+	BQ2429X_SYSFS_FIELD(_name, r, f, S_IRUGO, NULL)
 
 static ssize_t bq2429x_sysfs_show(struct device *dev,
-	struct device_attribute *attr, char *buf);
+				  struct device_attribute *attr, char *buf);
 static ssize_t bq2429x_sysfs_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count);
+				   struct device_attribute *attr,
+				   const char *buf, size_t count);
 
 struct bq2429x_sysfs_field_info {
 	struct device_attribute attr;
@@ -276,14 +306,18 @@ static struct bq2429x_sysfs_field_info bq2429x_sysfs_field_tbl[] = {
 	BQ2429X_SYSFS_FIELD_RO(rev, VPRS, REV),
 };
 
-#define BQ2429X_SYSFS_ATTRS_SIZE  (ARRAY_SIZE(bq2429x_sysfs_field_tbl) + 1)
-
-static struct attribute *bq2429x_sysfs_attrs[BQ2429X_SYSFS_ATTRS_SIZE];
+static struct attribute *bq2429x_sysfs_attrs[ARRAY_SIZE(bq2429x_sysfs_field_tbl) + 1];
 
 static const struct attribute_group bq2429x_sysfs_attr_group = {
 	.attrs = bq2429x_sysfs_attrs,
 };
 
+/**********************************************************
+*  Function:       bq2429x_sysfs_init_attrs
+*  Discription:    initialize bq2429x_sysfs_attrs[] for bq2429x attribute
+*  Parameters:   NULL
+*  return value:  NULL
+**********************************************************/
 static void bq2429x_sysfs_init_attrs(void)
 {
 	int i, limit = ARRAY_SIZE(bq2429x_sysfs_field_tbl);
@@ -291,18 +325,22 @@ static void bq2429x_sysfs_init_attrs(void)
 	for (i = 0; i < limit; i++)
 		bq2429x_sysfs_attrs[i] = &bq2429x_sysfs_field_tbl[i].attr.attr;
 
-	bq2429x_sysfs_attrs[limit] = NULL;
+	bq2429x_sysfs_attrs[limit] = NULL;	/* Has additional entry for this */
 }
 
-static struct bq2429x_sysfs_field_info *bq2429x_sysfs_field_lookup(
-	const char *name)
+/**********************************************************
+*  Function:       bq2429x_sysfs_field_lookup
+*  Discription:    get the current device_attribute from bq2429x_sysfs_field_tbl by attr's name
+*  Parameters:   name:evice attribute name
+*  return value:  bq2429x_sysfs_field_tbl[]
+**********************************************************/
+static struct bq2429x_sysfs_field_info *bq2429x_sysfs_field_lookup(const char *name)
 {
 	int i, limit = ARRAY_SIZE(bq2429x_sysfs_field_tbl);
 
-	for (i = 0; i < limit; i++) {
+	for (i = 0; i < limit; i++)
 		if (!strcmp(name, bq2429x_sysfs_field_tbl[i].attr.attr.name))
 			break;
-	}
 
 	if (i >= limit)
 		return NULL;
@@ -310,18 +348,24 @@ static struct bq2429x_sysfs_field_info *bq2429x_sysfs_field_lookup(
 	return &bq2429x_sysfs_field_tbl[i];
 }
 
+/**********************************************************
+*  Function:       bq2429x_sysfs_show
+*  Discription:    show the value for all bq2429x device's node
+*  Parameters:   dev:device
+*                      attr:device_attribute
+*                      buf:string of node value
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static ssize_t bq2429x_sysfs_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
+				  struct device_attribute *attr, char *buf)
 {
 	struct bq2429x_sysfs_field_info *info;
 	int ret;
 	u8 v;
 
 	info = bq2429x_sysfs_field_lookup(attr->attr.name);
-	if (info == NULL) {
-		hwlog_err("get sysfs entries failed\n");
+	if (!info)
 		return -EINVAL;
-	}
 
 	ret = bq2429x_read_mask(info->reg, info->mask, info->shift, &v);
 	if (ret)
@@ -330,24 +374,30 @@ static ssize_t bq2429x_sysfs_show(struct device *dev,
 	return scnprintf(buf, PAGE_SIZE, "%hhx\n", v);
 }
 
+/**********************************************************
+*  Function:       bq2429x_sysfs_store
+*  Discription:    set the value for all bq2429x device's node
+*  Parameters:   dev:device
+*                      attr:device_attribute
+*                      buf:string of node value
+*                      count:unused
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static ssize_t bq2429x_sysfs_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
+				   struct device_attribute *attr,
+				   const char *buf, size_t count)
 {
 	struct bq2429x_sysfs_field_info *info;
 	int ret;
 	u8 v;
 
 	info = bq2429x_sysfs_field_lookup(attr->attr.name);
-	if (info == NULL) {
-		hwlog_err("get sysfs entries failed\n");
+	if (!info)
 		return -EINVAL;
-	}
 
 	ret = kstrtou8(buf, 0, &v);
-	if (ret < 0) {
-		hwlog_err("get kstrtou8 failed\n");
+	if (ret < 0)
 		return ret;
-	}
 
 	ret = bq2429x_write_mask(info->reg, info->mask, info->shift, v);
 	if (ret)
@@ -356,6 +406,12 @@ static ssize_t bq2429x_sysfs_store(struct device *dev,
 	return count;
 }
 
+/**********************************************************
+*  Function:       bq2429x_sysfs_create_group
+*  Discription:    create the bq2429x device sysfs group
+*  Parameters:   di:bq2429x_device_info
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_sysfs_create_group(struct bq2429x_device_info *di)
 {
 	bq2429x_sysfs_init_attrs();
@@ -363,14 +419,18 @@ static int bq2429x_sysfs_create_group(struct bq2429x_device_info *di)
 	return sysfs_create_group(&di->dev->kobj, &bq2429x_sysfs_attr_group);
 }
 
+/**********************************************************
+*  Function:       charge_sysfs_remove_group
+*  Discription:    remove the bq2429x device sysfs group
+*  Parameters:   di:bq2429x_device_info
+*  return value:  NULL
+**********************************************************/
 static void bq2429x_sysfs_remove_group(struct bq2429x_device_info *di)
 {
 	sysfs_remove_group(&di->dev->kobj, &bq2429x_sysfs_attr_group);
 }
-
 #else
-
-static inline int bq2429x_sysfs_create_group(struct bq2429x_device_info *di)
+static int bq2429x_sysfs_create_group(struct bq2429x_device_info *di)
 {
 	return 0;
 }
@@ -378,89 +438,85 @@ static inline int bq2429x_sysfs_create_group(struct bq2429x_device_info *di)
 static inline void bq2429x_sysfs_remove_group(struct bq2429x_device_info *di)
 {
 }
+#endif
 
-#endif /* CONFIG_SYSFS */
-
+/**********************************************************
+*  Function:       bq2429x_check_ic_type
+*  Discription:    bq2429x chipIC config
+*  Parameters:   NULL
+*  return value:  1-bq2429x or others no bq2419x
+**********************************************************/
 static int bq2429x_check_ic_type(void)
 {
 	u8 reg = 0;
 	int ret = 0;
 
 	ret = bq2429x_read_byte(BQ2429X_REG_VPRS, &reg);
-	if (ret < 0)
+	if (ret < 0) {
+		hwlog_err("read charger version erro !\n");
 		return ret;
+	}
 
-	hwlog_info("check_ic_type [%x]=0x%x\n", BQ2429X_REG_VPRS, reg);
-
-	if ((0 == (reg & BQ2429X_REG_VPRS_REV_MASK)) &&
-		(reg & BQ2429X_REG_VPRS_PN_MASK))
+	if ((0 == (reg & BQ2429X_REG_VPRS_REV_MASK))
+	    && (reg & BQ2429X_REG_VPRS_PN_MASK)) {
 		return BQ2429X_REG_VPRS_PN_24296;
+	}
 
-	if ((reg & BQ2419X_REG_VPRS_DEV_REG_MASK) &&
-		(reg & BQ2419X_REG_VPRS_PN_MASK))
+	if ((reg & BQ2419X_REG_VPRS_DEV_REG_MASK)
+	    && (reg & BQ2419X_REG_VPRS_PN_MASK)) {
 		return BQ2419X_REG_VPRS_PN_24192;
+	}
 
 	return 0;
 }
 
 static int bq2429x_device_check(void)
 {
-	if ((bq2429x_check_ic_type() == BQ2429X_REG_VPRS_PN_24296) ||
-		(bq2429x_check_ic_type() == BQ2419X_REG_VPRS_PN_24192)) {
-		hwlog_info("bq2429x is good\n");
+	if ((BQ2429X_REG_VPRS_PN_24296 == bq2429x_check_ic_type())
+	    || (BQ2419X_REG_VPRS_PN_24192 == bq2429x_check_ic_type())) {
+		hwlog_info("bq2429x is good.\n");
 		return CHARGE_IC_GOOD;
+	} else {
+		hwlog_err("bq2429x is bad.\n");
+		return CHARGE_IC_BAD;
 	}
-
-	hwlog_err("bq2429x is bad\n");
-	return CHARGE_IC_BAD;
 }
 
-static int bq2429x_5v_chip_init(struct bq2429x_device_info *di)
+/**********************************************************
+*  Function:       bq2429x_chip_init
+*  Discription:    bq2429x chipIC initialization
+*  Parameters:   NULL
+*  return value:  0-sucess or others-fail
+**********************************************************/
+static int bq2429x_chip_init(void)
 {
 	int ret = 0;
-
-	/* boost mode current limit = 1000mA */
-	/* kick watchdog in bq2429x chip_init */
-	ret = bq2429x_write_byte(BQ2429X_REG_POC, 0x5a);
-
-	/* I2C watchdog timer setting = 80s */
-	/* fast charge timer setting = 12h */
-	ret |= bq2429x_write_byte(BQ2429X_REG_CTTC, 0x2d);
-
-	/* IR compensation voatge clamp = 48mV */
-	/* IR compensation resistor setting = 40mohm */
-	if (bq2429x_check_ic_type() != BQ2429X_REG_VPRS_PN_24296)
-		ret |= bq2429x_write_byte(BQ2429X_REG_BVTRC, 0x8f);
-
-	/* enable charging */
-	gpio_set_value(di->gpio_cd, 0);
-
-	return ret;
-}
-
-static int bq2429x_chip_init(struct chip_init_crit *init_crit)
-{
-	int ret = -1;
 	struct bq2429x_device_info *di = g_bq2429x_dev;
 
-	if (di == NULL || init_crit == NULL) {
-		hwlog_err("di or init_crit is null\n");
-		return -ENOMEM;
+	/*boost mode current limit = 1000mA */
+	/*kick watchdog in bq2429x chip_init*/
+	ret = bq2429x_write_byte(BQ2429X_REG_POC, 0x5a);
+	/*I2C watchdog timer setting = 80s */
+	/*fast charge timer setting = 12h */
+	ret |= bq2429x_write_byte(BQ2429X_REG_CTTC, 0x2d);
+
+	if (BQ2429X_REG_VPRS_PN_24296 != bq2429x_check_ic_type()) {
+		/*IR compensation voatge clamp = 48mV */
+		/*IR compensation resistor setting = 40mohm */
+		ret |= bq2429x_write_byte(BQ2429X_REG_BVTRC, 0x8f);
 	}
 
-	switch (init_crit->vbus) {
-	case ADAPTER_5V:
-		ret = bq2429x_5v_chip_init(di);
-		break;
-
-	default:
-		hwlog_err("invaid init_crit vbus mode\n");
-		break;
-	}
+	gpio_set_value(di->gpio_cd, 0);	/*enable charging*/
 
 	return ret;
 }
 
+/**********************************************************
+*  Function:       bq2429x_set_input_current
+*  Discription:    set the input current in charging process
+*  Parameters:   value:input current value
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_set_input_current(int value)
 {
 	int val = 0;
@@ -472,15 +528,17 @@ static int bq2429x_set_input_current(int value)
 		return bq2429x_iin_values[0];
 
 	val = params_to_reg(bq2429x_iin_values, array_size, value);
-
-	hwlog_info("set_input_current [%x]=0x%x\n", BQ2429X_REG_ISC, val);
-
 	return bq2429x_write_mask(BQ2429X_REG_ISC,
-			BQ2429X_REG_ISC_IINLIM_MASK,
-			BQ2429X_REG_ISC_IINLIM_SHIFT,
-			val);
+				  BQ2429X_REG_ISC_IINLIM_MASK,
+				  BQ2429X_REG_ISC_IINLIM_SHIFT, val);
 }
 
+/**********************************************************
+*  Function:       bq2429x_set_charge_current
+*  Discription:    set the charge current in charging process
+*  Parameters:   value:charge current value
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_set_charge_current(int value)
 {
 	int ret = 0;
@@ -491,39 +549,36 @@ static int bq2429x_set_charge_current(int value)
 	if (value > bq2429x_ichg_values[array_size - 1])
 		return bq2429x_ichg_values[array_size - 1];
 
-	/*
-	 * 1. If currentmA is below ICHG_512,
-	 * we can set the ICHG to 5*currentmA and set the FORCE_20PCT in REG02
-	 * to make the true current 20% of the ICHG.
-	 * 2. To slove the OCP BUG of BQ2419X,
-	 * we need set the ICHG (lower than 1024mA) to
-	 * 5*currentmA and set the FORCE_20PCT in REG02.
-	 */
+	/* 1.If currentmA is below ICHG_512, we can set the ICHG to 5*currentmA and
+	   set the FORCE_20PCT in REG02 to make the true current 20% of the ICHG
+	   2.To slove the OCP BUG of bq2429x, we need set the ICHG(lower than 1024mA)
+	   to 5*currentmA and set the FORCE_20PCT in REG02. */
 	else if (value < 1024) {
 		value *= 5;
 		force_20pct_en = 1;
 	}
-
 	if (value < bq2429x_ichg_values[0])
 		value = bq2429x_ichg_values[0];
 
 	ret = bq2429x_write_mask(BQ2429X_REG_CCC,
-				BQ2429X_REG_CCC_FORCE_20PCT_MASK,
-				BQ2429X_REG_CCC_FORCE_20PCT_SHIFT,
-				force_20pct_en);
+				 BQ2429X_REG_CCC_FORCE_20PCT_MASK,
+				 BQ2429X_REG_CCC_FORCE_20PCT_SHIFT,
+				 force_20pct_en);
 	if (ret < 0)
 		return ret;
 
 	val = params_to_reg(bq2429x_ichg_values, array_size, value);
-
-	hwlog_info("set_charge_current [%x]=0x%x\n", BQ2429X_REG_CCC, val);
-
 	return bq2429x_write_mask(BQ2429X_REG_CCC,
-			BQ2429X_REG_CCC_ICHG_MASK,
-			BQ2429X_REG_CCC_ICHG_SHIFT,
-			val);
+				  BQ2429X_REG_CCC_ICHG_MASK,
+				  BQ2429X_REG_CCC_ICHG_SHIFT, val);
 }
 
+/**********************************************************
+*  Function:       bq2429x_set_terminal_voltage
+*  Discription:    set the terminal voltage in charging process
+*  Parameters:   value:terminal voltage value
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_set_terminal_voltage(int value)
 {
 	int val = 0;
@@ -535,15 +590,17 @@ static int bq2429x_set_terminal_voltage(int value)
 		return bq2429x_vreg_values[0];
 
 	val = params_to_reg(bq2429x_vreg_values, array_size, value);
-
-	hwlog_info("set_terminal_voltage [%x]=0x%x\n", BQ2429X_REG_CVC, val);
-
 	return bq2429x_write_mask(BQ2429X_REG_CVC,
-			BQ2429X_REG_CVC_VREG_MASK,
-			BQ2429X_REG_CVC_VREG_SHIFT,
-			val);
+				  BQ2429X_REG_CVC_VREG_MASK,
+				  BQ2429X_REG_CVC_VREG_SHIFT, val);
 }
 
+/**********************************************************
+*  Function:       bq2429x_set_dpm_voltage
+*  Discription:    set the dpm voltage in charging process
+*  Parameters:   value:dpm voltage value
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_set_dpm_voltage(int value)
 {
 	int val = 0;
@@ -555,15 +612,17 @@ static int bq2429x_set_dpm_voltage(int value)
 		return bq2429x_vindpm_values[0];
 
 	val = params_to_reg(bq2429x_vindpm_values, array_size, value);
-
-	hwlog_info("set_dpm_voltage [%x]=0x%x\n", BQ2429X_REG_ISC, val);
-
 	return bq2429x_write_mask(BQ2429X_REG_ISC,
-			BQ2429X_REG_ISC_VINDPM_MASK,
-			BQ2429X_REG_ISC_VINDPM_SHIFT,
-			val);
+				  BQ2429X_REG_ISC_VINDPM_MASK,
+				  BQ2429X_REG_ISC_VINDPM_SHIFT, val);
 }
 
+/**********************************************************
+*  Function:       bq2429x_set_terminal_current
+*  Discription:    set the terminal current in charging process
+*  Parameters:   value:terminal current value
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_set_terminal_current(int value)
 {
 	int val = 0;
@@ -575,27 +634,33 @@ static int bq2429x_set_terminal_current(int value)
 		return bq2429x_iterm_values[0];
 
 	val = params_to_reg(bq2429x_iterm_values, array_size, value);
-
-	hwlog_info("set_terminal_current [%x]=0x%x\n", BQ2429X_REG_PCTCC, val);
-
 	return bq2429x_write_mask(BQ2429X_REG_PCTCC,
-			BQ2429X_REG_PCTCC_ITERM_MASK,
-			BQ2429X_REG_PCTCC_ITERM_SHIFT,
-			val);
+				  BQ2429X_REG_PCTCC_ITERM_MASK,
+				  BQ2429X_REG_PCTCC_ITERM_SHIFT, val);
 }
 
+/**********************************************************
+*  Function:       bq2429x_set_charge_enable
+*  Discription:    set the charge enable in charging process
+*  Parameters:   enable:charge enable or not
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_set_charge_enable(int enable)
 {
 	struct bq2429x_device_info *di = g_bq2429x_dev;
 
 	gpio_set_value(di->gpio_cd, !enable);
-
 	return bq2429x_write_mask(BQ2429X_REG_POC,
-			BQ2429X_REG_POC_CHG_CONFIG_MASK,
-			BQ2429X_REG_POC_CHG_CONFIG_SHIFT,
-			enable);
+				  BQ2429X_REG_POC_CHG_CONFIG_MASK,
+				  BQ2429X_REG_POC_CHG_CONFIG_SHIFT, enable);
 }
 
+/**********************************************************
+*  Function:       bq2429x_set_otg_enable
+*  Discription:    set the otg mode enable in charging process
+*  Parameters:   enable:otg mode  enable or not
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_set_otg_enable(int enable)
 {
 	int val = 0;
@@ -604,26 +669,31 @@ static int bq2429x_set_otg_enable(int enable)
 	gpio_set_value(di->gpio_cd, !enable);
 	val = enable << 1;
 
-	/* notice:
-	 * why enable irq when entry to OTG mode only?
-	 * because we care VBUS overloaded OCP or OVP's interrupt in boost mode
+	/*NOTICE:
+	   why enable irq when entry to OTG mode only?
+	   because we care VBUS overloaded OCP or OVP's interrupt in boost mode
 	 */
 	if ((!di->irq_active) && (enable)) {
-		di->irq_active = 1; /* ACTIVE */
+		di->irq_active = 1;
 		enable_irq(di->irq_int);
 	} else if ((di->irq_active) && (!enable)) {
-		di->irq_active = 0; /* INACTIVE */
+		di->irq_active = 0;
 		disable_irq(di->irq_int);
 	} else {
-		/* do nothing */
+		/*do nothing!!*/
 	}
 
 	return bq2429x_write_mask(BQ2429X_REG_POC,
 			BQ2429X_REG_POC_CHG_CONFIG_MASK,
-			BQ2429X_REG_POC_CHG_CONFIG_SHIFT,
-			val);
+			BQ2429X_REG_POC_CHG_CONFIG_SHIFT, val);
 }
 
+/**********************************************************
+*  Function:       bq2429x_reset_otg
+*  Discription:    set the otg mode disable and enable
+*  Parameters:   void
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_reset_otg(void)
 {
 	int val = 0;
@@ -631,45 +701,52 @@ static int bq2429x_reset_otg(void)
 	struct bq2429x_device_info *di = g_bq2429x_dev;
 
 	gpio_set_value(di->gpio_cd, !(FALSE));
-
 	val = (FALSE) << 1;
 	ret = bq2429x_write_mask(BQ2429X_REG_POC,
-			BQ2429X_REG_POC_CHG_CONFIG_MASK,
-			BQ2429X_REG_POC_CHG_CONFIG_SHIFT,
-			val);
-	if (ret)
+				 BQ2429X_REG_POC_CHG_CONFIG_MASK,
+				 BQ2429X_REG_POC_CHG_CONFIG_SHIFT, val);
+	if (ret) {
+		hwlog_info("bq2429x_reset_otg false fail \n");
 		return ret;
+	}
 
 	gpio_set_value(di->gpio_cd, !(TRUE));
-
 	val = (TRUE) << 1;
 	ret = bq2429x_write_mask(BQ2429X_REG_POC,
-			BQ2429X_REG_POC_CHG_CONFIG_MASK,
-			BQ2429X_REG_POC_CHG_CONFIG_SHIFT,
-			val);
-	if (ret)
+				 BQ2429X_REG_POC_CHG_CONFIG_MASK,
+				 BQ2429X_REG_POC_CHG_CONFIG_SHIFT, val);
+	if (ret) {
+		hwlog_info("bq2429x_reset_otg true fail \n");
 		return ret;
-
+	}
 	return 0;
 }
 
+/**********************************************************
+*  Function:       bq2429x_set_term_enable
+*  Discription:    set the terminal enable in charging process
+*  Parameters:   enable:terminal enable or not
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_set_term_enable(int enable)
 {
 	return bq2429x_write_mask(BQ2429X_REG_CTTC,
-			BQ2429X_REG_CTTC_EN_TERM_MASK,
-			BQ2429X_REG_CTTC_EN_TERM_SHIFT,
-			enable);
+				  BQ2429X_REG_CTTC_EN_TERM_MASK,
+				  BQ2429X_REG_CTTC_EN_TERM_SHIFT, enable);
 }
 
+/**********************************************************
+*  Function:       bq2429x_get_charge_state
+*  Discription:    get the charge states in charging process
+*  Parameters:   state:charge states
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_get_charge_state(unsigned int *state)
 {
 	u8 reg = 0;
 	int ret = 0;
 
 	ret = bq2429x_read_byte(BQ2429X_REG_SS, &reg);
-
-	hwlog_info("get_charge_state [%x]=0x%x\n", BQ2429X_REG_SS, reg);
-
 	if ((reg & BQ2429X_REG_SS_PG) == BQ2429X_REG_SS_NOTPG)
 		*state |= CHAGRE_STATE_NOT_PG;
 
@@ -681,9 +758,6 @@ static int bq2429x_get_charge_state(unsigned int *state)
 
 	ret |= bq2429x_read_byte(BQ2429X_REG_F, &reg);
 	ret |= bq2429x_read_byte(BQ2429X_REG_F, &reg);
-
-	hwlog_info("get_charge_state [%x]=0x%x\n", BQ2429X_REG_F, reg);
-
 	if ((reg & BQ2429X_REG_F_WDT_TIMEOUT) == BQ2429X_REG_F_WDT_TIMEOUT)
 		*state |= CHAGRE_STATE_WDT_FAULT;
 
@@ -696,40 +770,56 @@ static int bq2429x_get_charge_state(unsigned int *state)
 	return ret;
 }
 
+/**********************************************************
+*  Function:       bq2429x_reset_watchdog_timer
+*  Discription:    reset watchdog timer in charging process
+*  Parameters:   NULL
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_reset_watchdog_timer(void)
 {
 	return bq2429x_write_mask(BQ2429X_REG_POC,
-			BQ2429X_REG_POC_WDT_RESET_MASK,
-			BQ2429X_REG_POC_WDT_RESET_SHIFT,
-			0x01);
+				  BQ2429X_REG_POC_WDT_RESET_MASK,
+				  BQ2429X_REG_POC_WDT_RESET_SHIFT, 0x01);
 }
 
+/**********************************************************
+*  Function:       bq2429x_check_charger_plugged
+*  Discription:    check whether USB or adaptor is plugged
+*  Parameters:     NULL
+*  return value:   TRUE means USB or adaptor plugged
+*                  FALSE means USB or adaptor not plugged
+**********************************************************/
 static int bq2429x_check_charger_plugged(void)
 {
 	u8 reg = 0;
 	int ret = 0;
 
 	ret = bq2429x_read_byte(BQ2429X_REG_SS, &reg);
-
-	hwlog_info("check_charger_plugged [%x]=0x%x\n", BQ2429X_REG_SS, reg);
-
-	if ((reg & BQ2429X_REG_SS_VBUS_STAT_MASK) ==
-		BQ2429X_REG_SS_VBUS_PLUGGED)
+	if (BQ2429X_REG_SS_VBUS_PLUGGED ==
+	    (reg & BQ2429X_REG_SS_VBUS_STAT_MASK)) {
 		return TRUE;
-
+	}
 	return FALSE;
 }
 
+/**********************************************************
+*  Function:       bq2429x_check_input_dpm_state
+*  Discription:    check whether VINDPM or IINDPM
+*  Parameters:     NULL
+*  return value:   TRUE means VINDPM or IINDPM
+*                  FALSE means NoT DPM
+**********************************************************/
 static int bq2429x_check_input_dpm_state(void)
 {
 	u8 reg = 0;
 	int ret = -1;
 
 	ret = bq2429x_read_byte(BQ2429X_REG_SS, &reg);
-	if (ret < 0)
+	if (ret < 0) {
+		hwlog_err("bq2429x_check_input_dpm_state err\n");
 		return ret;
-
-	hwlog_info("check_input_dpm_state [%x]=0x%x\n", BQ2429X_REG_SS, reg);
+	}
 
 	if (reg & BQ2429X_REG_SS_DPM_STAT_MASK)
 		return TRUE;
@@ -737,47 +827,67 @@ static int bq2429x_check_input_dpm_state(void)
 		return FALSE;
 }
 
+/**********************************************************
+*  Function:       bq2429x_dump_register
+*  Discription:    print the register value in charging process
+*  Parameters:   reg_value:string for save register value
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_dump_register(char *reg_value)
 {
-	u8 reg[BQ2429X_REG_NUM] = {0};
-	char buff[BUF_LEN] = {0};
+	u8 reg[BQ2429X_REG_NUM] = { 0 };
+	char buff[26] = { 0 };
 	int i = 0;
 
 	memset(reg_value, 0, CHARGELOG_SIZE);
-
 	for (i = 0; i < BQ2429X_REG_NUM; i++) {
 		bq2429x_read_byte(i, &reg[i]);
 		bq2429x_read_byte(i, &reg[i]);
-		snprintf(buff, BUF_LEN, "0x%-8.2x", reg[i]);
+		sprintf(buff, "0x%-8.2x", reg[i]);
 		strncat(reg_value, buff, strlen(buff));
 	}
-
 	return 0;
 }
 
+/**********************************************************
+*  Function:       bq2429x_dump_register
+*  Discription:    print the register head in charging process
+*  Parameters:   reg_head:string for save register head
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_get_register_head(char *reg_head)
 {
-	char buff[BUF_LEN] = {0};
+	char buff[26] = { 0 };
 	int i = 0;
 
 	memset(reg_head, 0, CHARGELOG_SIZE);
-
 	for (i = 0; i < BQ2429X_REG_NUM; i++) {
-		snprintf(buff, BUF_LEN, "Reg[%d]    ", i);
+		sprintf(buff, "Reg[%d]    ", i);
 		strncat(reg_head, buff, strlen(buff));
 	}
-
 	return 0;
 }
 
+/**********************************************************
+*  Function:       bq2429x_set_batfet_disable
+*  Discription:    set the batfet disable in charging process
+*  Parameters:   disable:batfet disable or not
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_set_batfet_disable(int disable)
 {
 	return bq2429x_write_mask(BQ2429X_REG_MOC,
-			BQ2429X_REG_MOC_BATFET_DISABLE_MASK,
-			BQ2429X_REG_MOC_BATFET_DISABLE_SHIFT,
-			disable);
+				  BQ2429X_REG_MOC_BATFET_DISABLE_MASK,
+				  BQ2429X_REG_MOC_BATFET_DISABLE_SHIFT,
+				  disable);
 }
 
+/**********************************************************
+*  Function:       bq2429x_get_ilim
+*  Discription:    get average value for ilim
+*  Parameters:     NULL
+*  return value:   -1:fail;  other: ibus
+**********************************************************/
 static int bq2429x_get_ilim(void)
 {
 	int ret = 0;
@@ -785,25 +895,29 @@ static int bq2429x_get_ilim(void)
 	u32 state = 0;
 
 	ret |= bq2429x_get_charge_state(&state);
-	if (ret)
+	if(ret)
+	{
+		hwlog_err("[%s] get_charge_state fail,ret:%d\n",__func__,ret);
 		return -1;
-
-	if (CHAGRE_STATE_NOT_PG & state) {
-		hwlog_info("CHAGRE_STATE_NOT_PG state:%d\n", state);
+	}
+	if(CHAGRE_STATE_NOT_PG & state)
+	{
+		hwlog_info("[%s] CHAGRE_STATE_NOT_PG ,state:%d\n",__func__,state);
 		return 0;
 	}
-
-	/*
-	 * bq2429x do not support get-ibus function, for RunnintTest,
-	 * we return a fake vulue
-	 */
-	ibus = 1000; /* fake current value for Running test */
-	/* temperary log for RT flag */
-	hwlog_info("bq2429x: ibus = %d, RunningTest Begin\n", ibus);
+	/*bq2429x do not support get-ibus function, for RunnintTest, we return a fake vulue*/
+	ibus = 1000;//fake current value for Running test
+	hwlog_info("bq2429x: ibus = %d, RunningTest Begin!\n", ibus);//Temperary log for RT flag
 
 	return ibus;
 }
 
+/**********************************************************
+*  Function:       bq2429x_set_watchdog_timer
+*  Discription:    set the watchdog timer in charging process
+*  Parameters:   value:watchdog timer value
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_set_watchdog_timer(int value)
 {
 	u8 val = 0;
@@ -815,30 +929,30 @@ static int bq2429x_set_watchdog_timer(int value)
 		return bq2429x_watchdog_values[0];
 
 	val = params_to_reg(bq2429x_watchdog_values, array_size, value);
-
-	hwlog_info("set_watchdog_timer [%x]=0x%x\n", BQ2429X_REG_CTTC, val);
-
 	return bq2429x_write_mask(BQ2429X_REG_CTTC,
-			BQ2429X_REG_CTTC_WATCHDOG_MASK,
-			BQ2429X_REG_CTTC_WATCHDOG_SHIFT,
-			val);
+				  BQ2429X_REG_CTTC_WATCHDOG_MASK,
+				  BQ2429X_REG_CTTC_WATCHDOG_SHIFT, val);
 }
 
+/**********************************************************
+*  Function:       bq2429x_set_charger_hiz
+*  Discription:    set the charger hiz close watchdog
+*  Parameters:   enable:charger in hiz or not
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_set_charger_hiz(int enable)
 {
 	int ret = 0;
 
-	if (enable > 0)
+	if (enable > 0) {
 		ret |= bq2429x_write_mask(BQ2429X_REG_ISC,
-				BQ2429X_REG_ISC_EN_HIZ_MASK,
-				BQ2429X_REG_ISC_EN_HIZ_SHIFT,
-				TRUE);
-	else
+					  BQ2429X_REG_ISC_EN_HIZ_MASK,
+					  BQ2429X_REG_ISC_EN_HIZ_SHIFT, TRUE);
+	} else {
 		ret |= bq2429x_write_mask(BQ2429X_REG_ISC,
-				BQ2429X_REG_ISC_EN_HIZ_MASK,
-				BQ2429X_REG_ISC_EN_HIZ_SHIFT,
-				FALSE);
-
+					  BQ2429X_REG_ISC_EN_HIZ_MASK,
+					  BQ2429X_REG_ISC_EN_HIZ_SHIFT, FALSE);
+	}
 	return ret;
 }
 
@@ -866,35 +980,33 @@ struct charge_device_ops bq2429x_ops = {
 	.get_charge_current = NULL,
 };
 
+/**********************************************************
+*  Function:       bq2429x_irq_work
+*  Discription:    handler for chargerIC fault irq in charging process
+*  Parameters:   work:chargerIC fault interrupt workqueue
+*  return value:  NULL
+**********************************************************/
 static void bq2429x_irq_work(struct work_struct *work)
 {
-	struct bq2429x_device_info *di;
+	struct bq2429x_device_info *di =
+	    container_of(work, struct bq2429x_device_info, irq_work);
 	u8 reg = 0;
 
-	di = container_of(work, struct bq2429x_device_info, irq_work);
-
-	msleep(250); /* sleep 250ms */
-
+	msleep(250);
 	bq2429x_read_byte(BQ2429X_REG_F, &reg);
 	bq2429x_read_byte(BQ2429X_REG_F, &reg);
-
-	hwlog_err("boost_ovp_reg [%x]=0x%x\n", BQ2429X_REG_F, reg);
 
 	if (reg & BQ2429X_REG_F_BOOST_OCP) {
-		hwlog_info("CHARGE_FAULT_BOOST_OCP happened\n");
-
-		/* retry otg once */
+		hwlog_info("CHARGE_FAULT_BOOST_OCP once!! \n");
+		/*retry otg once*/
 		bq2429x_reset_otg();
-
-		msleep(100); /* sleep 100ms */
-
+		msleep(100);
 		bq2429x_read_byte(BQ2429X_REG_F, &reg);
 		bq2429x_read_byte(BQ2429X_REG_F, &reg);
 		if (reg & BQ2429X_REG_F_BOOST_OCP) {
-			hwlog_info("CHARGE_FAULT_BOOST_OCP happened twice\n");
-
+			hwlog_info("CHARGE_FAULT_BOOST_OCP twice!! \n");
 			atomic_notifier_call_chain(&fault_notifier_list,
-				CHARGE_FAULT_BOOST_OCP, NULL);
+						   CHARGE_FAULT_BOOST_OCP, NULL);
 		}
 	}
 
@@ -904,142 +1016,120 @@ static void bq2429x_irq_work(struct work_struct *work)
 	}
 }
 
+/**********************************************************
+*  Function:       bq2429x_interrupt
+*  Discription:    callback function for chargerIC fault irq in charging process
+*  Parameters:   irq:chargerIC fault interrupt
+*                      _di:bq2429x_device_info
+*  return value:  IRQ_HANDLED-sucess or others
+**********************************************************/
 static irqreturn_t bq2429x_interrupt(int irq, void *_di)
 {
 	struct bq2429x_device_info *di = _di;
 
-	if (di == NULL) {
-		hwlog_err("di is null\n");
-		return -1;
-	}
-
-	hwlog_info("bq2429x int happened (%d)\n", di->irq_active);
-
+	hwlog_info("bq2429x interrupt\n");
 	if (di->irq_active == 1) {
 		di->irq_active = 0;
 		disable_irq_nosync(di->irq_int);
 		schedule_work(&di->irq_work);
 	} else {
-		hwlog_info("the irq is not enable, do nothing\n");
+		hwlog_info("The irq is not enable,do nothing!\n");
 	}
-
 	return IRQ_HANDLED;
 }
 
+/**********************************************************
+*  Function:       bq2429x_probe
+*  Discription:    bq2429x module probe
+*  Parameters:   client:i2c_client
+*                      id:i2c_device_id
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_probe(struct i2c_client *client,
-	const struct i2c_device_id *id)
+			 const struct i2c_device_id *id)
 {
 	int ret = 0;
 	struct bq2429x_device_info *di = NULL;
+	struct charge_device_ops *ops = NULL;
 	struct device_node *np = NULL;
 	struct class *power_class = NULL;
 
-	hwlog_info("probe begin\n");
-
-	if (client == NULL || id == NULL) {
-		hwlog_err("client or id is null\n");
+	di = kzalloc(sizeof(*di), GFP_KERNEL);
+	if (!di) {
+		hwlog_err("bq2429x_device_info is NULL!\n");
 		return -ENOMEM;
 	}
-
-	di = kzalloc(sizeof(*di), GFP_KERNEL);
-	if (di == NULL)
-		return -ENOMEM;
-
 	g_bq2429x_dev = di;
-
 	di->dev = &client->dev;
 	np = di->dev->of_node;
 	di->client = client;
 	i2c_set_clientdata(client, di);
 
 	INIT_WORK(&di->irq_work, bq2429x_irq_work);
-
 	di->gpio_cd = of_get_named_gpio(np, "gpio_cd", 0);
-	hwlog_info("gpio_cd=%d\n", di->gpio_cd);
-
 	if (!gpio_is_valid(di->gpio_cd)) {
-		hwlog_err("gpio(gpio_cd) is not valid\n");
+		hwlog_err("gpio_cd is not valid\n");
 		ret = -EINVAL;
 		goto bq2429x_fail_0;
 	}
-
+	di->gpio_int = of_get_named_gpio(np, "gpio_int", 0);
+	if (!gpio_is_valid(di->gpio_int)) {
+		hwlog_err("gpio_int is not valid\n");
+		ret = -EINVAL;
+		goto bq2429x_fail_0;
+	}
+	/*set gpio to control CD pin to disable/enable bq2429x IC */
 	ret = gpio_request(di->gpio_cd, "charger_cd");
 	if (ret) {
-		hwlog_err("gpio(gpio_cd) request fail\n");
+		hwlog_err("could not request gpio_cd\n");
+		ret = -ENOMEM;
 		goto bq2429x_fail_0;
 	}
-
-	/* set gpio to control CD pin to disable/enable bq2429x IC */
-	ret = gpio_direction_output(di->gpio_cd, 0);
-	if (ret) {
-		hwlog_err("gpio(gpio_cd) set output fail\n");
-		goto bq2429x_fail_1;
-	}
-
-	di->gpio_int = of_get_named_gpio(np, "gpio_int", 0);
-	hwlog_info("gpio_int=%d\n", di->gpio_int);
-
-	if (!gpio_is_valid(di->gpio_int)) {
-		hwlog_err("gpio(gpio_int) is not valid\n");
-		ret = -EINVAL;
-		goto bq2429x_fail_1;
-	}
-
+	gpio_direction_output(di->gpio_cd, 0);
 	ret = gpio_request(di->gpio_int, "charger_int");
 	if (ret) {
-		hwlog_err("gpio(gpio_int) request fail\n");
+		hwlog_err("could not request gpio_int\n");
 		goto bq2429x_fail_1;
 	}
-
-	ret = gpio_direction_input(di->gpio_int);
-	if (ret) {
-		hwlog_err("gpio(gpio_int) set input fail\n");
-		goto bq2429x_fail_2;
-	}
-
+	gpio_direction_input(di->gpio_int);
 	di->irq_int = gpio_to_irq(di->gpio_int);
 	if (di->irq_int < 0) {
-		hwlog_err("gpio(gpio_int) map to irq fail\n");
-		ret = -EINVAL;
+		hwlog_err("could not map gpio_int to irq\n");
 		goto bq2429x_fail_2;
 	}
 
-	ret = request_irq(di->irq_int, bq2429x_interrupt, IRQF_TRIGGER_FALLING,
-		"charger_int_irq", di);
+	ret =
+	    request_irq(di->irq_int, bq2429x_interrupt, IRQF_TRIGGER_FALLING,
+			"charger_int_irq", di);
 	if (ret) {
-		hwlog_err("gpio(gpio_int) irq request fail\n");
+		hwlog_err("could not request irq_int\n");
 		di->irq_int = -1;
 		goto bq2429x_fail_2;
 	}
-
 	disable_irq(di->irq_int);
 	di->irq_active = 0;
 
-	ret = charge_ops_register(&bq2429x_ops);
+	ops = &bq2429x_ops;
+	ret = charge_ops_register(ops);
 	if (ret) {
-		hwlog_err("bq2429x charge ops register fail\n");
+		hwlog_err("register charge ops failed!\n");
 		goto bq2429x_fail_3;
 	}
-
 	ret = bq2429x_sysfs_create_group(di);
 	if (ret)
-		hwlog_err("sysfs group create failed\n");
-
+		hwlog_err("create sysfs entries failed!\n");
 	power_class = hw_power_get_class();
-	if (power_class != NULL) {
+	if (power_class) {
 		if (charge_dev == NULL)
-			charge_dev = device_create(power_class, NULL, 0, NULL,
-				"charger");
-
-		ret = sysfs_create_link(&charge_dev->kobj, &di->dev->kobj,
-			"bq2429x");
+			charge_dev = device_create(power_class, NULL, 0, NULL, "charger");
+		ret = sysfs_create_link(&charge_dev->kobj, &di->dev->kobj, "bq2429x");
 		if (ret) {
-			hwlog_err("sysfs link create failed\n");
+			hwlog_err("create link to bq2429x fail.\n");
 			goto bq2429x_fail_4;
 		}
 	}
 
-	hwlog_info("probe end\n");
+	hwlog_info("bq2429x probe ok!\n");
 	return 0;
 
 bq2429x_fail_4:
@@ -1058,38 +1148,40 @@ bq2429x_fail_0:
 	return ret;
 }
 
+/**********************************************************
+*  Function:       bq2429x_remove
+*  Discription:    bq2429x module remove
+*  Parameters:   client:i2c_client
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int bq2429x_remove(struct i2c_client *client)
 {
 	struct bq2429x_device_info *di = i2c_get_clientdata(client);
 
-	hwlog_info("remove begin\n");
-
 	bq2429x_sysfs_remove_group(di);
 
 	gpio_set_value(di->gpio_cd, 1);
-
-	if (di->gpio_cd)
+	if (di->gpio_cd) {
 		gpio_free(di->gpio_cd);
-
-	if (di->irq_int)
+	}
+	if (di->irq_int) {
 		free_irq(di->irq_int, di);
-
-	if (di->gpio_int)
+	}
+	if (di->gpio_int) {
 		gpio_free(di->gpio_int);
-
+	}
 	kfree(di);
-
-	hwlog_info("remove end\n");
 	return 0;
 }
 
 MODULE_DEVICE_TABLE(i2c, bq24192);
-static const struct of_device_id bq2429x_of_match[] = {
+static struct of_device_id bq2429x_of_match[] = {
 	{
-		.compatible = "huawei,bq2429x_charger",
-		.data = NULL,
-	},
-	{},
+	 .compatible = "huawei,bq2429x_charger",
+	 .data = NULL,
+	 },
+	{
+	 },
 };
 
 static const struct i2c_device_id bq2429x_i2c_id[] = {
@@ -1101,23 +1193,35 @@ static struct i2c_driver bq2429x_driver = {
 	.remove = bq2429x_remove,
 	.id_table = bq2429x_i2c_id,
 	.driver = {
-		.owner = THIS_MODULE,
-		.name = "bq2429x_charger",
-		.of_match_table = of_match_ptr(bq2429x_of_match),
-	},
+		   .owner = THIS_MODULE,
+		   .name = "bq2429x_charger",
+		   .of_match_table = of_match_ptr(bq2429x_of_match),
+		   },
 };
 
+/**********************************************************
+*  Function:       bq2429x_init
+*  Discription:    bq2429x module initialization
+*  Parameters:   NULL
+*  return value:  0-sucess or others-fail
+**********************************************************/
 static int __init bq2429x_init(void)
 {
 	int ret = 0;
 
 	ret = i2c_add_driver(&bq2429x_driver);
 	if (ret)
-		hwlog_err("i2c_add_driver error\n");
+		hwlog_err("%s: i2c_add_driver error!!!\n", __func__);
 
 	return ret;
 }
 
+/**********************************************************
+*  Function:       bq2429x_exit
+*  Discription:    bq2429x module exit
+*  Parameters:   NULL
+*  return value:  NULL
+**********************************************************/
 static void __exit bq2429x_exit(void)
 {
 	i2c_del_driver(&bq2429x_driver);
@@ -1125,7 +1229,6 @@ static void __exit bq2429x_exit(void)
 
 module_init(bq2429x_init);
 module_exit(bq2429x_exit);
-
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("bq2429x charger module driver");
-MODULE_AUTHOR("Huawei Technologies Co., Ltd.");
+MODULE_AUTHOR("HW Inc");

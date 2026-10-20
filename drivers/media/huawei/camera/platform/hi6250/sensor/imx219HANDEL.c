@@ -6,14 +6,12 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/rpmsg.h>
-#include <securec.h>
 
 #include "hwsensor.h"
 #include "sensor_commom.h"
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 #define SENSOR_GPIO_SETTING_DELAY_80_US 80
 static char *sensor_dts_name = "IMX219HANDEL_VENDOR";
 static hwsensor_vtbl_t s_imx219HANDEL_vtbl;
@@ -473,11 +471,7 @@ static int imx219HANDEL_match_id(hwsensor_intf_t* si, void * data)
     int rc = 0;
     char *sensor_name [] = { "IMX219HANDEL_SUNNY", "IMX219HANDEL_LITEON"};
 
-    rc = memset_s(cdata->cfg.name, DEVICE_NAME_SIZE, 0, DEVICE_NAME_SIZE);
-    if (rc != EOK) {
-        cam_err("%s. failed to memset_s write_data.", __func__);
-    }
-
+    memset(cdata->cfg.name, 0, DEVICE_NAME_SIZE);
     if (!strncmp(sensor->board_info->name, sensor_dts_name, strlen(sensor_dts_name))) {
         p = devm_pinctrl_get(s_imx219HANDEL.dev);
         if (IS_ERR_OR_NULL(p)) {
@@ -544,19 +538,18 @@ static int imx219HANDEL_match_id(hwsensor_intf_t* si, void * data)
         cam_info("%s module_id_0 %d module_id_1 %d .\n",__func__, module_id_0, module_id_1);
         if((module_id_0 == 1) && (module_id_1 == 1)){
             //sunny module
-            strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[0], strlen(sensor_name[0]));
+            strncpy(cdata->cfg.name, sensor_name[0], strlen(sensor_name[0])+1);
             cdata->data = sensor->board_info->sensor_index;
             rc = 0;
         }
         else if((module_id_0 == 1) && (module_id_1 == 0)){
             //liteon module
-            strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[1], strlen(sensor_name[1]));
+            strncpy(cdata->cfg.name, sensor_name[1], strlen(sensor_name[1])+1);
             cdata->data = sensor->board_info->sensor_index;
             rc = 0;
         }
         else{
-            strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor->board_info->name, 
-	     strlen(sensor->board_info->name));
+            strncpy(cdata->cfg.name, sensor->board_info->name, strlen(sensor->board_info->name)+1);
             cdata->data = sensor->board_info->sensor_index;
             cam_err("%s failed to get the module id value.\n",__func__);
             rc = 0;
@@ -564,8 +557,7 @@ static int imx219HANDEL_match_id(hwsensor_intf_t* si, void * data)
         gpio_free(sensor->board_info->gpios[FSIN].gpio);
         goto matchID_exit;
     }else {
-            strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor->board_info->name, 
-	     strlen(sensor->board_info->name));
+            strncpy(cdata->cfg.name, sensor->board_info->name, strlen(sensor->board_info->name)+1);
             cdata->data = sensor->board_info->sensor_index;
             rc = 0;
             goto matchID_exit;
@@ -642,8 +634,10 @@ int imx219HANDEL_config(hwsensor_intf_t* si, void  *argp)
         case SEN_CONFIG_READ_REG_SETTINGS:
             break;
         case SEN_CONFIG_ENABLE_CSI:
+            //ret = si->vtbl->csi_enable(si);
             break;
         case SEN_CONFIG_DISABLE_CSI:
+            //ret = si->vtbl->csi_disable(si);
             break;
         case SEN_CONFIG_MATCH_ID:
             ret = si->vtbl->match_id(si,argp);
@@ -699,7 +693,7 @@ static int __init imx219HANDEL_init_module(void)
 
 static void __exit imx219HANDEL_exit_module(void)
 {
-    hwsensor_unregister(Sensor2Pdev(s_imx219HANDEL));
+    hwsensor_unregister(&s_imx219HANDEL.intf);
     platform_driver_unregister(&s_imx219HANDEL_driver);
 }
 /*lint -restore*/

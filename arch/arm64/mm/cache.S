@@ -23,7 +23,6 @@
 #include <asm/assembler.h>
 #include <asm/cpufeature.h>
 #include <asm/alternative.h>
-#include <asm/uaccess.h>
 
 /*
  *	__flush_dcache_all()
@@ -122,11 +121,6 @@ ENTRY(flush_icache_range)
  *	- end     - virtual end address of region
  */
 ENTRY_NOTAG(__flush_cache_user_range)
-	uaccess_ttbr0_enable x2, x3, x4
-alternative_if ARM64_HAS_CACHE_IDC
-	dsb	ishst
-	b	7f
-alternative_else_nop_endif
 	dcache_line_size x2, x3
 	sub	x3, x2, #1
 	bic	x4, x0, x3
@@ -137,11 +131,6 @@ user_alt 9f, "dc cvau, x4",  "dc civac, x4",  ARM64_WORKAROUND_CLEAN_CACHE
 	b.lo	1b
 	dsb	ish
 
-7:
-alternative_if ARM64_HAS_CACHE_DIC
-	isb
-	b	8f
-alternative_else_nop_endif
 	icache_line_size x2, x3
 	sub	x3, x2, #1
 	bic	x4, x0, x3
@@ -152,13 +141,11 @@ USER(9f, ic	ivau, x4	)		// invalidate I line PoU
 	b.lo	1b
 	dsb	ish
 	isb
-8:	mov	x0, #0
-1:
-	uaccess_ttbr0_disable x1, x2
+	mov	x0, #0
 	ret
 9:
 	mov	x0, #-EFAULT
-	b	1b
+	ret
 ENDPROC(flush_icache_range)
 ENDPROC(__flush_cache_user_range)
 
@@ -186,29 +173,24 @@ ENDPIPROC(__flush_dcache_area)
  *	- size    - size in question
  */
 ENTRY(__clean_dcache_area_pou)
-alternative_if ARM64_HAS_CACHE_IDC
-	dsb	ishst
-	ret
-alternative_else_nop_endif
 	dcache_by_line_op cvau, ish, x0, x1, x2, x3
 	ret
 ENDPROC(__clean_dcache_area_pou)
-
-/*
- *	__dma_inv_area(start, size)
- *	- start   - virtual start address of region
- *	- size    - size in question
- */
-__dma_inv_area:
-	add	x1, x1, x0
-	/* FALLTHROUGH */
 
 /*
  *	__inval_cache_range(start, end)
  *	- start   - start address of region
  *	- end     - end address of region
  */
-ENTRY_NOTAG(__inval_cache_range)
+ENTRY(__inval_cache_range)
+	/* FALLTHROUGH */
+
+/*
+ *	__dma_inv_range(start, end)
+ *	- start   - virtual start address of region
+ *	- end     - virtual end address of region
+ */
+__dma_inv_range:
 	dcache_line_size x2, x3
 	sub	x3, x2, #1
 	tst	x1, x3				// end cache line aligned?
@@ -227,43 +209,46 @@ ENTRY_NOTAG(__inval_cache_range)
 	dsb	sy
 	ret
 ENDPIPROC(__inval_cache_range)
-ENDPROC(__dma_inv_area)
+ENDPROC(__dma_inv_range)
 
 /*
- *	__clean_dcache_area_poc(kaddr, size)
- *
- * 	Ensure that any D-cache lines for the interval [kaddr, kaddr+size)
- * 	are cleaned to the PoC.
- *
- *	- kaddr   - kernel address
- *	- size    - size in question
- */
-ENTRY(__clean_dcache_area_poc)
-	/* FALLTHROUGH */
-
-/*
- *	__dma_clean_area(start, size)
+ *	__dma_clean_range(start, end)
  *	- start   - virtual start address of region
- *	- size    - size in question
+ *	- end     - virtual end address of region
  */
-__dma_clean_area:
-	dcache_by_line_op cvac, sy, x0, x1, x2, x3
+__dma_clean_range:
+	dcache_line_size x2, x3
+	sub	x3, x2, #1
+	bic	x0, x0, x3
+1:
+alternative_if_not ARM64_WORKAROUND_CLEAN_CACHE
+	dc	cvac, x0
+alternative_else
+	dc	civac, x0
+alternative_endif
+	add	x0, x0, x2
+	cmp	x0, x1
+	b.lo	1b
+	dsb	sy
 	ret
-ENDPIPROC(__clean_dcache_area_poc)
-ENDPROC(__dma_clean_area)
+ENDPROC(__dma_clean_range)
 
 /*
- *	__dma_flush_area(start, size)
- *
- *	clean & invalidate D / U line
- *
+ *	__dma_flush_range(start, end)
  *	- start   - virtual start address of region
- *	- size    - size in question
+ *	- end     - virtual end address of region
  */
-ENTRY(__dma_flush_area)
-	dcache_by_line_op civac, sy, x0, x1, x2, x3
+ENTRY(__dma_flush_range)
+	dcache_line_size x2, x3
+	sub	x3, x2, #1
+	bic	x0, x0, x3
+1:	dc	civac, x0			// clean & invalidate D / U line
+	add	x0, x0, x2
+	cmp	x0, x1
+	b.lo	1b
+	dsb	sy
 	ret
-ENDPIPROC(__dma_flush_area)
+ENDPIPROC(__dma_flush_range)
 
 /*
  *	__dma_map_area(start, size, dir)
@@ -272,9 +257,10 @@ ENDPIPROC(__dma_flush_area)
  *	- dir	- DMA direction
  */
 ENTRY(__dma_map_area)
+	add	x1, x1, x0
 	cmp	w2, #DMA_FROM_DEVICE
-	b.eq	__dma_inv_area
-	b	__dma_clean_area
+	b.eq	__dma_inv_range
+	b	__dma_clean_range
 ENDPIPROC(__dma_map_area)
 
 /*
@@ -284,7 +270,8 @@ ENDPIPROC(__dma_map_area)
  *	- dir	- DMA direction
  */
 ENTRY(__dma_unmap_area)
+	add	x1, x1, x0
 	cmp	w2, #DMA_TO_DEVICE
-	b.ne	__dma_inv_area
+	b.ne	__dma_inv_range
 	ret
 ENDPIPROC(__dma_unmap_area)

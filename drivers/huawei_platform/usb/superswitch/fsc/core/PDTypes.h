@@ -87,8 +87,6 @@
 #define PD_1_5_A                150
 #define PD_3_0_A                300
 
-#define PD_18_W    36000
-
 typedef union {
   FSC_U16 word;
   FSC_U8 byte[2] __PACKED;
@@ -240,7 +238,7 @@ typedef union {
 
   struct {
     unsigned USBSuperSpeed:3;
-    unsigned SOP2Controller:1;	/* SOP'' Controller present */
+    unsigned SOP2Controller:1; 	/* SOP'' Controller present */
     unsigned VbusThroughCable:1;
     unsigned VbusCurrent:2;
     unsigned Reserved0:2;
@@ -273,7 +271,7 @@ typedef union {
 
   struct {
     unsigned USBSuperSpeed:3;
-    unsigned VbusRequired:1;	/* SOP'' Controller present */
+    unsigned VbusRequired:1; 	/* SOP'' Controller present */
     unsigned VconnRequired:1;
     unsigned VconnPower:3;
     unsigned Reserved0:13;
@@ -455,7 +453,7 @@ typedef enum {
   PRLTxVerifyGoodCRC,         /* Verify the good CRC message
                                * (retry, tx error, msg id, and msg sent)
                                */
-
+          
   /* ------- BIST Receiver Test -------- */
   PRL_BIST_Rx_Reset_Counter,  /* Reset BISTErrorCounter and preload PRBS */
   PRL_BIST_Rx_Test_Frame,     /* Wait for test Frame form PHY */
@@ -483,7 +481,6 @@ typedef enum {
   AUTO_VDM_DISCOVER_MODES_PP,
   AUTO_VDM_ENTER_MODE_PP,
   AUTO_VDM_DP_GET_STATUS,
-  AUTO_VDM_DP_SET_CONFIG,
   AUTO_VDM_DONE
 } VdmDiscoveryState_t;
 

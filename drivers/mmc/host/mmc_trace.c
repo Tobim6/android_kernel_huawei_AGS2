@@ -1,4 +1,21 @@
+/******************************************************************************
 
+                  版权所有 (C), 2001-2011, 华为技术有限公司
+
+ ******************************************************************************
+  文    件  名   : mmc_trace.c
+  版    本  号   : 初稿
+  作            者   : 袁旦 00145322
+  生成日期   : 2015年3月9日
+  最近修改   :
+  功能描述   : mmc log 记录功能
+  函数列表   :
+  修改历史   :
+  日            期   : 2015年3月9日
+  作            者   : 袁旦 00145322
+  修改内容   : 创建文件
+
+******************************************************************************/
 
 /*****************************************************************************
   1 、头文件包含
@@ -42,8 +59,6 @@ extern "C" {
 #include <linux/hisi/util.h>
 #include <linux/hisi/mmc_trace.h>
 #include <linux/pm_runtime.h>
-#include <linux/hisi/rdr_hisi_platform.h>
-#include <mntn_subtype_exception.h>
 
 #ifdef CONFIG_HISILICON_PLATFORM_MAINTAIN
 #include "../../hisi/mntn/blackbox/rdr_print.h"
@@ -252,7 +267,18 @@ static void queue_loop_in(struct queue *q, void *element, unsigned int len)
 	return;
 }
 
+/*****************************************************************************
+ 函 数 名 	: mmc_trace_proc_write
+ 功能描述   : proc 节点写操作函数
+ 输入参数   :
+ 输出参数   : 无
+ 返 回 值       :
 
+ 修改历史   :
+ 日            期   : 2015年4月15日
+ 作            者   : 邓浩00221160
+ 修改内容   : 新生成函数
+*****************************************************************************/
 static ssize_t mmc_trace_proc_write(struct file *file, const char __user * userbuf, size_t count, loff_t * ppos)
 {
 	char buf;
@@ -275,7 +301,18 @@ static ssize_t mmc_trace_proc_write(struct file *file, const char __user * userb
 
 }
 
+/*****************************************************************************
+函 数 名 	: mmc_trace_proc_read
+ 功能描述   : proc 节点读操作函数
+ 输入参数   :
+ 输出参数   : 无
+ 返 回 值       :
 
+ 修改历史   :
+ 日            期   : 2015年4月15日
+ 作            者   : 邓浩00221160
+ 修改内容   : 新生成函数
+*****************************************************************************/
 static ssize_t mmc_trace_proc_read(struct file *file, char __user * userbuf, size_t count, loff_t * ppos)
 {
 	int cnt;
@@ -299,7 +336,18 @@ static const struct file_operations mmc_trace_file_ops = {
 	.read = mmc_trace_proc_read,
 };
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_get_cur_time_str
+ 功能描述   : 当前时间获取
+ 输入参数   : poutstr-输出时间字符串，ulen-字符长度
+ 输出参数   : 无
+ 返 回 值       : 无
 
+ 修改历史   :
+ 日            期   : 2015年4月15日
+ 作            者   : 邓浩00221160
+ 修改内容   : 新生成函数
+*****************************************************************************/
 static void mmc_trace_get_cur_time_str(char *poutstr, unsigned int ulen)
 {
 	u64 ts = 0;
@@ -310,7 +358,18 @@ static void mmc_trace_get_cur_time_str(char *poutstr, unsigned int ulen)
 	}
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_get_cmd_level_str
+ 功能描述       : 当前设备类型获取
+ 输入参数       : id- 设备类型id，poutstr-输出，ulen长度
+ 输出参数       : 无
+ 返 回 值       : 无
 
+ 修改历史       :
+ 日        期   : 2015年4月15日
+ 作        者   : 邓浩00221160
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static void mmc_trace_get_time_str(u64 time, char *poutstr, unsigned int ulen)
 {
 	if (NULL != poutstr) {
@@ -318,7 +377,18 @@ static void mmc_trace_get_time_str(u64 time, char *poutstr, unsigned int ulen)
 	}
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_get_device_str
+ 功能描述       : 当前设备类型获取
+ 输入参数       : id- 设备类型id，poutstr-输出，ulen长度
+ 输出参数       : 无
+ 返 回 值       : 无
 
+ 修改历史       :
+ 日        期   : 2015年4月15日
+ 作        者   : 邓浩00221160
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static void mmc_trace_get_device_str(int id, char *poutstr, unsigned int ulen)
 {
 	char *mmc_trace_devname = NULL;
@@ -329,7 +399,18 @@ static void mmc_trace_get_device_str(int id, char *poutstr, unsigned int ulen)
 	}
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_get_cmd_level_str
+ 功能描述       : 当前设备类型获取
+ 输入参数       : id- 设备类型id，poutstr-输出，ulen长度
+ 输出参数       : 无
+ 返 回 值       : 无
 
+ 修改历史       :
+ 日        期   : 2015年4月15日
+ 作        者   : 邓浩00221160
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static void mmc_trace_get_cmd_level_str(char pos, char *poutstr, unsigned int ulen)
 {
 	if (NULL != poutstr) {
@@ -337,7 +418,18 @@ static void mmc_trace_get_cmd_level_str(char pos, char *poutstr, unsigned int ul
 	}
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_get_cmd_level_str
+ 功能描述       : 当前类型获取
+ 输入参数       : id- 设备类型id，poutstr-输出，ulen长度
+ 输出参数       : 无
+ 返 回 值       : 无
 
+ 修改历史       :
+ 日        期   : 2015年4月15日
+ 作        者   : 邓浩00221160
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static void mmc_trace_get_perf_flag_str(int arg, char *poutstr, unsigned int ulen)
 {
 	if (NULL != poutstr) {
@@ -345,7 +437,18 @@ static void mmc_trace_get_perf_flag_str(int arg, char *poutstr, unsigned int ule
 	}
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_hex2asc
+ 功能描述       : 数字到asc转换接口
+ 输入参数       : number
+ 输出参数       : 无
+ 返 回 值       : 无
 
+ 修改历史       :
+ 日        期   : 2015年3月9日
+ 作        者   : 袁旦 00145322
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static int mmc_trace_hex2asc(int n)
 {
 	n &= 15;
@@ -356,7 +459,18 @@ static int mmc_trace_hex2asc(int n)
 	}
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_printf_putc_init
+ 功能描述       : 初始化日志写入
+ 输入参数       : id- 设备类型id，poutstr-输出，ulen长度
+ 输出参数       : 无
+ 返 回 值       : 无
 
+ 修改历史       :
+ 日        期   : 2015年3月9日
+ 作        者   : 袁旦 00145322
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static void mmc_trace_printf_putc_init(unsigned n, struct mmc_trace_client *client)
 {
 	struct mmc_trace_init *pInit = (struct mmc_trace_init *)MMC_TRACE_INIT_START_ADDR;
@@ -373,7 +487,18 @@ static void mmc_trace_printf_putc_init(unsigned n, struct mmc_trace_client *clie
 	queue_loop_in((struct queue *)(((struct mmc_trace_init *)(client->mmc_trace_init))->init_buff), &n, sizeof(char));
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_printf_putc_init
+ 功能描述       : 初始化日志写入
+ 输入参数       : id- 设备类型id，poutstr-输出，ulen长度
+ 输出参数       : 无
+ 返 回 值       : 无
 
+ 修改历史       :
+ 日        期   : 2015年3月9日
+ 作        者   : 袁旦 00145322
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static void mmc_trace_printf_putc_comm(unsigned n, struct mmc_trace_client *client)
 {
 	struct mmc_trace_comm *pComm = (struct mmc_trace_comm *)MMC_TRACE_COMM_START_ADDR;
@@ -389,7 +514,18 @@ static void mmc_trace_printf_putc_comm(unsigned n, struct mmc_trace_client *clie
 	queue_loop_in((struct queue *)(((struct mmc_trace_comm *)(client->mmc_trace_comm))->comm_buff), &n, sizeof(char));
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_printf_putc_init
+ 功能描述       : 初始化日志写入
+ 输入参数       : id- 设备类型id，poutstr-输出，ulen长度
+ 输出参数       : 无
+ 返 回 值       : 无
 
+ 修改历史       :
+ 日        期   : 2015年3月9日
+ 作        者   : 袁旦 00145322
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static void mmc_trace_printf_putc_perf(unsigned n, struct mmc_trace_client *client)
 {
 	struct mmc_trace_perf *pPerf = (struct mmc_trace_perf *)MMC_TRACE_PERF_START_ADDR;
@@ -405,7 +541,18 @@ static void mmc_trace_printf_putc_perf(unsigned n, struct mmc_trace_client *clie
 	queue_loop_in((struct queue *)(((struct mmc_trace_perf *)(client->mmc_trace_perf))->perf_buff), &n, sizeof(char));
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_printf_putc_init
+ 功能描述       : 初始化日志写入
+ 输入参数       : id- 设备类型id，poutstr-输出，ulen长度
+ 输出参数       : 无
+ 返 回 值       : 无
 
+ 修改历史       :
+ 日        期   : 2015年3月9日
+ 作        者   : 袁旦 00145322
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static void mmc_trace_xputs(const char *s, void (*mmc_trace_printf_putc) (unsigned n, struct mmc_trace_client * client), struct mmc_trace_client *client)
 {
 	while (*s) {
@@ -413,7 +560,18 @@ static void mmc_trace_xputs(const char *s, void (*mmc_trace_printf_putc) (unsign
 	}
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_xprintf
+ 功能描述       : 变参写入
+ 输入参数       : mmc_trace_printf_putc-写入调用函数，idex-模块id
+ 输出参数       : 无
+ 返 回 值       : 无
 
+ 修改历史       :
+ 日        期   : 2015年3月9日
+ 作        者   : 袁旦 00145322
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static void mmc_trace_xprintf(const char *fmt, va_list ap, void (*mmc_trace_printf_putc) (unsigned n, struct mmc_trace_client * client), struct mmc_trace_client *client, unsigned int idex)
 {
 	char scratch[MMC_TRACE_SCRATCH_SIZE] = { 0 };
@@ -514,7 +672,18 @@ static void mmc_trace_xprintf(const char *fmt, va_list ap, void (*mmc_trace_prin
 	}
 }
 
+/*****************************************************************************
+ 函    数  名   : mmc_trace_rdr_dump
+ 功能描述       : RDR 内存初始化
+ 输入参数       : void
+ 输出参数       : 无
+ 返    回 值    : 0 success, -1 fail
 
+ 修改历史       :
+ 日        期   : 2015年4月15日
+ 作        者   : 邓浩00221160
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static void mmc_trace_rdr_dump(u32 modid, u32 etype, u64 coreid, char *pathname, pfn_cb_dump_done pfn_cb)
 {
 	/* 保存回调函数是为了在做完日志保存后通知框架本核日志保存完成 */
@@ -522,14 +691,36 @@ static void mmc_trace_rdr_dump(u32 modid, u32 etype, u64 coreid, char *pathname,
 	return;
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_rdr_reset
+ 功能描述       : RDR内存初始化
+ 输入参数       : void
+ 输出参数       : 无
+ 返 回 值       : 0 success, -1 fail
 
+ 修改历史       :
+ 日        期   : 2015年4月15日
+ 作        者   : 邓浩00221160
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static void mmc_trace_rdr_reset(u32 modid, u32 etype, u64 coreid)
 {
 	pr_err("%s enter \n", __func__);
 	return;
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_clean_rdr_memory
+ 功能描述       : RDR内存初始化
+ 输入参数       : void
+ 输出参数       : 无
+ 返 回 值       : 0 success, -1 fail
 
+ 修改历史       :
+ 日        期   : 2015年4月15日
+ 作        者   : 邓浩00221160
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static int mmc_trace_clean_rdr_memory(struct rdr_register_module_result rdr_info)
 {
 	dump_vir_addr = (u64 *) hisi_bbox_map(rdr_info.log_addr, rdr_info.log_len);
@@ -545,7 +736,18 @@ static int mmc_trace_clean_rdr_memory(struct rdr_register_module_result rdr_info
 	return 0;
 }
 
+/*****************************************************************************
+ 函   数   名   : mmc_trace_rdr_register_core
+ 功能描述       : 注册本模块操作指针
+ 输入参数       : void
+ 输出参数       : 无
+ 返    回  值   : 0 success, -1 fail
 
+ 修改历史       :
+ 日        期   : 2015年4月15日
+ 作        者   : 邓浩00221160
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static int mmc_trace_rdr_register_core(void)
 {
 	struct rdr_module_ops_pub s_module_ops;
@@ -571,7 +773,18 @@ static int mmc_trace_rdr_register_core(void)
 	return ret;
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_rdr_register_exception
+ 功能描述       : 向框架注册本模块可能发生的异常流程
+ 输入参数       : void
+ 输出参数       : 无
+ 返 回 值       : 0 success, -1 fail
 
+ 修改历史       :
+ 日       期    : 2015年4月15日
+ 作       者    : 邓浩00221160
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static int mmc_trace_rdr_register_exception(void)
 {
 	struct rdr_exception_info_s einfo;
@@ -594,7 +807,6 @@ static int mmc_trace_rdr_register_exception(void)
 	einfo.e_reentrant = (u32)RDR_REENTRANT_DISALLOW;
 	/* 异常类型初始化失败 */
 	einfo.e_exce_type = MMC_S_EXCEPTION;
-	einfo.e_exce_subtype = MMC_EXCEPT_INIT_FAIL;
 	/* 异常发生在EMMC. */
 	einfo.e_from_core = RDR_EMMC;
 	einfo.e_upload_flag = (u32)RDR_UPLOAD_NO;
@@ -617,7 +829,6 @@ static int mmc_trace_rdr_register_exception(void)
 	einfo.e_reset_core_mask = RDR_AP;
 	einfo.e_reentrant = (u32)RDR_REENTRANT_DISALLOW;
 	einfo.e_exce_type = MMC_S_EXCEPTION;
-	einfo.e_exce_subtype = MMC_EXCEPT_CMD_TIMEOUT;
 	einfo.e_from_core = RDR_EMMC;
 	einfo.e_upload_flag = (u32)RDR_UPLOAD_NO;
 	memcpy(einfo.e_from_module, "RDR_MMC_TIME_OUT", sizeof("RDR_MMC_TIME_OUT"));
@@ -632,7 +843,18 @@ static int mmc_trace_rdr_register_exception(void)
 	return 0;
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_rdr_init
+ 功能描述       : 向RDR注册模块
+ 输入参数       : void
+ 输出参数       : 无
+ 返 回 值       : 0 success, -1 fail
 
+ 修改历史       :
+ 日       期    : 2015年4月15日
+ 作       者    : 邓浩00221160
+ 修改内容       : 新生成函数
+*****************************************************************************/
 static int mmc_trace_rdr_init(void)
 {
 	int ret = 0;
@@ -652,7 +874,18 @@ static int mmc_trace_rdr_init(void)
 	return ret;
 }
 
+/*****************************************************************************
+ 函 数 名 	    : mmc_trace_client_register
+ 功能描述       : mmc trace client初始化相关
+ 输入参数       : void
+ 输出参数       : 无
+ 返 回 值       : mmc_trace_client结构体
 
+ 修改历史       :
+ 日        期   : 2015年3月9日
+ 作        者   : 袁旦 00145322
+ 修改内容       : 新生成函数
+*****************************************************************************/
 struct mmc_trace_client *mmc_trace_client_init(void)
 {
 	struct mmc_trace_client *pClt = NULL;
@@ -726,7 +959,20 @@ struct mmc_trace_client *mmc_trace_client_init(void)
 	return pClt;
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_init_record
+ 功能描述      : 初始化数据记录接口，  不能使用在中断上下文
+ 输入参数      : void
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 static int mmc_trace_init_record(struct mmc_host *host, const char *fmt, ...)
 {
 	va_list ap;
@@ -758,7 +1004,20 @@ static int mmc_trace_init_record(struct mmc_host *host, const char *fmt, ...)
 	return 0;
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_comm_record
+ 功能描述      :  通用数据记录接口 不能使用在中断上下文
+ 输入参数      : host，fmt
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 int mmc_trace_comm_record(struct mmc_host *host, const char *fmt, ...)
 {
 	va_list ap;
@@ -794,7 +1053,20 @@ int mmc_trace_comm_record(struct mmc_host *host, const char *fmt, ...)
 	return 0;
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_perf_record
+ 功能描述      : 性能数据记录接口，不能使用在中断上下文
+ 输入参数      : record
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 void mmc_trace_perf_record(struct mmc_trace_perf_point_record *record)
 {
 	int i = 0;
@@ -842,7 +1114,20 @@ void mmc_trace_perf_record(struct mmc_trace_perf_point_record *record)
 	return;
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_sdhci_dumpregs
+ 功能描述      : sdhciIP寄存器dump接口
+ 输入参数      : host
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 static void mmc_trace_sdhci_dumpregs(struct sdhci_host *host)
 {
 	if (NULL == host) {
@@ -853,7 +1138,20 @@ static void mmc_trace_sdhci_dumpregs(struct sdhci_host *host)
 	sdhci_dumpregs_fortrace(host);
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_dwmmc_dumpregs
+ 功能描述      : dwmmcIP寄存器dump接口
+ 输入参数      : mmc
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 static void mmc_trace_dwmmc_dumpregs(struct mmc_host *mmc)
 {
 	if (NULL == mmc) {
@@ -864,7 +1162,20 @@ static void mmc_trace_dwmmc_dumpregs(struct mmc_host *mmc)
 	dw_mci_reg_dump_fortrace(mmc);
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_dumpregs
+ 功能描述      : IP寄存器dump接口
+ 输入参数      : index
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 static int mmc_trace_dumpregs(unsigned int index)
 {
 	if (index >= DEV_TRACE_MAX)
@@ -887,7 +1198,20 @@ static int mmc_trace_dumpregs(unsigned int index)
 	return 0;
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_tofile
+ 功能描述      : trace log 记录
+ 输入参数      : trace_type 日志记录类别
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 static int mmc_trace_tofile(MMC_TRACE_TYPE trace_type)
 {
 	char *mmc_trace_filepath = NULL;
@@ -942,7 +1266,20 @@ static int mmc_trace_tofile(MMC_TRACE_TYPE trace_type)
 
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_init_tofile
+ 功能描述      : trace init记录
+ 输入参数      : 无
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 void mmc_trace_init_tofile(void)
 {
 	int retval = 0;
@@ -955,7 +1292,20 @@ void mmc_trace_init_tofile(void)
 	}
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_comm_tofile
+ 功能描述      : trace comm记录
+ 输入参数      : 无
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 void mmc_trace_comm_tofile(int index)
 {
 	int retval = 0;
@@ -990,7 +1340,20 @@ void mmc_trace_comm_tofile(int index)
 	return;
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_perf_tofile
+ 功能描述      : trace perf记录
+ 输入参数      : 无
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 void mmc_trace_perf_tofile(void)
 {
 	int i = 0;
@@ -1016,6 +1379,15 @@ void mmc_trace_perf_tofile(void)
 	mdelay(100);
 
 	/*调测使用 */
+#if 0
+	retval = mmc_trace_tofile(TRACE_PERF);
+	if (0 == retval) {
+	} else {
+		MMCTRACE_DEBUGPL(0x3, "mmc trace perf record raw fail\n");
+		mmc_trace_fd->mmc_trace_tofile_perf = false;
+		return;
+	}
+#endif
 
 	/*完整一条性能日志数据结构，下面进行内容填充并写入内存 */
 	record_exp = (struct mmc_trace_perf_record_exp *)(((struct mmc_trace_perf *)(mmc_trace_fd->mmc_trace_perf))->perf_buff + sizeof(struct queue) - 8);
@@ -1088,7 +1460,20 @@ done:
 	return;
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_byself
+ 功能描述      : trace 记录
+ 输入参数      : 无
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 void mmc_trace_byself(int index)
 {
 	mmc_trace_init_tofile();
@@ -1097,6 +1482,31 @@ void mmc_trace_byself(int index)
 }
 
 /*后续调测使用接口*/
+#if 0
+void mmc_trace_raw_data(void)
+{
+	int retval = -1;
+
+	if (dump_vir_addr == NULL)
+		return;
+
+	/*删除hisi_logs目录下的旧文件 */
+	retval = mntn_filesys_rm_file(MMC_TRACE_RAW_DATA_PATH);
+	if (0 != retval) {
+		printk(KERN_ERR "%s: mntn_filesys_rm_file fail \n", __func__);
+		return;
+	}
+
+	/*生成新的bin文件接口 */
+	retval = mntn_filesys_write_log(MMC_TRACE_RAW_DATA_PATH, dump_vir_addr, MMC_TRACE_TOTAL_SIZE, 0660);
+	if (!retval) {
+		printk(KERN_ERR "%s: mntn_filesys_write_log fail \n", __func__);
+		return;
+	}
+
+	return;
+}
+#endif
 
 /*****************************************************************************
  函	  数   名  : mmc_trace_init_begin
@@ -1143,7 +1553,20 @@ void mmc_trace_init_begin(struct mmc_host *host)
 	return;
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_init_end
+ 功能描述      : 初始化记录结束标记
+ 输入参数      : host
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 void mmc_trace_init_end(struct mmc_host *host)
 {
 	if (NULL == mmc_trace_fd) {
@@ -1175,7 +1598,20 @@ void mmc_trace_init_end(struct mmc_host *host)
 	return;
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_record
+ 功能描述      : 日志记录接口 不能使用在中断上下文
+ 输入参数      : struct mmc_host *host, struct mmc_request *mrq
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 void mmc_trace_record(struct mmc_host *host, struct mmc_request *mrq)
 {
 	if ((NULL == host) || (NULL == mrq)) {
@@ -1212,12 +1648,25 @@ void mmc_trace_record(struct mmc_host *host, struct mmc_request *mrq)
 	return;
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_emmc_init_fail_reset
+ 功能描述      : 对外初始化复位接口
+ 输入参数      : 无
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 void mmc_trace_emmc_init_fail_reset(void)
 {
 	if (check_himntn(HIMNTN_MMC_TRACE) == 0) {
 		pr_err("%s:emmc init failed\n", __func__);
-		rdr_syserr_process_for_ap((u32)MODID_AP_S_PANIC_Storage, 0ull, 0ull);
+		BUG_ON(true);
 	}
 
 	if (NULL == mmc_trace_fd) {
@@ -1239,10 +1688,42 @@ void mmc_trace_emmc_init_fail_reset(void)
 	return;
 }
 
+/*****************************************************************************
+ 函	  数   名  : mmc_trace_emmc_cmd_timeout_reset
+ 功能描述      : 对外命令超时复位接口
+ 输入参数      : 无
+ 输出参数      : 无
+ 返   回   值  : void
+ 调用函数      :
+ 被调函数      :
 
+ 修改历史      :
+ 日        期  : 2015年3月9日
+ 作        者  : 袁旦 00145322
+ 修改内容      : 新生成函数
+*****************************************************************************/
 void mmc_trace_emmc_cmd_timeout_reset(void)
 {
 	return;
+#if 0
+	if (NULL == mmc_trace_fd) {
+		pr_err("%s: mmc_trace_fd is NULL \n", __func__);
+		return;
+	}
+
+	/*防止继续记录log */
+	mmc_trace_fd->mmc_trace_reset_cmdtimeout = true;
+
+	mdelay(15000);
+
+	mmc_trace_dumpregs(EMMC);
+
+#ifdef CONFIG_HISI_BB
+	rdr_syserr_process_for_ap(RDR_MODID_MMC_CMD_TIMEOUT, 0, 0);
+#endif
+
+	return;
+#endif
 }
 
 void mmc_trace_fd_init(void)

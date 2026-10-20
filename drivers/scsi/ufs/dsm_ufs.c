@@ -128,7 +128,10 @@ int dsm_ufs_update_ocs_info(struct ufs_hba *hba, int err_code, int ocs)
 
 int dsm_ufs_update_fastboot_info(struct ufs_hba *hba)
 {
-	char *pstr;
+	char *pstr, *dstr;
+	char tmp[64];
+	int err;
+	long tmp_code;
 	unsigned int err_code;
 
 	if (!dsm_ufs_enable)
@@ -139,11 +142,22 @@ int dsm_ufs_update_fastboot_info(struct ufs_hba *hba)
 		pr_err("No fastboot dmd info\n");
 		return -EINVAL;
 	}
-	if (1 != sscanf(pstr, "fastbootdmd=%d", &err_code)) {
-		pr_err("Failed to get err_code\n");
+	pstr += strlen("fastbootdmd=");
+	dstr = strstr(pstr, " ");
+	if (!dstr) {
+		pr_err("No find the fastboot dmd end\n");
 		return -EINVAL;
 	}
 
+	memcpy(tmp, pstr, (unsigned long)(dstr - pstr));
+	tmp[dstr - pstr] = '\0';
+	err = kstrtol(tmp, 10, &tmp_code);
+	if (err) {
+		pr_info("Dsm_fastboot_dmd: kstrtol failed, err: %d\n",
+			err);
+		return err;
+	}
+	err_code = (unsigned int)tmp_code;
 	if (err_code) {
 		if (err_code & FASTBOOTDMD_PWR_ERR) {
 			if (test_and_set_bit_lock(UFS_FASTBOOT_PWMODE_ERR,
@@ -324,7 +338,7 @@ int dsm_ufs_get_log(struct ufs_hba *hba, unsigned long code, char *err_msg)
 	dsm_log_buff += ret;
 	buff_size -= ret;
 #endif
-	if ((hba->sdev_ufs_device != NULL)
+    if ((hba->sdev_ufs_device != NULL)
 		&& (hba->sdev_ufs_device->rev != NULL))
 		snprintf(rev, 5, "%.4s", hba->sdev_ufs_device->rev);
 
@@ -554,22 +568,16 @@ int dsm_ufs_enabled(void)
 }
 
 /*lint -e648 -e845*/
-#ifdef CONFIG_HISI_MMC_SECURE_RPMB
 extern int get_rpmb_key_status(void);
-#endif
 int dsm_ufs_utp_err_need_report(struct ufs_hba *hba)
 {
-	int key_status = 0;
-
 	if (unlikely(hba->host->is_emulator))
 		return 0;
-#ifdef CONFIG_HISI_MMC_SECURE_RPMB
-	key_status = get_rpmb_key_status();
-#endif
-	if ((0 == key_status) && (OCS_FATAL_ERROR == g_ufs_dsm_adaptor.ocs))
-		return 0;
 
-	return 1;
+    if ((0 == get_rpmb_key_status()) && (OCS_FATAL_ERROR == g_ufs_dsm_adaptor.ocs)) {
+        return 0;
+    }
+    return 1;
 }
 
 void dsm_ufs_enable_volt_irq(struct ufs_hba *hba)
@@ -671,8 +679,6 @@ void dsm_ufs_handle_work(struct work_struct *work)
 
 	hba = container_of(work, struct ufs_hba, dsm_work);
 
-	mutex_lock(&hba->eh_mutex);
-
 	if (g_ufs_dsm_adaptor.err_type & (1 << UFS_FASTBOOT_PWMODE_ERR)) {
 		DSM_UFS_LOG(hba, DSM_UFS_FASTBOOT_PWMODE_ERR, "Fastboot PwrMode Error");/* !e713*/
 		clear_bit_unlock((unsigned int)UFS_FASTBOOT_PWMODE_ERR, &g_ufs_dsm_adaptor.err_type);
@@ -737,8 +743,8 @@ void dsm_ufs_handle_work(struct work_struct *work)
 		DSM_UFS_LOG(hba, DSM_UFS_DEV_INTERNEL_ERR, "UFS_DEV_INTERNEL_ERR");
 		clear_bit_unlock(UFS_DEV_INTERNEL_ERR, &g_ufs_dsm_adaptor.err_type);
 	}
-	if (g_ufs_dsm_adaptor.err_type & (1 << UFS_HI1861_INTERNEL_ERR)) {
-		DSM_UFS_LOG(hba, DSM_UFS_HI1861_INTERNEL_ERR, "DSM_UFS_HI1861_INTERNEL_ERR");
+	if (g_ufs_dsm_adaptor.err_type & (1 << UFS_HIVV_INTERNEL_ERR)) {
+		DSM_UFS_LOG(hba, DSM_UFS_HIVV_INTERNEL_ERR, "DSM_UFS_HIVV_INTERNEL_ERR");
 		clear_bit_unlock(UFS_DEV_INTERNEL_ERR, &g_ufs_dsm_adaptor.err_type);
 	}
 	if (g_ufs_dsm_adaptor.err_type & (1 << UFS_VOLT_GPIO_ERR)) {
@@ -755,7 +761,7 @@ void dsm_ufs_handle_work(struct work_struct *work)
 	}
 	if (g_ufs_dsm_adaptor.err_type & (1 << UFS_LIFETIME_EXCCED_ERR)) {
 		DSM_UFS_LOG(hba, DSM_UFS_LIFETIME_EXCCED_ERR, "UFS Life time exceed");
-		clear_bit_unlock(UFS_LIFETIME_EXCCED_ERR, &g_ufs_dsm_adaptor.err_type);
+		clear_bit_unlock(UFS_INLINE_CRYPTO_ERR, &g_ufs_dsm_adaptor.err_type);
 	}
 	if (g_ufs_dsm_adaptor.err_type & (1 << UFS_HARDWARE_ERR)) {
 		DSM_UFS_LOG(hba, DSM_UFS_HARDWARE_ERR, "UFS hardware error:Sense_key = 4");
@@ -769,8 +775,6 @@ void dsm_ufs_handle_work(struct work_struct *work)
 		DSM_UFS_LOG(hba, DSM_UFS_TEMP_LOW_ERR, "UFS temperature too low");
 		clear_bit_unlock(UFS_TEMP_LOW_ERR, &g_ufs_dsm_adaptor.err_type);
 	}
-
-	mutex_unlock(&hba->eh_mutex);
 }
 
 void schedule_ufs_dsm_work(struct ufs_hba *hba)

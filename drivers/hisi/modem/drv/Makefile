@@ -24,13 +24,8 @@ ifeq ($(strip $(CFG_ENABLE_BUILD_SOCP)),YES)
 obj-y			+= socp/
 endif
 ifeq ($(strip $(CFG_ENABLE_BUILD_OM)),YES)
-ifeq ($(strip $(CFG_CONFIG_MODEM_MINI_DUMP)),YES)
-obj-y				+= dump_eng/
-else
-obj-y                           += dump/
+obj-y				+= dump/
 endif
-endif
-
 obj-y				+= nvim/
 ifeq ($(strip $(CFG_CONFIG_FAULT_INFLOOD)),YES)
 obj-y				+= fault_inflood/

@@ -51,18 +51,6 @@ do {\
 #define SMARTPAKIT_REG_VALUE_M32    (0xFFFFFFFF)
 
 #define SMARTPAKIT_DELAY_US_TO_MS   (1000)
-#define I2C_STATUS_B64 (64)
-
-struct i2c_err_info {
-	unsigned int regs_num;
-	unsigned int err_count;
-	unsigned long int err_details;
-};
-
-struct smartpa_vendor_info {
-	unsigned int vendor;
-	const char *chip_model;
-};
 
 typedef struct smartpakit_gpio_state {
 	unsigned int state;
@@ -188,8 +176,8 @@ typedef struct smartpakit_i2c_priv {
 	struct i2c_client *i2c;
 } smartpakit_i2c_priv_t;
 
-struct smartpakit_priv;
-struct smartpakit_pa_ctl_sequence;
+typedef struct smartpakit_priv smartpakit_priv_t;
+typedef struct smartpakit_pa_ctl_sequence smartpakit_pa_ctl_sequence_t;
 
 typedef struct smartpakit_i2c_ioctl_ops {
 	int (*hw_reset)(void *priv);
@@ -197,19 +185,18 @@ typedef struct smartpakit_i2c_ioctl_ops {
 	int (*read_regs)(void *priv, void __user *p);
 	int (*write_regs)(void *priv, void __user *p, int compat_mode);
 	int (*write_regs_all)(void *priv, void __user *p, int compat_mode);
-	int (*do_write_regs_all)(struct smartpakit_priv *pakit_priv, struct smartpakit_pa_ctl_sequence *sequence);
+	int (*do_write_regs_all)(smartpakit_priv_t *pakit_priv, smartpakit_pa_ctl_sequence_t *sequence);
 	int (*i2c_read)(struct i2c_client *i2c, char *rx_data, int length);
 	int (*i2c_write)(struct i2c_client *i2c, char *rx_data, int length);
 } smartpakit_i2c_ioctl_ops_t;
 
-// 0 reg node:   w-reg-addr | mask | value     | delay | 0
+// 0 reg node:   reg-addr   | mask | value     | delay | 0
 // 1 gpio node:  gpio-index | 0    | h/l state | delay | 1
 // 2 delay node: 0          | 0    | 0         | delay | 2
 // 3 skip node:  0          | 0    | 0         | 0     | 3
 // 4 rxorw node: w-reg-addr | mask | r-reg-addr| delay | 4, this mask is xor mask
-// 5 read node;  r-reg-addr | 0    | 0         | 0     | 5
 typedef enum smartpakit_param_node_type {
-	SMARTPAKIT_PARAM_NODE_TYPE_REG_WRITE,
+	SMARTPAKIT_PARAM_NODE_TYPE_REG,
 	SMARTPAKIT_PARAM_NODE_TYPE_GPIO,
 	// only delay time
 	SMARTPAKIT_PARAM_NODE_TYPE_DELAY,
@@ -217,7 +204,6 @@ typedef enum smartpakit_param_node_type {
 	// so, the number of regs must be an integer multiple of 2
 	SMARTPAKIT_PARAM_NODE_TYPE_SKIP,
 	SMARTPAKIT_PARAM_NODE_TYPE_REG_RXORW, // read, xor, write
-	SMARTPAKIT_PARAM_NODE_TYPE_REG_READ, //read reg
 
 	SMARTPAKIT_PARAM_NODE_TYPE_MAX,
 } smartpakit_param_node_type_t;
@@ -266,14 +252,10 @@ typedef struct smartpakit_priv {
 	// support pa number(now, max == SMARTPAKIT_PA_ID_MAX)
 	unsigned int pa_num;
 	unsigned int i2c_num; // load successful i2c module
-	const char *special_name_config;
 
-	int gpio_of_hw_reset[SMARTPAKIT_PA_ID_MAX];
-	int gpio_of_irq[SMARTPAKIT_PA_ID_MAX];
 	// for simple pa(not smart pa) and smartpa(with dsp, plugin)
 	unsigned int chip_vendor;
 	const char *chip_model;
-	char chip_model_list[SMARTPAKIT_PA_ID_MAX][SMARTPAKIT_NAME_MAX];
 	unsigned int switch_num;
 	smartpakit_switch_node_t *switch_ctl;
 
@@ -281,7 +263,6 @@ typedef struct smartpakit_priv {
 	bool resume_sequence_permission_enable;
 	smartpakit_pa_ctl_sequence_t resume_sequence;
 	smartpakit_pa_ctl_sequence_t poweron_sequence[SMARTPAKIT_PA_ID_MAX];
-	bool force_refresh_chip;
 
 	// misc device r/w settings
 	bool misc_rw_permission_enable;
@@ -306,8 +287,6 @@ int  smartpakit_deregister_i2c_device(smartpakit_i2c_priv_t *i2c_priv);
 void smartpakit_register_ioctl_ops(smartpakit_i2c_ioctl_ops_t *ops);
 int  smartpakit_parse_params(smartpakit_pa_ctl_sequence_t *sequence, void __user *arg, int compat_mode);
 int  smartpakit_set_poweron_regs(smartpakit_priv_t *pakit_priv, smartpakit_pa_ctl_sequence_t *sequence);
-bool smartpakit_is_gpio_request(int gpio, bool is_irq);
-int smartpakit_set_info(struct smartpa_vendor_info *vendor_info);
 
 #endif // __SMARTPAKIT_H__
 

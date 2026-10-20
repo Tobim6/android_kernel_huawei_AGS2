@@ -21,71 +21,13 @@
 #include <linux/of_address.h>
 #include <linux/io.h>
 #include <linux/slab.h>
-#include <linux/hisi/hisi_cpufreq_req.h>
 #include <linux/hisi/hifreq_hotplug.h>
-#include <linux/version.h>
 
-#ifdef CONFIG_HISI_HW_VOTE_CPU_FREQ
-#include <linux/hisi/hisi_hw_vote.h>
-#endif
-
-#define CREATE_TRACE_POINTS
-#include <trace/events/hisi_cpufreq_req.h>
 
 #define VERSION_ELEMENTS	1
 static unsigned int cpufreq_dt_version = 0;
 
-static int cpufreq_freq_req_policy_notifier(struct notifier_block *nb,
-					    unsigned long event, void *data)
-{
-	struct cpufreq_req *req = container_of(nb, struct cpufreq_req, nb);
-	struct cpufreq_policy *policy = (struct cpufreq_policy *) data;
 
-	if (event != CPUFREQ_ADJUST ||
-	    !cpumask_test_cpu(req->cpu, policy->cpus))
-		return NOTIFY_DONE;
-
-	trace_cpufreq_req_notify(req->cpu, (void *)req, req->freq,
-				 policy->min, policy->max);
-
-	cpufreq_verify_within_limits(policy, req->freq,
-				     policy->cpuinfo.max_freq);
-
-	return NOTIFY_OK;
-}
-
-int hisi_cpufreq_init_req(struct cpufreq_req *req, int cpu)
-{
-	if (unlikely(IS_ERR_OR_NULL(req)))
-		return -1;
-
-	req->cpu = cpu;
-	req->freq = 0;
-	req->nb.priority = 100;
-	req->nb.notifier_call = cpufreq_freq_req_policy_notifier;
-	return cpufreq_register_notifier(&req->nb, CPUFREQ_POLICY_NOTIFIER);
-}
-EXPORT_SYMBOL(hisi_cpufreq_init_req);
-
-void hisi_cpufreq_update_req(struct cpufreq_req *req, unsigned int freq)
-{
-	if (unlikely(IS_ERR_OR_NULL(req)))
-		return;
-
-	req->freq = freq;
-	trace_cpufreq_req_update(req->cpu, (void *)req, freq);
-	cpufreq_update_policy(req->cpu);
-}
-EXPORT_SYMBOL(hisi_cpufreq_update_req);
-
-void hisi_cpufreq_exit_req(struct cpufreq_req *req)
-{
-	if (unlikely(IS_ERR_OR_NULL(req)))
-		return;
-
-	cpufreq_unregister_notifier(&req->nb, CPUFREQ_POLICY_NOTIFIER);
-}
-EXPORT_SYMBOL(hisi_cpufreq_exit_req);
 
 #ifdef CONFIG_HISI_L2_DYNAMIC_RETENTION
 struct l2_retention_ctrl {
@@ -117,17 +59,15 @@ void l2_retention_write(u64 cfg)
 			: "memory");
 }
 
-void l2_dynamic_retention_ctrl(struct cpufreq_policy *policy, unsigned int freq)
+void l2_dynamic_retention_ctrl(int cluster, unsigned int freq)
 {
 	u64 cfg;
-	int cluster;
 
 	if (IS_ERR_OR_NULL(l2_ret_ctrl)) {
 		pr_err("%s l2_ret_ctrl not init\n", __func__);
 		return;
 	}
 
-	cluster = topology_physical_package_id(policy->cpu);
 	if (cluster != l2_ret_ctrl->l2_retention_dis_cluster) {
 		return;
 	}
@@ -196,7 +136,27 @@ err_out:
 }
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
+#ifdef CONFIG_HISI_HW_VOTE_CPU_FREQ
+enum hw_vote_ret_type {
+	REG_PMCTRL_TYPE,
+};
+
+struct hw_vote_cpu_reg_info {
+	unsigned int reg_type;
+	unsigned int vote_reg_offset;
+	unsigned int vote_bits_mask;
+	unsigned int vote_wr_mask;
+	unsigned int result_reg_offset;
+	unsigned int result_rd_mask;
+};
+
+static struct hw_vote_cpu_reg_info *cpu_vote_reg = NULL;
+static unsigned int cpu_ch_num = 0;
+static void __iomem *pmctrl_base = NULL;
+
+#endif
+
+
 int hisi_cpufreq_set_supported_hw(struct cpufreq_policy *policy)
 {
 	int ret, cpu;
@@ -219,7 +179,7 @@ int hisi_cpufreq_set_supported_hw(struct cpufreq_policy *policy)
 
 void hisi_cpufreq_put_supported_hw(struct cpufreq_policy *policy)
 {
-	int cpu = 0, j;
+	int cpu, j;
 	struct device *cpu_dev;
 
 	/* find last cpu of policy->related_cpus */
@@ -234,17 +194,6 @@ void hisi_cpufreq_put_supported_hw(struct cpufreq_policy *policy)
 
 	dev_pm_opp_put_supported_hw(cpu_dev);
 }
-#else
-struct opp_table *hisi_cpufreq_set_supported_hw(struct device *cpu_dev)
-{
-	return dev_pm_opp_set_supported_hw(cpu_dev, &cpufreq_dt_version, VERSION_ELEMENTS);
-}
-
-void hisi_cpufreq_put_supported_hw(struct opp_table *opp_table)
-{
-	dev_pm_opp_put_supported_hw(opp_table);
-}
-#endif
 
 static int hisi_cpufreq_get_dt_version(void)
 {
@@ -307,57 +256,52 @@ void hisi_cpufreq_get_suspend_freq(struct cpufreq_policy *policy)
 
 #ifdef CONFIG_HISI_HW_VOTE_CPU_FREQ
 
-struct hvdev *hisi_cpufreq_hv_init(struct device *cpu_dev)
+#define FREQ_VOTE_RATIO		(16U)
+#define KHz		(1000)
+
+int hisi_hw_vote_target(struct cpufreq_policy *policy, unsigned int index)
 {
-	struct device_node *np;
-	struct hvdev *cpu_hvdev = NULL;
-	const char *ch_name;
-	const char *vsrc;
-	int ret;
+	int cluster;
+	unsigned int freq_cfg;
+	void __iomem *reg;
+	int shift, width;
+	unsigned int mask;
 
-	if (IS_ERR_OR_NULL(cpu_dev)) {
-		pr_err("%s: cpu_dev is null!\n", __func__);
-		goto err_out;
+	if (NULL == policy) {
+		return -EINVAL;
 	}
 
-	np = cpu_dev->of_node;
-	if (IS_ERR_OR_NULL(np)) {
-		pr_err("%s: cpu_dev no dt node!\n", __func__);
-		goto err_out;
+	cluster = topology_physical_package_id(policy->cpu);
+	if ((unsigned int)cluster >= cpu_ch_num || NULL == cpu_vote_reg) {
+		pr_err("%s: hw vote cpu info error\n", __func__);
+		return -EINVAL;
 	}
 
-	ret = of_property_read_string_index(np, "freq-vote-channel", 0, &ch_name);
-	if (ret) {
-		pr_err("[%s]parse freq-vote-channel fail!\n", __func__);
-		goto err_out;
+	if (0 == cpu_vote_reg[cluster].vote_reg_offset) {
+		pr_err("%s: pmctrl vote reg not remap\n", __func__);
+		return -EINVAL;
 	}
 
-	ret = of_property_read_string_index(np, "freq-vote-channel", 1, &vsrc);
-	if (ret) {
-		pr_err("[%s]parse vote src fail!\n", __func__);
-		goto err_out;
+#ifdef CONFIG_HISI_L2_DYNAMIC_RETENTION
+	l2_dynamic_retention_ctrl(cluster, policy->freq_table[index].frequency);
+#endif
+
+	freq_cfg = (policy->freq_table[index].frequency / KHz) / FREQ_VOTE_RATIO;
+
+	if (REG_PMCTRL_TYPE == cpu_vote_reg[cluster].reg_type) {
+		reg   = pmctrl_base + cpu_vote_reg[cluster].vote_reg_offset;
+		shift = ffs(cpu_vote_reg[cluster].vote_bits_mask);
+		if (shift <= 0) {
+			pr_err("%s: cluster%d result reg mask error\n", __func__, cluster);
+			return -EINVAL;
+		}
+		shift -= 1;
+		width = fls(cpu_vote_reg[cluster].vote_bits_mask) - shift;
+		mask  = (1 << width) - 1;
+		writel(cpu_vote_reg[cluster].vote_wr_mask | ((freq_cfg & mask) << shift), reg);
 	}
 
-	cpu_hvdev = hisi_hvdev_register(cpu_dev, ch_name, vsrc);
-	if (IS_ERR_OR_NULL(cpu_hvdev)) {
-		pr_err("%s: cpu_hvdev register fail!\n", __func__);
-	}
-err_out:
-	return cpu_hvdev;
-}
-
-void hisi_cpufreq_hv_exit(struct hvdev *cpu_hvdev, unsigned int cpu)
-{
-	if (hisi_hvdev_remove(cpu_hvdev))
-		pr_err("cpu%d unregister hvdev fail\n", cpu);
-}
-
-int hisi_cpufreq_set(struct hvdev *cpu_hvdev, unsigned int freq)
-{
-	if (IS_ERR_OR_NULL(cpu_hvdev))
-		return -ENODEV;
-
-	return hisi_hv_set_freq(cpu_hvdev, freq);
+	return 0;
 }
 
 unsigned int hisi_cpufreq_get(unsigned int cpu)
@@ -372,46 +316,128 @@ unsigned int hisi_cpufreq_get(unsigned int cpu)
 	return policy->cur;
 }
 
-void hisi_cpufreq_policy_cur_init(struct hvdev *cpu_hvdev, struct cpufreq_policy *policy)
+int hisi_cpufreq_policy_cur_init(struct cpufreq_policy *policy)
 {
+	int cluster;
+	unsigned int target_freq = 0, index;
 	int ret;
-	unsigned int freq_khz = 0;
-	unsigned int index = 0;
+	void __iomem *reg;
+	unsigned int shift;
 
-	ret = hisi_hv_get_result(cpu_hvdev, &freq_khz);
-	if (ret) {
-		goto exception;
+	if (!policy) {
+		pr_err("%s: policy is NULL\n", __func__);
+		return -EINVAL;
 	}
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 0)
-	ret = cpufreq_frequency_table_target(policy, policy->freq_table, freq_khz, CPUFREQ_RELATION_C, &index);
-	if (ret) {
-		goto exception;
+	cluster = topology_physical_package_id(policy->cpu);
+	if ((unsigned int)cluster >= cpu_ch_num || NULL == cpu_vote_reg) {
+		pr_err("%s: hw vote cpu info error\n", __func__);
+		policy->cur = policy->freq_table[0].frequency;
+		return -EINVAL;
 	}
-#else
-	index = cpufreq_frequency_table_target(policy, freq_khz, CPUFREQ_RELATION_C);
-#endif
 
-	policy->cur = policy->freq_table[index].frequency;
-	hisi_hv_set_freq(cpu_hvdev, policy->cur);/*update last freq in hv driver*/
+	if (0 == cpu_vote_reg[cluster].result_reg_offset) {
+		policy->cur = policy->freq_table[0].frequency;
+		pr_err("%s: pmctrl result reg not remap\n", __func__);
+		return -EINVAL;
+	}
 
-	return;
-exception:
-	pr_err("%s:find freq%d fail\n", __func__, freq_khz);
-	policy->cur = policy->freq_table[0].frequency;
-	hisi_hv_set_freq(cpu_hvdev, policy->cur);/*update last freq in hv driver*/
+	if (REG_PMCTRL_TYPE == cpu_vote_reg[cluster].reg_type) {
+		reg   = pmctrl_base + cpu_vote_reg[cluster].result_reg_offset;
+		shift = ffs(cpu_vote_reg[cluster].result_rd_mask);
+		if (shift <= 0) {
+			policy->cur = policy->freq_table[0].frequency;
+			pr_err("%s: cluster%d result reg mask error\n", __func__, cluster);
+			return -EINVAL;
+		}
+		shift -= 1;
+		target_freq = (readl(reg) & cpu_vote_reg[cluster].result_rd_mask) >> shift;
+	}
+
+	target_freq = target_freq * KHz * FREQ_VOTE_RATIO;
+
+	ret = cpufreq_frequency_table_target(policy, policy->freq_table, target_freq, CPUFREQ_RELATION_C, &index);
+
+	if (0 == ret) {
+		policy->cur = policy->freq_table[index].frequency;
+	} else {
+		pr_err("%s: find freq fail%d\n", __func__, ret);
+		policy->cur = policy->freq_table[0].frequency;
+	}
+
+	return ret;
+}
+
+static int hw_vote_cpu_reg_remap(void)
+{
+	struct device_node *np;
+	int ret;
+	int elem_num;
+
+	np = of_find_compatible_node(NULL, NULL, "hisilicon,pmctrl");
+	if (!np) {
+		pr_err("[%s] doesn't have pmctrl node!\n", __func__);
+		return -ENODEV;
+	}
+
+	pmctrl_base = of_iomap(np, 0);
+	if (NULL == pmctrl_base) {
+		pr_err("[%s]: ioremap fail!\n", __func__);
+		return -EINVAL;
+	}
+
+	np = of_find_compatible_node(NULL, NULL, "hisi,freq-hw-vote-cpu");
+	if (!np) {
+		pr_err("[%s] doesn't have freq-hw-vote-cpu node!\n", __func__);
+		return -ENODEV;
+	}
+
+	ret = of_property_read_u32_array(np, "vote_channel_num", &cpu_ch_num, 1);
+	if (ret) {
+		pr_err("[%s]parse vote_channel_num fail!\n", __func__);
+		return -ENODEV;
+	}
+
+	elem_num = of_property_count_elems_of_size(np, "vote_reg_info", sizeof(unsigned int));
+	if ((cpu_ch_num * (sizeof(struct hw_vote_cpu_reg_info) / sizeof(unsigned int))) != elem_num) {
+		pr_err("[%s]vote_reg_info & struct un-match\n", __func__);
+		return -ENODEV;
+	}
+
+	cpu_vote_reg = kzalloc(sizeof(struct hw_vote_cpu_reg_info) * cpu_ch_num, GFP_KERNEL);
+	if (NULL == cpu_vote_reg) {
+		pr_err("[%s]kzalloc hw_vote_cpu_reg_info buffer fail!\n", __func__);
+		return -EINVAL;
+	}
+
+	ret = of_property_read_u32_array(np, "vote_reg_info", (unsigned int*)cpu_vote_reg, elem_num);
+	if (ret) {
+		pr_err("[%s]parse vote_reg_info fail!\n", __func__);
+		kfree(cpu_vote_reg);
+		cpu_vote_reg = NULL;
+		return -ENODEV;
+	}
+
+	return 0;
 }
 #endif
 
-int hisi_cpufreq_init(void)
+static int hisi_cpufreq_init(void)
 {
 	int ret = 0;
+	struct platform_device *pdev;
 
 	if (!of_find_compatible_node(NULL, NULL, "arm,generic-bL-cpufreq"))
 		return -ENODEV;
 
 #ifdef CONFIG_HISI_L2_DYNAMIC_RETENTION
 	l2_dynamic_retention_init();
+#endif
+
+#ifdef CONFIG_HISI_HW_VOTE_CPU_FREQ
+	ret = hw_vote_cpu_reg_remap();
+	if (ret)
+		return ret;
 #endif
 
 	ret = hisi_cpufreq_get_dt_version();
@@ -422,5 +448,10 @@ int hisi_cpufreq_init(void)
 	bL_hifreq_hotplug_init();
 #endif
 
+	pdev = platform_device_register_simple("cpufreq-dt", -1, NULL, 0);
+	if (IS_ERR(pdev))
+		return PTR_ERR(pdev);
+
 	return ret;
 }
+module_init(hisi_cpufreq_init);

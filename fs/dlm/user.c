@@ -355,10 +355,6 @@ static int dlm_device_register(struct dlm_ls *ls, char *name)
 	error = misc_register(&ls->ls_device);
 	if (error) {
 		kfree(ls->ls_device.name);
-		/* this has to be set to NULL
-		 * to avoid a double-free in dlm_device_deregister
-		 */
-		ls->ls_device.name = NULL;
 	}
 fail:
 	return error;
@@ -519,9 +515,14 @@ static ssize_t device_write(struct file *file, const char __user *buf,
 	if (count > sizeof(struct dlm_write_request) + DLM_RESNAME_MAXLEN)
 		return -EINVAL;
 
-	kbuf = memdup_user_nul(buf, count);
-	if (IS_ERR(kbuf))
-		return PTR_ERR(kbuf);
+	kbuf = kzalloc(count + 1, GFP_NOFS);
+	if (!kbuf)
+		return -ENOMEM;
+
+	if (copy_from_user(kbuf, buf, count)) {
+		error = -EFAULT;
+		goto out_free;
+	}
 
 	if (check_version(kbuf)) {
 		error = -EBADE;

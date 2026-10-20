@@ -376,14 +376,14 @@ EXPORT_SYMBOL(TEEK_InitializeContext);
  */
 void TEEK_FinalizeContext(TEEC_Context *context)
 {
-	struct list_node *ptr = NULL;
-	TEEC_Session *session = NULL;
+	struct list_node *ptr;
+	TEEC_Session *session;
 	/*TEEC_SharedMemory* shrdmem;*/
 
 	tlogd("TEEK_FinalizeContext started\n");
 
 	/* First, check parameters is valid or not */
-	if (context == NULL) {
+	if (!context) {
 		tloge("context is null, not correct\n");
 		return;
 	}
@@ -432,7 +432,7 @@ static TEEC_Result __TEEK_OpenSession(TEEC_Context *context,
 	uint32_t origin = TEEC_ORIGIN_API;
 	TC_NS_ClientContext cli_context;
 	TC_NS_ClientLogin cli_login = { 0, 0 };
-	TC_NS_DEV_File *dev_file = NULL;
+	TC_NS_DEV_File *dev_file;
 	uint32_t param_type[4] = { 0 };
 	errno_t sret;
 
@@ -448,7 +448,7 @@ static TEEC_Result __TEEK_OpenSession(TEEC_Context *context,
 		*returnOrigin = origin;
 
 	/* First, check parameters is valid or not */
-	if (context == NULL || session == NULL || destination == NULL || operation == NULL
+	if (!context || !session || !destination || !operation
 			|| TEEC_LOGIN_IDENTIFY != connectionMethod) {
 		tloge("invalid input params\n");
 		goto cfc_ret_fail;
@@ -471,7 +471,7 @@ static TEEC_Result __TEEK_OpenSession(TEEC_Context *context,
 	}
 	cli_login.method = TEEC_LOGIN_IDENTIFY;
 	dev_file = (TC_NS_DEV_File *)(context->dev);
-	if (dev_file == NULL) {
+	if (!dev_file) {
 		tloge("invalid context->dev (NULL)\n");
 		teec_ret = (TEEC_Result)TEEC_ERROR_BAD_PARAMETERS;
 		goto cfc_ret_fail;
@@ -600,15 +600,15 @@ void TEEK_CloseSession(TEEC_Session *session)
 	int32_t ret;
 	TC_NS_ClientContext cli_context;
 	TC_NS_ClientLogin cli_login = { 0, 0 };
-	struct list_node *ptr = NULL;
-	TEEC_Session *temp_sess = NULL;
+	struct list_node *ptr;
+	TEEC_Session *temp_sess;
 	bool found = false;
 	errno_t sret;
 
 	tlogd("TEEK_CloseSession started\n");
 
 	/* First, check parameters is valid or not */
-	if (NULL == session || NULL == session->context) {
+	if (!session || !session->context) {
 		tloge("input invalid session or session->context is null\n");
 		return;
 	}
@@ -649,7 +649,7 @@ void TEEK_CloseSession(TEEC_Session *session)
 		}
 		sret = memset_s(session->teec_token, TOKEN_SAVE_LEN, 0x00, TOKEN_SAVE_LEN);
 		if (EOK != sret) {
-			tloge("memset_s session's member error ret value is %d.\n", sret);
+			tloge("memset_s teec_token error ret value is %d.\n", sret);
 		}
 		session->ops_cnt = 0;
 		list_remove(&session->head);
@@ -686,7 +686,7 @@ TEEC_Result TEEK_InvokeCommand(TEEC_Session *session,
 	tlogd("TEEK_InvokeCommand Started:\n");
 
 	/* First, check parameters is valid or not */
-	if (NULL == session ||  NULL == session->context) {
+	if (!session || !session->context) {
 		tloge("input invalid session or session->context is null\n");
 		if (returnOrigin)
 			*returnOrigin = origin;

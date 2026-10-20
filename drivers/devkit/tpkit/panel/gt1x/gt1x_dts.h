@@ -52,7 +52,6 @@
 #define GTP_ROI_FW_SUPPORTED	"gt1x_roi_fw_supported"
 #define GTP_PANEL_ID	"panel_id"
 #define GTP_TOUCH_SWITH_FLAG	"touch_switch_flag"
-#define GTP_HIDE_PLAIN_LCD_LOG 	"hide_plain_lcd_log"
 
 #define GTP_POWER_SELF_CTRL		"power_self_ctrl"
 #define GTP_VCI_LDO_VALUE		"vci_ldo_value"
@@ -63,9 +62,6 @@
 
 #define GTP_FW_UPDATE_LOGIC		"fw_update_logic"
 #define GT1X_SLAVE_ADDR			"slave_address"
-
-#define GTP_SUPPORT_WXY			"gt1x_support_wxy"
-#define GTP_WXY_DATA_ADD		"gt1x_wxy_data_add"
 
 #define GT1X_SUPPORT_TP_COLOR			"support_get_tp_color"
 #define GT1X_PROVIDE_PANEL_ID_SUPPORT			"provide_panel_id_suppot"

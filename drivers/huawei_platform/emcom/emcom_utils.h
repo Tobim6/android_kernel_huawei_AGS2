@@ -28,16 +28,6 @@ HWLOG_REGIST();
 #define EMCOM_DEBUG    1
 #define EMCOM_INFO     1
 
-/* network type */
-typedef enum
-{
-	NETWORK_TYPE_UNKNOWN = 0,
-	NETWORK_TYPE_2G,
-	NETWORK_TYPE_3G,
-	NETWORK_TYPE_4G,
-	NETWORK_TYPE_WIFI,
-} NETWORK_TYPE;
-
 typedef enum
 {
     MODEM_NOT_SUPPORT_EMCOM,
@@ -47,20 +37,20 @@ typedef enum
 #define EMCOM_LOGD(fmt, ...) \
     do { \
         if (EMCOM_DEBUG) { \
-            hwlog_info("%s "fmt"\n", __func__, ##__VA_ARGS__); \
+            hwlog_info("%s"fmt"\n", __func__, ##__VA_ARGS__); \
         } \
     } while (0)
 
 #define EMCOM_LOGI(fmt, ...) \
     do { \
         if (EMCOM_INFO) { \
-            hwlog_info("%s "fmt"\n", __func__, ##__VA_ARGS__); \
+            hwlog_info("%s"fmt"\n", __func__, ##__VA_ARGS__); \
         } \
     } while (0)
 
 #define EMCOM_LOGE(fmt, ...) \
     do { \
-            hwlog_err("%s "fmt"\n", __func__, ##__VA_ARGS__); \
+            hwlog_err("%s"fmt"\n", __func__, ##__VA_ARGS__); \
     } while (0)
 
 bool Emcom_Is_Modem_Support( void );

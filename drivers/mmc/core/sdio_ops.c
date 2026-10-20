@@ -29,6 +29,8 @@ int mmc_send_io_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
 	struct mmc_command cmd = {0};
 	int i, err = 0;
 
+	BUG_ON(!host);
+
 	cmd.opcode = SD_IO_SEND_OP_COND;
 	cmd.arg = ocr;
 	cmd.flags = MMC_RSP_SPI_R4 | MMC_RSP_R4 | MMC_CMD_BCR;
@@ -78,9 +80,8 @@ static int mmc_io_rw_direct_host(struct mmc_host *host, int write, unsigned fn,
 	struct dw_mci_slot *slot = mmc_priv(host);
 #endif
 
-	if (fn > 7)
-		return -EINVAL;
-
+	BUG_ON(!host);
+	BUG_ON(fn > 7);
 #ifdef CONFIG_HUAWEI_DSM
 	if(addr & ~0x1FFFF)
 		dw_mci_dsm_dump(slot->host, DSM_SDIO_CDM52_INVELADE_ARGUMENT_ERR_NO);
@@ -138,6 +139,7 @@ static int mmc_io_rw_direct_host(struct mmc_host *host, int write, unsigned fn,
 int mmc_io_rw_direct(struct mmc_card *card, int write, unsigned fn,
 	unsigned addr, u8 in, u8 *out)
 {
+	BUG_ON(!card);
 	return mmc_io_rw_direct_host(card->host, write, fn, addr, in, out);
 }
 
@@ -156,6 +158,8 @@ int mmc_io_rw_extended(struct mmc_card *card, int write, unsigned fn,
 	struct dw_mci_slot *slot = mmc_priv(card->host);
 #endif
 
+	BUG_ON(!card);
+	BUG_ON(fn > 7);
 	WARN_ON(blksz == 0);
 
 #ifdef CONFIG_HUAWEI_DSM
@@ -196,7 +200,7 @@ int mmc_io_rw_extended(struct mmc_card *card, int write, unsigned fn,
              }
 		data.sg = sgtable.sgl;
 		data.sg_len = nents;
-		/*lint -save -e679*/
+		/*lint -save -e648 -e679*/
 		for_each_sg(data.sg, sg_ptr, data.sg_len, i) {
 			sg_set_page(sg_ptr, virt_to_page(buf + (i * seg_size)),
 					min(seg_size, left_size),
@@ -268,5 +272,6 @@ int sdio_reset(struct mmc_host *host)
 	else
 		abort |= 0x08;
 
-	return mmc_io_rw_direct_host(host, 1, 0, SDIO_CCCR_ABORT, abort, NULL);
+	ret = mmc_io_rw_direct_host(host, 1, 0, SDIO_CCCR_ABORT, abort, NULL);
+	return ret;
 }

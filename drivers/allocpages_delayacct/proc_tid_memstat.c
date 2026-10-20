@@ -1,13 +1,12 @@
 #include <linux/seq_file.h>
 #include <linux/sched.h>
-#include <linux/delayacct.h>
 #include <linux/pid_namespace.h>
 #include <linux/pid.h>
 #include <linux/spinlock.h>
 
 #ifdef CONFIG_HW_MEMORY_MONITOR
-int proc_tid_memstat(struct seq_file *m, struct pid_namespace *ns,
-				struct pid *pid, struct task_struct *task)
+extern int proc_tid_memstat(struct seq_file *m, struct pid_namespace *ns,
+			    struct pid *pid, struct task_struct *task)
 {
 	unsigned long flags;
 	unsigned long long allocpages_delay_total;

@@ -27,10 +27,11 @@ struct plt_entry {
 	__le32	br;	/* br	x16				*/
 };
 
+static struct plt_entry *plts_addr;
 
 static bool in_init(const struct module *mod, void *loc)
 {
-	return (u64)loc - (u64)mod->init_layout.base < mod->init_layout.size;
+	return (u64)loc - (u64)mod->module_init < mod->init_size;
 }
 
 u64 module_emit_plt_entry(struct module *mod, void *loc, const Elf64_Rela *rela,
@@ -42,6 +43,8 @@ u64 module_emit_plt_entry(struct module *mod, void *loc, const Elf64_Rela *rela,
 	int i = pltsec->plt_num_entries;
 	u64 val = sym->st_value + rela->r_addend;
 
+	if (!in_init(mod, loc))
+		plts_addr = plt;
 
 	/*
 	 * MOVK/MOVN/MOVZ opcode:
@@ -234,9 +237,9 @@ int module_frob_arch_sections(Elf_Ehdr *ehdr, Elf_Shdr *sechdrs,
 
 u64 livepatch_emit_plt_entry(struct module *mod, unsigned long val)
 {
-	struct plt_entry *plt = (struct plt_entry *)mod->arch.core.plt->sh_addr;
+	struct plt_entry *plt = plts_addr;
 	int num = mod->arch.core.plt_num_entries;
-	u32 *addr = (u32 *)&plt[num];
+	u32 *addr = &plt[num];
 	u32 insns[4];
 	int i;
 

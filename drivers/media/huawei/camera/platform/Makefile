@@ -15,23 +15,3 @@ ccflags-y += -Idrivers/media/huawei/camera/platform/kirin970
 obj-y += kirin970/
 endif
 
-ifeq ($(CONFIG_HISI_CAMERA_HISTAR_ISPV120), y)
-ccflags-y += -Idrivers/media/huawei/camera/platform/$(TARGET_BOARD_PLATFORM)
-obj-y += $(TARGET_BOARD_PLATFORM)/
-endif
-
-ifeq ($(CONFIG_HISI_CAMERA_HISTAR_ISPV200), y)
-ccflags-y += -Idrivers/media/huawei/camera/platform/$(TARGET_BOARD_PLATFORM)
-obj-y += $(TARGET_BOARD_PLATFORM)/
-endif
-
-ifeq ($(CONFIG_HISI_CAMERA_HISTAR_ISPV250), y)
-ccflags-y += -Idrivers/media/huawei/camera/platform/$(TARGET_BOARD_PLATFORM)
-obj-y += $(TARGET_BOARD_PLATFORM)/
-endif
-
-ifeq ($(CONFIG_HISI_CAMERA_HISTAR_ISPV210), y)
-ccflags-y += -Idrivers/media/huawei/camera/platform/$(TARGET_BOARD_PLATFORM)
-obj-y += $(TARGET_BOARD_PLATFORM)/
-endif
-

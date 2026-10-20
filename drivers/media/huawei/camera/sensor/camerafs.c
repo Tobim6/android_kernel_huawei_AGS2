@@ -81,7 +81,6 @@ spinlock_t pix_lock = __SPIN_LOCK_UNLOCKED("camerafs");
 #define LDO_NUM_MAX 6
 #define LDO_RUN_COUNT 20
 #define LDO_NAME_LEN 32
-#define LDO_DROP_CURRENT_COUNT 2
 enum
 {
     REAR_POS = 0,
@@ -100,7 +99,7 @@ static int rt_ldo_detect_pos = REAR_POS;
 static struct mutex  ldo_lock;
 extern int strncpy_s(char *strDest, size_t destMax, const char *strSrc, size_t count);
 extern int memset_s(void *dest, size_t destMax, int c, size_t count);
-extern int memcpy_s(void *dest, size_t destMax, const void *src, size_t count);
+
 static ssize_t rear_sensor_freq_gear_store(struct device *dev,
     struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -369,7 +368,6 @@ struct device_attribute *attr,char *buf)
 {
     cam_ldo *p_ldo = NULL;
     int buflen = 0;
-    int ret;
     cam_info("Enter : %s", __func__);
     mutex_lock(&ldo_lock);
     if(buf == NULL){
@@ -383,12 +381,7 @@ struct device_attribute *attr,char *buf)
     }else{
         p_ldo = &(camerafs_ldo[FRONT_POS]);
     }
-    ret = memcpy_s((cam_ldo *)buf, buflen, p_ldo, buflen);
-    if (ret != 0) {
-        cam_err("%s, copy buf is fail\n", __func__);
-        mutex_unlock(&ldo_lock);
-        return -1;
-    }
+    memcpy((cam_ldo *)buf, p_ldo, buflen);
     mutex_unlock(&ldo_lock);
     cam_info("Exit : %s\n", __func__);
     return buflen;
@@ -400,9 +393,6 @@ struct device_attribute *attr, const char *buf, size_t count)
     int i, j= 0;
     int sum_cur = 0;
     int cur_val = 0;
-    int drop_count = LDO_DROP_CURRENT_COUNT;
-    int min_cur = 0;
-    int max_cur = 0;
     cam_ldo *p_ldo = NULL;
     mutex_lock(&ldo_lock);
     if(buf == NULL){
@@ -425,21 +415,11 @@ struct device_attribute *attr, const char *buf, size_t count)
     for(i=0; i< p_ldo->ldo_num; i++){
         sum_cur = 0;
         for(j=0; j<LDO_RUN_COUNT; j++){
-	    cur_val = hisi_adc_get_current(p_ldo->ldo_channel[i]);
+            cur_val = hisi_adc_get_current(p_ldo->ldo_channel[i]);
             if(cur_val < 0){
-                cam_err("%s ldo read data error cur_val = %d\n", __func__, cur_val);
                 sum_cur = -1;
                 break;
             }else{
-                if(j==0) {
-                    min_cur = cur_val;
-                    max_cur = cur_val;
-                }else {
-                    if(min_cur > cur_val)
-                        min_cur = cur_val;
-                    if(max_cur < cur_val)
-                        max_cur = cur_val;
-                }
                 sum_cur = sum_cur + cur_val;
             }
             msleep(5);
@@ -447,7 +427,7 @@ struct device_attribute *attr, const char *buf, size_t count)
         if(sum_cur == -1){
             p_ldo->ldo_current[i] = sum_cur;
         }else{
-            p_ldo->ldo_current[i] = (sum_cur-min_cur-max_cur)/(LDO_RUN_COUNT-drop_count);
+            p_ldo->ldo_current[i] = sum_cur/LDO_RUN_COUNT;
         }
     }
     mutex_unlock(&ldo_lock);
@@ -496,11 +476,7 @@ static int hw_rt_get_ldo_data(void)
                     cam_err("%s failed %d\n", __func__, __LINE__);
                     return ret;
                 }
-                ret = strncpy_s(p_ldo->ldo_name[i], LDO_NAME_LEN - 1, pldoname, strlen(pldoname));
-                if (ret != 0) {
-                    cam_err("%s copy ldo name failed %d\n", __func__, __LINE__);
-                    return ret;
-                }
+                strncpy_s(p_ldo->ldo_name[i], LDO_NAME_LEN-1, pldoname, strlen(pldoname));
             }
         }
 
@@ -525,11 +501,7 @@ static int hw_rt_get_ldo_data(void)
                     cam_err("%s failed %d\n", __func__, __LINE__);
                     return ret;
                 }
-                ret = strncpy_s(p_ldo->ldo_name[i], LDO_NAME_LEN - 1, pldoname, strlen(pldoname));
-                if (ret != 0) {
-                    cam_err("%s copy ldo name failed %d\n", __func__, __LINE__);
-                    return ret;
-                }
+                strncpy_s(p_ldo->ldo_name[i], LDO_NAME_LEN-1, pldoname, strlen(pldoname));
             }
         }
         rt_ldo_detect_pos = REAR_POS;//default detect rear camera

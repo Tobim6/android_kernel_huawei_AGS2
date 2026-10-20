@@ -1391,16 +1391,11 @@ static int hi6522_config_flash_torch_timeout(struct hi6522_device_info *di)
 
 static void hi6522_config_opt_param(void)
 {
-	if(!(strstr(saved_command_line, "androidboot.swtype=factory"))){
-		unsigned char chooper = 0;
+	unsigned char chooper = 0;
 
-		hi6522_read_byte(0x1D, &chooper);
-		chooper &= 0x2;
-		chooper |= 0x69;
-		hi6522_write_byte(0x1D, chooper);
-	}else{
-		hi6522_write_byte(0x1D, 0x6B);
-	}
+	hi6522_read_byte(0x1D, &chooper);
+	chooper &= 0x2;
+	chooper |= 0x69;
 
 	hi6522_write_byte(0x48, 0x14);
 	hi6522_write_byte(0x40, 0x8A);
@@ -1415,6 +1410,7 @@ static void hi6522_config_opt_param(void)
 	hi6522_write_byte(0x1C, 0x7F);
 	hi6522_write_byte(0x17, 0x78);
 	hi6522_write_byte(0x16, 0xC8);
+	hi6522_write_byte(0x1D, chooper);
 	hi6522_write_byte(0x18, 0x99);
 	hi6522_write_byte(0x2F, 0x18);
 	hi6522_write_byte(0x31, 0x2C);
@@ -1556,8 +1552,8 @@ int scharger_power_on(int id)
 	case SCHG_BOOST3_ID:	//flash_bst:
 		scharger_di->flash_bst_en = CHG_POWER_EN;
 		ret = hi6522_config_flash_boost_enable(scharger_di);
-		usleep_range(500,510);
-                break;
+		udelay(500);
+		break;
 	case SCHG_SOURCE1_ID:	//flash_led_flash:
 		scharger_di->flash_led_flash_en = CHG_POWER_EN;
 		ret = hi6522_config_flash_led_flash_enable(scharger_di);
@@ -1871,43 +1867,38 @@ int scharger_flash_torch_timeout_config(unsigned int timeoutSec)
 /**********************************************************
 *  Function:     hi6522_chip_init()
 *  Discription:  chip init for hi6523
-*  Parameters:   chip_init_crit
+*  Parameters:   NULL
 *  return value:
 *                 0-sucess or others-fail
 **********************************************************/
-int hi6522_chip_init(struct chip_init_crit* init_crit)
+int hi6522_chip_init(void)
 {
 	int ret = 0;
 	struct hi6522_device_info *di = g_hi6522_dev;
-	if (NULL == di || !init_crit) {
-		SCHARGER_ERR("%s hi6522_device_info or init_crit is NULL!\n", __func__);
+	if (NULL == di) {
+		SCHARGER_ERR("%s hi6522_device_info is NULL!\n", __func__);
 		return -ENOMEM;
 	}
-	switch(init_crit->vbus) {
-		case ADAPTER_5V:
-			ret |= hi6522_set_fast_safe_timer(CHG_FAST_SAFE_TIMER_MAX);
-			ret |= hi6522_set_term_enable(CHG_TERM_DIS);
-			ret |= hi6522_set_input_current(IINLIM_500);
-			ret |= hi6522_set_charge_current(CHG_FAST_ICHG_VALUE(500));
-			ret |= hi6522_set_terminal_voltage(CHG_FAST_VCHG_VALUE(4350));
-			ret |= hi6522_set_terminal_current(CHG_TERM_ICHG_150MA);
-			ret |= hi6522_set_watchdog_timer(WATCHDOG_TIMER_40_S);
-			ret |= hi6522_set_precharge_current(CHG_PRG_ICHG_200MA);
-			ret |= hi6522_set_precharge_voltage(CHG_PRG_VCHG_2800);
-			ret |= hi6522_set_batfet_ctrl(CHG_BATFET_EN);
-			ret |= hi6522_set_dpm_voltage(VINDPM_4520);
-			/*IR compensation voatge clamp ,IR compensation resistor setting */
-			ret |= hi6522_set_vclamp(di->param_dts.vclamp);
-			ret |= hi6522_set_otg_current(BOOST_LIM_MAX);
-			ret |= hi6522_set_otg_enable(CHG_OTG_FORCE_DIS);
-			break;
-		default:
-			SCHARGER_ERR("%s: init mode err\n", __func__);
-			return -EINVAL;
-	}
+
+	ret |= hi6522_set_fast_safe_timer(CHG_FAST_SAFE_TIMER_MAX);
+	ret |= hi6522_set_term_enable(CHG_TERM_DIS);
+	ret |= hi6522_set_input_current(IINLIM_500);
+	ret |= hi6522_set_charge_current(CHG_FAST_ICHG_VALUE(500));
+	ret |= hi6522_set_terminal_voltage(CHG_FAST_VCHG_VALUE(4350));
+	ret |= hi6522_set_terminal_current(CHG_TERM_ICHG_150MA);
+	ret |= hi6522_set_watchdog_timer(WATCHDOG_TIMER_40_S);
+	ret |= hi6522_set_precharge_current(CHG_PRG_ICHG_200MA);
+	ret |= hi6522_set_precharge_voltage(CHG_PRG_VCHG_2800);
+	ret |= hi6522_set_batfet_ctrl(CHG_BATFET_EN);
+	ret |= hi6522_set_dpm_voltage(VINDPM_4520);
+	/*IR compensation voatge clamp ,IR compensation resistor setting */
+	ret |= hi6522_set_vclamp(di->param_dts.vclamp);
+	ret |= hi6522_set_otg_current(BOOST_LIM_MAX);
+	ret |= hi6522_set_otg_enable(CHG_OTG_FORCE_DIS);
 
 	return ret;
 }
+
 /**********************************************************
 *  Function:        hi6522_get_ibus_ma
 *  Discription:     get ibus
@@ -1992,8 +1983,8 @@ int hi6522_set_charger_hiz(int enable)
 #ifdef  CONFIG_HUAWEI_USB_SHORT_CIRCUIT_PROTECT
 		if(1 == di->hiz_iin_limit_open_flag && is_uscp_hiz_mode() && !is_in_rt_uscp_mode()){
 			hiz_iin_limit_flag = HIZ_IIN_FLAG_TRUE;
+			SCHARGER_ERR("[%s] is_uscp_hiz_mode HIZ,enable:%d,set 100mA\n", __func__, enable);
 			if(first_in){
-				SCHARGER_ERR("[%s] is_uscp_hiz_mode HIZ,enable:%d,set 100mA\n", __func__, enable);
 				first_in = 0;
 				return hi6522_set_input_current(IINLIM_100);//set inputcurrent to 100mA
 			}else{
@@ -2570,35 +2561,29 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 	}
 
 	if (irq_status[1] & CHG_IRQ1_WLED_OVP_38V) {
-		if(!(strstr(saved_command_line, "androidboot.swtype=factory"))){
-			wled_ovp_count++;
-			hi6522_config_enable_chopper(di,0);
 
-			if(WLED_IRQ_ONCE_COUNT == wled_ovp_count)
-			{
-				hi6522_config_enable_ifb1_ifb2(di,wled_ovp_count);
-				SCHARGER_ERR("SCHARGER ERROR:CHG_IRQ1_WLED_OVP_38V,wled_ovp_count:%d.\n",wled_ovp_count);
-			}
-			else if(WLED_IRQ_SECOND_COUNT == wled_ovp_count)
-			{
-				hi6522_config_enable_ifb1_ifb2(di,wled_ovp_count);
-				SCHARGER_ERR("SCHARGER ERROR:CHG_IRQ1_WLED_OVP_38V,wled_ovp_count:%d.\n",wled_ovp_count);
-			}
-			else if(WLED_IRQ_THIRD_COUNT == wled_ovp_count)
-			{
-				hi6522_config_enable_chopper(di,1);
-				hi6522_config_enable_ifb1_ifb2(di,wled_ovp_count);
-				wled_ovp_count = 0;
-				di->wled_en = CHG_POWER_DIS;
-				hi6522_config_wled_enable(di);
-				SCHARGER_ERR
-			    ("SCHARGER ERROR:CHG_IRQ1_WLED_OVP_38V,wled_ovp_count :%d.\n",wled_ovp_count);
-			}
-		}else{
+		wled_ovp_count++;
+        hi6522_config_enable_chopper(di,0);
+
+        if(WLED_IRQ_ONCE_COUNT == wled_ovp_count)
+        {
+            hi6522_config_enable_ifb1_ifb2(di,wled_ovp_count);
+            SCHARGER_ERR("SCHARGER ERROR:CHG_IRQ1_WLED_OVP_38V,wled_ovp_count:%d.\n",wled_ovp_count);
+        }
+        else if(WLED_IRQ_SECOND_COUNT == wled_ovp_count)
+        {
+            hi6522_config_enable_ifb1_ifb2(di,wled_ovp_count);
+            SCHARGER_ERR("SCHARGER ERROR:CHG_IRQ1_WLED_OVP_38V,wled_ovp_count:%d.\n",wled_ovp_count);
+        }
+        else if(WLED_IRQ_THIRD_COUNT == wled_ovp_count)
+        {
+            hi6522_config_enable_chopper(di,1);
+            hi6522_config_enable_ifb1_ifb2(di,wled_ovp_count);
+            wled_ovp_count = 0;
 			di->wled_en = CHG_POWER_DIS;
 			hi6522_config_wled_enable(di);
 			SCHARGER_ERR
-			    ("SCHARGER ERROR:CHG_IRQ1_WLED_OVP_38V,reg[0x08]:0x%x.\n",irq_status[1]);
+		    ("SCHARGER ERROR:CHG_IRQ1_WLED_OVP_38V,wled_ovp_count :%d.\n",wled_ovp_count);
 		}
 		atomic_notifier_call_chain(&fault_notifier_list,
 					   CHARGE_FAULT_SCHARGER,
@@ -2617,32 +2602,28 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 	}
 
 	if (irq_status[1] & CHG_IRQ1_WLED_UVP) {
-		if(!(strstr(saved_command_line, "androidboot.swtype=factory"))){
-			wled_uvp_count++;
-			hi6522_config_enable_chopper(di,0);
-			if(WLED_IRQ_ONCE_COUNT == wled_uvp_count)
-			{
-				hi6522_config_enable_ifb1_ifb2(di,wled_uvp_count);
-				SCHARGER_ERR("SCHARGER ERROR:CHG_IRQ1_WLED_UVP,wled_uvp_count:%d.\n",wled_uvp_count);
-			}
-			else if(WLED_IRQ_SECOND_COUNT == wled_uvp_count)
-			{
-				hi6522_config_enable_ifb1_ifb2(di,wled_uvp_count);
-				SCHARGER_ERR("SCHARGER ERROR:CHG_IRQ1_WLED_UVP,wled_uvp_count:%d.\n",wled_uvp_count);
-			}
-			else if(WLED_IRQ_THIRD_COUNT == wled_uvp_count)
-			{
-				hi6522_config_enable_chopper(di,1);
-				hi6522_config_enable_ifb1_ifb2(di,wled_uvp_count);
-				wled_uvp_count = 0;
-				di->wled_en = CHG_POWER_DIS;
-				hi6522_config_wled_enable(di);
-				SCHARGER_ERR("SCHARGER ERROR:CHG_IRQ1_WLED_UVP,wled_uvp_count :%d.\n",wled_uvp_count);
-	        }
-		}else{
+
+		wled_uvp_count++;
+        hi6522_config_enable_chopper(di,0);
+        if(WLED_IRQ_ONCE_COUNT == wled_uvp_count)
+        {
+            hi6522_config_enable_ifb1_ifb2(di,wled_uvp_count);
+            SCHARGER_ERR("SCHARGER ERROR:CHG_IRQ1_WLED_UVP,wled_uvp_count:%d.\n",wled_uvp_count);
+        }
+        else if(WLED_IRQ_SECOND_COUNT == wled_uvp_count)
+        {
+            hi6522_config_enable_ifb1_ifb2(di,wled_uvp_count);
+            SCHARGER_ERR("SCHARGER ERROR:CHG_IRQ1_WLED_UVP,wled_uvp_count:%d.\n",wled_uvp_count);
+        }
+        else if(WLED_IRQ_THIRD_COUNT == wled_uvp_count)
+        {
+            hi6522_config_enable_chopper(di,1);
+            hi6522_config_enable_ifb1_ifb2(di,wled_uvp_count);
+            wled_uvp_count = 0;
 			di->wled_en = CHG_POWER_DIS;
 			hi6522_config_wled_enable(di);
-		}
+			SCHARGER_ERR("SCHARGER ERROR:CHG_IRQ1_WLED_UVP,wled_uvp_count :%d.\n",wled_uvp_count);
+        }
 			SCHARGER_ERR
 		    ("SCHARGER ERROR:CHG_IRQ1_WLED_UVP,reg[0x08]:0x%x.\n",
 		     irq_status[1]);
@@ -2662,7 +2643,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[2] & CHG_IRQ2_FLASH_BST_UVP) {/*lint !e690*/
+	if (irq_status[2] & CHG_IRQ2_FLASH_BST_UVP) {
 		di->flash_bst_en = CHG_POWER_DIS;
 		hi6522_config_flash_boost_enable(di);
 		SCHARGER_ERR
@@ -2673,7 +2654,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[2] & CHG_IRQ2_FLASH_BST_OVP) {/*lint !e690*/
+	if (irq_status[2] & CHG_IRQ2_FLASH_BST_OVP) {
 		di->flash_bst_en = CHG_POWER_DIS;
 		hi6522_config_flash_boost_enable(di);
 		SCHARGER_ERR
@@ -2684,7 +2665,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[2] & CHG_IRQ2_FLASH_BST_SCP) {/*lint !e690*/
+	if (irq_status[2] & CHG_IRQ2_FLASH_BST_SCP) {
 		/*To avoid Scharger v210 chip problem */
 		flash_bst_scp_cnt++;
 		if (flash_bst_scp_cnt > 3) {
@@ -2700,7 +2681,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 		}
 	}
 
-	if (irq_status[2] & CHG_IRQ2_FLASH_LED_SHORT) {/*lint !e690*/
+	if (irq_status[2] & CHG_IRQ2_FLASH_LED_SHORT) {
 		di->flash_led_flash_en = CHG_POWER_DIS;
 		di->flash_led_torch_en = CHG_POWER_DIS;
 		hi6522_config_flash_led_flash_enable(di);
@@ -2713,7 +2694,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[2] & CHG_IRQ2_FLASH_LED_OPEN) {/*lint !e690*/
+	if (irq_status[2] & CHG_IRQ2_FLASH_LED_OPEN) {
 		di->flash_led_flash_en = CHG_POWER_DIS;
 		di->flash_led_torch_en = CHG_POWER_DIS;
 		hi6522_config_flash_led_flash_enable(di);
@@ -2726,7 +2707,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[3] & CHG_IRQ3_LCD_NCP_SCP) {/*lint !e690*/
+	if (irq_status[3] & CHG_IRQ3_LCD_NCP_SCP) {
 		di->lcd_bst_en = CHG_POWER_DIS;
 		di->lcd_ncp_en = CHG_POWER_DIS;
 		di->lcd_ldo_en = CHG_POWER_DIS;
@@ -2741,7 +2722,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[3] & CHG_IRQ3_LCD_BST_UVP) {/*lint !e690*/
+	if (irq_status[3] & CHG_IRQ3_LCD_BST_UVP) {
 		di->lcd_bst_en = CHG_POWER_DIS;
 		di->lcd_ncp_en = CHG_POWER_DIS;
 		di->lcd_ldo_en = CHG_POWER_DIS;
@@ -2756,7 +2737,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[3] & CHG_IRQ3_LCD_BST_OVP) {/*lint !e690*/
+	if (irq_status[3] & CHG_IRQ3_LCD_BST_OVP) {
 		di->lcd_bst_en = CHG_POWER_DIS;
 		di->lcd_ncp_en = CHG_POWER_DIS;
 		di->lcd_ldo_en = CHG_POWER_DIS;
@@ -2771,7 +2752,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[3] & CHG_IRQ3_LCD_BST_SCP) {/*lint !e690*/
+	if (irq_status[3] & CHG_IRQ3_LCD_BST_SCP) {
 		hi6522_read_byte(SOC_SCHARGER_LCD_BOOST_REG10_ADDR(0),
 				 &reg_read);
 		if (0x55 == reg_read) {
@@ -2794,7 +2775,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[3] & CHG_IRQ3_LCD_LDO_OCP) {/*lint !e690*/
+	if (irq_status[3] & CHG_IRQ3_LCD_LDO_OCP) {
 		di->lcd_bst_en = CHG_POWER_DIS;
 		di->lcd_ncp_en = CHG_POWER_DIS;
 		di->lcd_ldo_en = CHG_POWER_DIS;
@@ -2809,7 +2790,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[3] & CHG_IRQ3_LDO1_200MA_OCP) {/*lint !e690*/
+	if (irq_status[3] & CHG_IRQ3_LDO1_200MA_OCP) {
 		di->ldo1_200ma_en = CHG_POWER_DIS;
 		hi6522_config_ldo1_200ma_enable(di);
 		SCHARGER_ERR
@@ -2820,7 +2801,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[3] & CHG_IRQ3_LDO2_200MA_OCP) {/*lint !e690*/
+	if (irq_status[3] & CHG_IRQ3_LDO2_200MA_OCP) {
 		di->ldo2_200ma_en = CHG_POWER_DIS;
 		hi6522_config_ldo2_200ma_enable(di);
 		SCHARGER_ERR
@@ -2831,7 +2812,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 					   NULL);
 	}
 
-	if (irq_status[4] & CHG_IRQ4_OTG_SCP) {/*lint !e690*/
+	if (irq_status[4] & CHG_IRQ4_OTG_SCP) {
 		otg_scp_cnt++;
 		hi6522_write_byte(CHG_IRQ_REG4,
 				  irq_status[4] & CHG_IRQ4_OTG_SCP);
@@ -2852,7 +2833,7 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 		}
 	}
 
-	if (irq_status[4] & CHG_IRQ4_OTG_UVP) {/*lint !e690*/
+	if (irq_status[4] & CHG_IRQ4_OTG_UVP) {
 		otg_uvp_cnt++;
 		hi6522_write_byte(CHG_IRQ_REG4,
 				  irq_status[4] & CHG_IRQ4_OTG_UVP);
@@ -2875,9 +2856,9 @@ static void hi6522_irq_work_handle(struct work_struct *work)
 	/*clean irq */
 	hi6522_write_byte(CHG_IRQ_REG0, irq_status[0]);
 	hi6522_write_byte(CHG_IRQ_REG1, irq_status[1]);
-	hi6522_write_byte(CHG_IRQ_REG2, irq_status[2]);/*lint !e690*/
-	hi6522_write_byte(CHG_IRQ_REG3, irq_status[3]);/*lint !e690*/
-	hi6522_write_byte(CHG_IRQ_REG4, irq_status[4]);/*lint !e690*/
+	hi6522_write_byte(CHG_IRQ_REG2, irq_status[2]);
+	hi6522_write_byte(CHG_IRQ_REG3, irq_status[3]);
+	hi6522_write_byte(CHG_IRQ_REG4, irq_status[4]);
 
 	enable_irq(di->irq_int);
 #ifdef CONFIG_HUAWEI_OCP
@@ -2986,7 +2967,7 @@ static void parse_dts(struct device_node *np, struct hi6522_device_info *di)
 	ret = of_property_read_u32(np, "hiz_iin_limit_open_flag", &(di->hiz_iin_limit_open_flag));
 	if (ret) {
 		SCHARGER_ERR("get hiz_iin_limit_open_flag failed\n");
-		di->hiz_iin_limit_open_flag = 0;
+		di->hiz_iin_limit_open_flag = 0;//disable hiz_iin limit
 	}
 	SCHARGER_INF("prase_dts hiz_iin_limit_open_flag = %d\n", di->hiz_iin_limit_open_flag);
 	ret = of_property_read_u32(np, "vclamp", &(di->param_dts.vclamp));

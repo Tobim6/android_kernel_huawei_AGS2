@@ -298,7 +298,7 @@ static int finish_unfinished(struct super_block *s)
 		pathrelse(&path);
 
 		inode = reiserfs_iget(s, &obj_key);
-		if (IS_ERR_OR_NULL(inode)) {
+		if (!inode) {
 			/*
 			 * the unlink almost completed, it just did not
 			 * manage to remove "save" link and release objectid
@@ -636,8 +636,7 @@ static int __init init_inodecache(void)
 						  sizeof(struct
 							 reiserfs_inode_info),
 						  0, (SLAB_RECLAIM_ACCOUNT|
-						      SLAB_MEM_SPREAD|
-						      SLAB_ACCOUNT),
+							SLAB_MEM_SPREAD),
 						  init_once);
 	if (reiserfs_inode_cachep == NULL)
 		return -ENOMEM;
@@ -812,7 +811,6 @@ static const struct dquot_operations reiserfs_quota_operations = {
 	.write_info = reiserfs_write_info,
 	.alloc_dquot	= dquot_alloc,
 	.destroy_dquot	= dquot_destroy,
-	.get_next_id	= dquot_get_next_id,
 };
 
 static const struct quotactl_ops reiserfs_qctl_operations = {
@@ -1403,17 +1401,13 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 	unsigned long safe_mask = 0;
 	unsigned int commit_max_age = (unsigned int)-1;
 	struct reiserfs_journal *journal = SB_JOURNAL(s);
-	char *new_opts;
+	char *new_opts = kstrdup(arg, GFP_KERNEL);
 	int err;
 	char *qf_names[REISERFS_MAXQUOTAS];
 	unsigned int qfmt = 0;
 #ifdef CONFIG_QUOTA
 	int i;
 #endif
-
-	new_opts = kstrdup(arg, GFP_KERNEL);
-	if (arg && !new_opts)
-		return -ENOMEM;
 
 	sync_filesystem(s);
 	reiserfs_write_lock(s);
@@ -1560,8 +1554,7 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 	}
 
 out_ok_unlocked:
-	if (new_opts)
-		replace_mount_options(s, new_opts);
+	replace_mount_options(s, new_opts);
 	return 0;
 
 out_err_unlock:
@@ -1676,7 +1669,7 @@ static int read_super_block(struct super_block *s, int offset)
 /* after journal replay, reread all bitmap and super blocks */
 static int reread_meta_blocks(struct super_block *s)
 {
-	ll_rw_block(REQ_OP_READ, 0, 1, &SB_BUFFER_WITH_SB(s));
+	ll_rw_block(READ, 1, &SB_BUFFER_WITH_SB(s));
 	wait_on_buffer(SB_BUFFER_WITH_SB(s));
 	if (!buffer_uptodate(SB_BUFFER_WITH_SB(s))) {
 		reiserfs_warning(s, "reiserfs-2504", "error reading the super");
@@ -2522,7 +2515,7 @@ out:
 	if (inode->i_size < off + len - towrite)
 		i_size_write(inode, off + len - towrite);
 	inode->i_version++;
-	inode->i_mtime = inode->i_ctime = current_time(inode);
+	inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 	mark_inode_dirty(inode);
 	return len - towrite;
 }

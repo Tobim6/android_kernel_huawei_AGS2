@@ -35,8 +35,6 @@
 #define NO_IRQ 0
 #endif
 
-#define TRY_LOCK_TIMEOUT_MS  1000
-
 /* definition of platform data */
 struct hi64xx_irq_platform_data {
 	/* public data */
@@ -84,7 +82,6 @@ static irqreturn_t hi64xx_irq_handler(int irq, void *data)
 
 	wake_lock(&hi64xx_irq->wake_lock);
 	disable_irq_nosync(irq);
-
 	return IRQ_WAKE_THREAD;/*lint !e454*/
 }
 
@@ -316,10 +313,7 @@ int hi64xx_irq_request_irq(struct hi64xx_irq *hi64xx_data, int phy_irq_id,
 {
 	struct hi64xx_irq_platform_data *data = NULL;
 
-	if (!hi64xx_data) {
-		pr_err("%s: hi64xx data is NULL\n", __FUNCTION__);
-		return -EINVAL;
-	}
+	BUG_ON(NULL == hi64xx_data);
 	data = (struct hi64xx_irq_platform_data *)hi64xx_data;
 
 	if ((phy_irq_id >= data->phy_irq_map.irq_num) || (phy_irq_id < 0))
@@ -377,7 +371,7 @@ int hi64xx_irq_disable_irq(struct hi64xx_irq *irq_data, int phy_irq)
 }
 EXPORT_SYMBOL(hi64xx_irq_disable_irq);
 
-int hi64xx_irq_enable_irqs(struct hi64xx_irq *irq_data, int irq_num, const int* phy_irqs)
+int hi64xx_irq_enable_irqs(struct hi64xx_irq *irq_data, int irq_num, int* phy_irqs)
 {
 	struct hi64xx_irq_platform_data *data =
 		(struct hi64xx_irq_platform_data *)irq_data;
@@ -395,7 +389,7 @@ int hi64xx_irq_enable_irqs(struct hi64xx_irq *irq_data, int irq_num, const int* 
 }
 EXPORT_SYMBOL(hi64xx_irq_enable_irqs);
 
-int hi64xx_irq_disable_irqs(struct hi64xx_irq *irq_data, int irq_num, const int* phy_irqs)
+int hi64xx_irq_disable_irqs(struct hi64xx_irq *irq_data, int irq_num, int* phy_irqs)
 {
 	struct hi64xx_irq_platform_data *data =
 		(struct hi64xx_irq_platform_data *)irq_data;
@@ -501,8 +495,6 @@ static int hi64xx_irq_suspend(struct platform_device *pdev, pm_message_t state)
 	struct device *dev = &pdev->dev;
 	struct hi64xx_irq_platform_data *data = platform_get_drvdata(pdev);
 	int ret = 0;
-	unsigned long cur_time;
-	unsigned long timeout;
 
 	dev_info(dev, "%s ok!\n", __FUNCTION__);
 
@@ -511,22 +503,11 @@ static int hi64xx_irq_suspend(struct platform_device *pdev, pm_message_t state)
 		return -EINVAL;
 	}
 
-
-	timeout = jiffies + msecs_to_jiffies(TRY_LOCK_TIMEOUT_MS);
-	while (!mutex_trylock(&data->sr_lock)) {
-		cur_time = jiffies;
-		if (time_after(cur_time, timeout)) {
-			dev_info(&pdev->dev, "%s: mutex trylock timeout fail.\n", __func__);
-
-			return -EAGAIN;
-		}
-
-		usleep_range(1000, 2000);
-	}
+	mutex_lock(&data->sr_lock);
 
 	ret = hi64xx_hifi_misc_suspend();
 	if (ret) {
-		mutex_unlock(&data->sr_lock);/*lint !e455*/
+		mutex_unlock(&data->sr_lock);
 		return ret;
 	}
 

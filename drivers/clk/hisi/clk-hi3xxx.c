@@ -2173,13 +2173,6 @@ static const struct of_device_id hs_of_match[] = {
     {},/*lint !e785 */
 };
 
-#ifdef CONFIG_HISI_CLK_DEBUG
-char *hs_base_addr_transfer(long unsigned int base_addr)
-{
-	return "NONE";
-}
-#endif
-
 static void __iomem __init *hs_clk_get_base(struct device_node *np)
 {
 	struct device_node *parent;

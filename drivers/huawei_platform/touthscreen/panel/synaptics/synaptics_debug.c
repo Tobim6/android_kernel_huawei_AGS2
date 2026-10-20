@@ -1087,7 +1087,7 @@ static int f54_rawimage_report(void)
 			(int32_t*)kzalloc((rows_size+1)*(columns_size+1)*sizeof(int32_t), GFP_KERNEL);
 		rawdata_from_chip = (int*)kzalloc((rows_size * columns_size)*sizeof(int), GFP_KERNEL);
 		if (!limit_tab.MutualRawMax || !limit_tab.MutualRawMin || !rawdata_from_chip){
-			TS_LOG_ERR("kzalloc error: MutualRawMax:%pK, MutualRawMin:%pK, rawdata_from_chip:%pK\n",
+			TS_LOG_ERR("kzalloc error: MutualRawMax:%p, MutualRawMin:%p, rawdata_from_chip:%p\n",
 				limit_tab.MutualRawMax, limit_tab.MutualRawMin, rawdata_from_chip);
 			goto error_release_mem;
 		}
@@ -2120,7 +2120,7 @@ static short FindMedian(short* pdata, int num)
 static int td43xx_ee_short_normalize_data(signed short * image, unsigned int lens)
 {
 	int retval = 0;
-	int i = 0, j = 0;
+	char i = 0, j = 0;
 	char tx_num = f54->rmi4_data->num_of_tx;
 	char rx_num = f54->rmi4_data->num_of_rx;
 	int part_two_limit = f54->rmi4_data->synaptics_chip_data->tddi_ee_short_test_parttwo_limit;
@@ -2483,6 +2483,7 @@ exit:
 static int synaptics_rmi4_f54_attention_cust(void)
 {
 	int retval;
+	int l;
 	unsigned char report_index[2];
 	int i = 0;
 	unsigned int report_times_max = 0;
@@ -2571,7 +2572,6 @@ int synaptics_get_calib_data(struct ts_calibration_data_info *info)
 {
 	int rc = NO_ERR;
 	unsigned char command;
-	size_t infolength = 0;
 
 	TS_LOG_INFO("%s called\n", __FUNCTION__);
 
@@ -2584,8 +2584,8 @@ int synaptics_get_calib_data(struct ts_calibration_data_info *info)
 		TS_LOG_ERR("Failed to get data\n");
 		goto exit;
 	}
-	infolength = min(sizeof(info->data),(size_t)(f54->report_size+1));
-	memcpy(info->data, f54->report_data, infolength - 1);
+
+	memcpy(info->data, f54->report_data, f54->report_size);
 
 	info->used_size = f54->report_size;
 	TS_LOG_INFO("info->used_size = %d\n", info->used_size);
@@ -2628,7 +2628,6 @@ exit:
 int synaptics_debug_data_test(struct ts_diff_data_info *info)
 {
 	int rc = NO_ERR;
-	int infolength = 0;
 
 	TS_LOG_INFO("synaptics_get_debug_cap_data called\n");
 
@@ -2649,8 +2648,8 @@ int synaptics_debug_data_test(struct ts_diff_data_info *info)
 		TS_LOG_ERR("failed to recognize ic_ver\n");
 		break;
 	}
-	infolength = min(sizeof(info->buff),rawdata_size * sizeof(int)+1);
-	memcpy(info->buff, f54->rawdatabuf, infolength-1);
+
+	memcpy(info->buff, f54->rawdatabuf, rawdata_size * sizeof(int));
 	memcpy(info->result, buf_f54test_result, strlen(buf_f54test_result));
 	info->used_size = rawdata_size / 2;
 
@@ -3244,10 +3243,6 @@ static int match_module_name(const char *module_name)
 				   __func__);
 			return -EINVAL;
 		}
-	}else {
-		TS_LOG_ERR("%s: Failed to match module_name \n",
-				   __func__);
-		return -EINVAL;
 	}
 }
 

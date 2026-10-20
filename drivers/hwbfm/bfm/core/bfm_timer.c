@@ -42,8 +42,7 @@
 #define BOOT_TIMER_COUNT_STEP ((unsigned int)5000) /* unit: msec */
 #define BFMR_TIMEOUT_VALUE_FOR_SHORT_TIMER ((u32)(1000 * 60 * 10)) /* unit: msec */
 #define BFMR_TIMEOUT_VALUE_FOR_LONG_TIMER ((u32)(1000 * 60 * 30)) /* unit: msec */
-#define BFMR_MAX_TIMEOUT_VALUE_FOR_ACTION_TIMER ((u32)(1000 * 60 * 30)) /* unit: msec */
-#define BFMR_VENDOR_HUAWEI_FLAG "/eng"
+#define BFMR_MAX_TIMEOUT_VALUE_FOR_ACTION_TIMER ((u32)(1000 * 60 * 10)) /* unit: msec */
 
 
 /*----local prototypes---------------------------------------------------------------*/
@@ -122,15 +121,7 @@ static void bfm_check_boot_time(struct bfm_boot_timer_info *boot_timer_info)
             : (boot_timer_info->short_timer_timeout_value / (unsigned int)(1000 * 60)));
         boot_timer_info->boot_timer_count_task_should_run = false;
         mutex_unlock(&s_boot_timer_mutex);
-
-        if (bfmr_is_dir_existed(BFMR_VENDOR_HUAWEI_FLAG))
-        {
-            bfm_send_signal_to_init();//for dump trace of init Process.
-
-            boot_fail_err(KERNEL_BOOT_TIMEOUT, NO_SUGGESTION, NULL);
-        } else {
-            bfmr_set_boot_stage(STAGE_BOOT_SUCCESS);
-        }
+        boot_fail_err(KERNEL_BOOT_TIMEOUT, NO_SUGGESTION, NULL);
     }
 
     list_for_each_entry(atimer, &action_timer_active_list, act_list) {
@@ -143,13 +134,7 @@ static void bfm_check_boot_time(struct bfm_boot_timer_info *boot_timer_info)
             BFMR_PRINT_SIMPLE_INFO("hwboot_timer: %s timer expired! boot fail!\n",atimer->action_name);
             boot_timer_info->boot_timer_count_task_should_run = false;
             mutex_unlock(&s_boot_timer_mutex);
-
-            if (bfmr_is_dir_existed(BFMR_VENDOR_HUAWEI_FLAG))
-            {
-                bfm_send_signal_to_init();
-
-                boot_fail_err(KERNEL_BOOT_TIMEOUT, NO_SUGGESTION, NULL);
-            }
+            boot_fail_err(KERNEL_BOOT_TIMEOUT, NO_SUGGESTION, NULL);
         }
     }
 }
@@ -353,14 +338,14 @@ int bfm_action_timer_start(char *act_name, unsigned int timeout_value)
     pid_t task_pid_tmp;
 
     if (NULL == act_name) {
-        BFMR_PRINT_INVALID_PARAMS("act_name.\n");
+        BFMR_PRINT_INVALID_PARAMS("act_name invalid: %p\n", act_name);
         return ret;
     }
 
     if (timeout_value > BFMR_MAX_TIMEOUT_VALUE_FOR_ACTION_TIMER) {
         timeout_value = BFMR_MAX_TIMEOUT_VALUE_FOR_ACTION_TIMER;
-        BFMR_PRINT_INVALID_PARAMS("!!WARNING!!timeout value too large! timeout_value:%d\n",
-                                    timeout_value);
+        BFMR_PRINT_INVALID_PARAMS("!!WARNING!!timeout value too large! act_name: %p, timeout_value:%d\n",
+                                    act_name, timeout_value);
     }
 
     /*get current task info*/
@@ -428,7 +413,7 @@ int bfm_action_timer_stop(char *act_name)
 
     if (NULL == act_name)
     {
-        BFMR_PRINT_INVALID_PARAMS("act_name.\n");
+        BFMR_PRINT_INVALID_PARAMS("act_name: %p\n", act_name);
         return ret;
     }
 
@@ -477,7 +462,7 @@ int bfm_action_timer_pause(char *act_name)
 
     if (NULL == act_name)
     {
-        BFMR_PRINT_INVALID_PARAMS("act_name.\n");
+        BFMR_PRINT_INVALID_PARAMS("act_name: %p\n", act_name);
         return ret;
     }
 
@@ -526,7 +511,7 @@ int bfm_action_timer_resume(char *act_name)
 
     if (NULL == act_name)
     {
-        BFMR_PRINT_INVALID_PARAMS("act_name.\n");
+        BFMR_PRINT_INVALID_PARAMS("act_name: %p\n", act_name);
         return ret;
     }
 

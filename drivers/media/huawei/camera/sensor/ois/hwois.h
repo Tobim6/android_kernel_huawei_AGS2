@@ -54,7 +54,6 @@ struct hw_ois_info {
 typedef struct _tag_hw_ois_intf
 {
 	hw_ois_vtbl_t *vtbl;
-    struct v4l2_subdev *subdev;
 } hw_ois_intf_t;
 
 
@@ -84,7 +83,7 @@ struct _tag_hw_ois_vtbl {
 /* extern function declare */
 extern int hw_ois_register(struct platform_device *pdev,
 		hw_ois_intf_t *intf, struct hw_ois_info *hw_ois_info);
-extern void hw_ois_unregister(struct v4l2_subdev* subdev);
+extern void hw_ois_unregister(hw_ois_intf_t *intf);
 int hw_ois_config(hw_ois_t *hw_ois, void *arg);
 int hw_ois_get_dt_data(struct platform_device *pdev, ois_t *ois);
 

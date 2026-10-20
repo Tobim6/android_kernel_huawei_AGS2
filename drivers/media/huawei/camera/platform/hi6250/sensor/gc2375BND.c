@@ -13,7 +13,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 #define GPIO_LOW_STATE       0
 #define GPIO_HIGH_STATE      1
 
@@ -438,8 +437,10 @@ int gc2375BND_config(hwsensor_intf_t* si, void  *argp)
         case SEN_CONFIG_READ_REG_SETTINGS:
             break;
         case SEN_CONFIG_ENABLE_CSI:
+            //ret = si->vtbl->csi_enable(si);
             break;
         case SEN_CONFIG_DISABLE_CSI:
+            //ret = si->vtbl->csi_disable(si);
             break;
         case SEN_CONFIG_MATCH_ID:
             if(NULL == si->vtbl->match_id){
@@ -496,7 +497,7 @@ static int32_t gc2375BND_platform_probe(struct platform_device* pdev)
     rc = rpmsg_sensor_register(pdev, (void *)&s_gc2375BND);
     if (0 != rc){
         cam_err("%s rpmsg_sensor_register fail.\n", __func__);
-        hwsensor_unregister(Sensor2Pdev(s_gc2375BND));
+        hwsensor_unregister(&s_gc2375BND.intf);
         goto gc2375BND_sensor_probe_fail;
     }
 
@@ -514,7 +515,7 @@ static int __init gc2375BND_init_module(void)
 static void __exit gc2375BND_exit_module(void)
 {
     rpmsg_sensor_unregister((void*)&s_gc2375BND);
-    hwsensor_unregister(Sensor2Pdev(s_gc2375BND));
+    hwsensor_unregister(&s_gc2375BND.intf);
     platform_driver_unregister(&s_gc2375BND_driver);
 }
 /*lint -restore*/

@@ -187,7 +187,7 @@ static int hisi_regulator_scharge_list_voltage_linear(struct regulator_dev *rdev
 	}
 
 	if (regulator_test_debug) {
-		for (i = 0; i < sreg->vol_numb; i++) {/*lint !e574*/
+		for (i = 0; i < sreg->vol_numb; i++) {
 			pr_err("%d ", (int)sreg->vset_table[i]);
 		}
 		pr_err("+++++++++++++++++++++++++++++++++++\n");
@@ -215,7 +215,7 @@ static int hisi_regulator_scharge_get_voltage(struct regulator_dev *dev)
 
 	if (index == -1) {
 		return -1;
-	} else if (index < 0 || index >= sreg->vol_numb) {/*lint !e574*/
+	} else if (index < 0 || index >= sreg->vol_numb) {
 		pr_err("++++++++ in [%s] index  %d outside +++++++\n", __func__, index);
 		return -1;
 	}
@@ -223,7 +223,7 @@ static int hisi_regulator_scharge_get_voltage(struct regulator_dev *dev)
 	if (regulator_test_debug) {
 		pr_err("++++++++ index %x+++++++\n", (unsigned int)index);
 		pr_err("+++++++++++++++++++++++++++++++++++\n");
-		for (i = 0; i < sreg->vol_numb; i++) {/*lint !e574*/
+		for (i = 0; i < sreg->vol_numb; i++) {
 			pr_err("%d ", (int)sreg->vset_table[i]);
 		}
 		pr_err("+++++++++++++++++++++++++++++++++++\n");
@@ -324,7 +324,7 @@ static int hisi_regulator_scharge_get_current_limit(struct regulator_dev *dev)
 	index = scharger_power_get_current_limit_index(vset_regs->vset_reg, vset_data->mask, vset_data->shift);
 	if (index == -1) {
 		return -1;
-	} else if (index < 0 || index >= sreg->vol_numb) {/*lint !e574*/
+	} else if (index < 0 || index >= sreg->vol_numb) {
 		pr_err("++++++++ in [%s] index  %d outside +++++++\n", __func__, index);
 		return -1;
 	}
@@ -332,7 +332,7 @@ static int hisi_regulator_scharge_get_current_limit(struct regulator_dev *dev)
     if (regulator_test_debug) {
 	    pr_err("++++++++ index %x+++++++\n", (unsigned int)index);
 	    pr_err("+++++++++++++++++++++++++++++++++++\n");
-	    for (i = 0; i < sreg->vol_numb; i++) {/*lint !e574*/
+	    for (i = 0; i < sreg->vol_numb; i++) {
 			pr_err("%d ", (int)sreg->vset_table[i]);
 	    }
 	    pr_err("+++++++++++++++++++++++++++++++++++\n");
@@ -429,7 +429,7 @@ static struct regulator_init_data *fake_of_get_regulator_init_data(struct device
 	init_data->num_consumer_supplies * sizeof(struct regulator_consumer_supply), GFP_KERNEL);
 	if (NULL == init_data->consumer_supplies) {
 		dev_err(dev, "%s devm_kzalloc consumer_supplies err\n", __func__);
-		return NULL;/*lint !e574 !e429*/
+		return NULL;
 	}
 
 	consumer_supplies = init_data->consumer_supplies ;

@@ -761,7 +761,7 @@ fb_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 
 	if (info->fbops->fb_read)
 		return info->fbops->fb_read(info, buf, count, ppos);
-	
+
 	total_size = info->screen_size;
 
 	if (total_size == 0)
@@ -826,7 +826,7 @@ fb_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
 
 	if (info->fbops->fb_write)
 		return info->fbops->fb_write(info, buf, count, ppos);
-	
+
 	total_size = info->screen_size;
 
 	if (total_size == 0)
@@ -1052,9 +1052,12 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 }
 EXPORT_SYMBOL(fb_set_var);
 
+#if defined(CONFIG_HISI_FB_3650) || defined(CONFIG_HISI_FB_6250) || defined(CONFIG_HISI_FB_3660)
+extern int g_debug_enable_lcd_sleep_in;
+#endif
 int
 fb_blank(struct fb_info *info, int blank)
-{	
+{
 	struct fb_event event;
 	int ret = -EINVAL, early_ret;
 
@@ -1063,6 +1066,25 @@ fb_blank(struct fb_info *info, int blank)
 
 	event.info = info;
 	event.data = &blank;
+
+#if defined(CONFIG_HISI_FB_3650) || defined(CONFIG_HISI_FB_6250) || defined(CONFIG_HISI_FB_3660)
+	if (g_debug_enable_lcd_sleep_in) {
+		if (info->fbops->fb_blank) {
+			ret = info->fbops->fb_blank(blank, info);
+		}
+		return ret;
+	}
+#endif
+
+	/*
+	 * fb1/2/3.. fb_blank should not call fb_notifier_call_chain.
+	 */
+	if (info->node > 0) {
+		if (info->fbops->fb_blank) {
+			ret = info->fbops->fb_blank(blank, info);
+		}
+		return ret;
+	}
 
 	early_ret = fb_notifier_call_chain(FB_EARLY_EVENT_BLANK, &event);
 
@@ -1476,7 +1498,7 @@ out:
 	return res;
 }
 
-static int 
+static int
 fb_release(struct inode *inode, struct file *file)
 __acquires(&info->lock)
 __releases(&info->lock)
@@ -1608,11 +1630,6 @@ static int do_remove_conflicting_framebuffers(struct apertures_struct *a,
 	return 0;
 }
 
-static bool lockless_register_fb;
-module_param_named_unsafe(lockless_register_fb, lockless_register_fb, bool, 0400);
-MODULE_PARM_DESC(lockless_register_fb,
-	"Lockless framebuffer registration for debugging [default=off]");
-
 static int do_register_framebuffer(struct fb_info *fb_info)
 {
 	int i, ret;
@@ -1658,7 +1675,7 @@ static int do_register_framebuffer(struct fb_info *fb_info)
 			fb_info->pixmap.access_align = 32;
 			fb_info->pixmap.flags = FB_PIXMAP_DEFAULT;
 		}
-	}	
+	}
 	fb_info->pixmap.offset = 0;
 
 	if (!fb_info->pixmap.blit_x)
@@ -1680,27 +1697,24 @@ static int do_register_framebuffer(struct fb_info *fb_info)
 	registered_fb[i] = fb_info;
 
 	event.info = fb_info;
-	if (!lockless_register_fb)
-		console_lock();
+	console_lock();
 	if (!lock_fb_info(fb_info)) {
-		if (!lockless_register_fb)
-			console_unlock();
+		console_unlock();
 		return -ENODEV;
 	}
 
 	fb_notifier_call_chain(FB_EVENT_FB_REGISTERED, &event);
 	unlock_fb_info(fb_info);
-	if (!lockless_register_fb)
-		console_unlock();
+	console_unlock();
 	return 0;
 }
 
-static int unbind_console(struct fb_info *fb_info)
+static int do_unregister_framebuffer(struct fb_info *fb_info)
 {
 	struct fb_event event;
-	int ret;
-	int i = fb_info->node;
+	int i, ret = 0;
 
+	i = fb_info->node;
 	if (i < 0 || i >= FB_MAX || registered_fb[i] != fb_info)
 		return -EINVAL;
 
@@ -1715,29 +1729,17 @@ static int unbind_console(struct fb_info *fb_info)
 	unlock_fb_info(fb_info);
 	console_unlock();
 
-	return ret;
-}
-
-static int __unlink_framebuffer(struct fb_info *fb_info);
-
-static int do_unregister_framebuffer(struct fb_info *fb_info)
-{
-	struct fb_event event;
-	int ret;
-
-	ret = unbind_console(fb_info);
-
 	if (ret)
 		return -EINVAL;
 
 	pm_vt_switch_unregister(fb_info->dev);
 
-	__unlink_framebuffer(fb_info);
+	unlink_framebuffer(fb_info);
 	if (fb_info->pixmap.addr &&
 	    (fb_info->pixmap.flags & FB_PIXMAP_DEFAULT))
 		kfree(fb_info->pixmap.addr);
 	fb_destroy_modelist(&fb_info->modelist);
-	registered_fb[fb_info->node] = NULL;
+	registered_fb[i] = NULL;
 	num_registered_fb--;
 	fb_cleanup_device(fb_info);
 	event.info = fb_info;
@@ -1750,7 +1752,7 @@ static int do_unregister_framebuffer(struct fb_info *fb_info)
 	return 0;
 }
 
-static int __unlink_framebuffer(struct fb_info *fb_info)
+int unlink_framebuffer(struct fb_info *fb_info)
 {
 	int i;
 
@@ -1762,20 +1764,6 @@ static int __unlink_framebuffer(struct fb_info *fb_info)
 		device_destroy(fb_class, MKDEV(FB_MAJOR, i));
 		fb_info->dev = NULL;
 	}
-
-	return 0;
-}
-
-int unlink_framebuffer(struct fb_info *fb_info)
-{
-	int ret;
-
-	ret = __unlink_framebuffer(fb_info);
-	if (ret)
-		return ret;
-
-	unbind_console(fb_info);
-
 	return 0;
 }
 EXPORT_SYMBOL(unlink_framebuffer);
@@ -1880,31 +1868,17 @@ EXPORT_SYMBOL(fb_set_suspend);
 static int __init
 fbmem_init(void)
 {
-	int ret;
+	proc_create("fb", 0, NULL, &fb_proc_fops);
 
-	if (!proc_create("fb", 0, NULL, &fb_proc_fops))
-		return -ENOMEM;
-
-	ret = register_chrdev(FB_MAJOR, "fb", &fb_fops);
-	if (ret) {
+	if (register_chrdev(FB_MAJOR,"fb",&fb_fops))
 		printk("unable to get major %d for fb devs\n", FB_MAJOR);
-		goto err_chrdev;
-	}
 
 	fb_class = class_create(THIS_MODULE, "graphics");
 	if (IS_ERR(fb_class)) {
-		ret = PTR_ERR(fb_class);
-		pr_warn("Unable to create fb class; errno = %d\n", ret);
+		printk(KERN_WARNING "Unable to create fb class; errno = %ld\n", PTR_ERR(fb_class));
 		fb_class = NULL;
-		goto err_class;
 	}
 	return 0;
-
-err_class:
-	unregister_chrdev(FB_MAJOR, "fb");
-err_chrdev:
-	remove_proc_entry("fb", NULL);
-	return ret;
 }
 
 #ifdef MODULE

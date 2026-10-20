@@ -64,7 +64,6 @@ typedef enum {
     POLICY_STATE_TIMER,
     NO_RESPONSE_TIMER,
     LOOP_RESET_TIMER,
-    VBUS_ONLY_TIMER,
 } TIMER2;
 
 typedef struct {
@@ -204,14 +203,6 @@ void platform_delay_10us( FSC_U32 delayCount );
 void platform_notify_cc_orientation(CC_ORIENTATION orientation);
 
 /*******************************************************************************
-* Function:        platform_notify_debug_accessory_snk
-* Input:           orientation - Orientation of CC (NONE, CC1, CC2)
-* Return:          None
-* Description:     A callback used by the core to report to the platform the debug accessory sink
-******************************************************************************/
-void platform_notify_debug_accessory_snk(CC_ORIENTATION orientation);
-
-/*******************************************************************************
 * Function:        platform_notify_audio_accessory
 * Input:           orientation - Orientation of CC (NONE, CC1, CC2)
 * Return:          None
@@ -274,8 +265,6 @@ void platform_set_data_role(FSC_BOOL PolicyIsDFP);
 * Description:     A callback used by the core to report the new data role after
 *                  a data role swap.
 *******************************************************************************/
-void platform_notify_attached_vbus_only(void);
-void platform_notify_unattached_vbus_only(void);
 void platform_notify_bist(FSC_BOOL bistEnabled);
 
 void platform_set_timer(TIMER *timer, FSC_U16 timeout);
@@ -296,14 +285,12 @@ void platform_set_vconn(FSC_BOOL enable);
 FSC_BOOL platform_get_vconn_swap_to_on_supported(void);
 FSC_BOOL platform_get_vconn_swap_to_off_supported(void);
 FSC_BOOL platform_get_dp_enabled(void);
+FSC_BOOL platform_get_pr_swap_wa_enabled(void);
 FSC_BOOL platform_get_product_type_ama(void);
 FSC_BOOL platform_get_modal_operation_supported(void);
-FSC_BOOL platform_discover_mode_supported(void);
-FSC_BOOL platform_enter_mode_supported(void);
-FSC_BOOL platform_discover_svid_supported(void);
-FSC_U32 platform_sink_pdo_number(void);
+
 void platform_double_56k_cable(void);
 #ifdef FSC_HAVE_CUSTOM_SRC2
 void platform_double_22k_cable(void);
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
+#endif
 #endif  // _FSC_PLATFORM_H_

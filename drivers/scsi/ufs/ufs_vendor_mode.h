@@ -22,7 +22,7 @@ struct ufs_ioctl_vendor_state_t {
 int ufs_ioctl_vendor_package(
     struct ufs_hba *hba,
     struct ufs_ioctl_vendor_state_t *ufs_vendor_ioctl_state,
-    const void __user *buffer);
+    void __user *buffer);
 int ufs_ioctl_vendor_package_tick(
     struct ufs_hba *hba, struct scsi_device *dev,
     struct ufs_ioctl_vendor_state_t *ufs_vendor_ioctl_state,

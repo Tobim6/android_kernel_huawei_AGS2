@@ -21,7 +21,6 @@
 #include <linux/debugobjects.h>
 #include <linux/kallsyms.h>
 #include <linux/list.h>
-#include <linux/notifier.h>
 #include <linux/rbtree.h>
 #include <linux/radix-tree.h>
 #include <linux/rcupdate.h>
@@ -31,8 +30,8 @@
 #include <linux/compiler.h>
 #include <linux/llist.h>
 #include <linux/bitops.h>
-#include <linux/hisi/rdr_hisi_ap_hook.h>
 #include <linux/hisi/page_tracker.h>
+#include <linux/hisi/rdr_hisi_ap_hook.h>
 
 #include <asm/uaccess.h>
 #include <asm/tlbflush.h>
@@ -246,21 +245,11 @@ struct page *vmalloc_to_page(const void *vmalloc_addr)
 	 */
 	VIRTUAL_BUG_ON(!is_vmalloc_or_module_addr(vmalloc_addr));
 
-	/*
-	 * Don't dereference bad PUD or PMD (below) entries. This will also
-	 * identify huge mappings, which we may encounter on architectures
-	 * that define CONFIG_HAVE_ARCH_HUGE_VMAP=y. Such regions will be
-	 * identified as vmalloc addresses by is_vmalloc_addr(), but are
-	 * not [unambiguously] associated with a struct page, so there is
-	 * no correct value to return for them.
-	 */
 	if (!pgd_none(*pgd)) {
 		pud_t *pud = pud_offset(pgd, addr);
-		WARN_ON_ONCE(pud_bad(*pud));
-		if (!pud_none(*pud) && !pud_bad(*pud)) {
+		if (!pud_none(*pud)) {
 			pmd_t *pmd = pmd_offset(pud, addr);
-			WARN_ON_ONCE(pmd_bad(*pmd));
-			if (!pmd_none(*pmd) && !pmd_bad(*pmd)) {
+			if (!pmd_none(*pmd)) {
 				pte_t *ptep, pte;
 
 				ptep = pte_offset_map(pmd, addr);
@@ -287,12 +276,13 @@ EXPORT_SYMBOL(vmalloc_to_pfn);
 
 /*** Global kva allocator ***/
 
+#define VM_LAZY_FREE	0x01
+#define VM_LAZY_FREEING	0x02
 #define VM_VM_AREA	0x04
 
 static DEFINE_SPINLOCK(vmap_area_lock);
 /* Export for kexec only */
 LIST_HEAD(vmap_area_list);
-static LLIST_HEAD(vmap_purge_list);
 static struct rb_root vmap_area_root = RB_ROOT;
 
 /* The vmap cache globals are protected by vmap_area_lock */
@@ -356,8 +346,6 @@ static void __insert_vmap_area(struct vmap_area *va)
 
 static void purge_vmap_area_lazy(void);
 
-static BLOCKING_NOTIFIER_HEAD(vmap_notify_list);
-
 /*
  * Allocate a region of KVA of the specified size and alignment, within the
  * vstart and vend.
@@ -376,8 +364,6 @@ static struct vmap_area *alloc_vmap_area(unsigned long size,
 	BUG_ON(!size);
 	BUG_ON(offset_in_page(size));
 	BUG_ON(!is_power_of_2(align));
-
-	might_sleep_if(gfpflags_allow_blocking(gfp_mask));
 
 	va = kmalloc_node(sizeof(struct vmap_area),
 			gfp_mask & GFP_RECLAIM_MASK, node);
@@ -457,7 +443,8 @@ nocache:
 		if (list_is_last(&first->list, &vmap_area_list))
 			goto found;
 
-		first = list_next_entry(first, list);
+		first = list_entry(first->list.next,
+				struct vmap_area, list);
 	}
 
 found:
@@ -471,7 +458,7 @@ found:
 	free_vmap_cache = &va->rb_node;
 	spin_unlock(&vmap_area_lock);
 
-	BUG_ON(!IS_ALIGNED(va->va_start, align));
+	BUG_ON(va->va_start & (align-1));
 	BUG_ON(va->va_start < vstart);
 	BUG_ON(va->va_end > vend);
 
@@ -484,34 +471,12 @@ overflow:
 		purged = 1;
 		goto retry;
 	}
-
-	if (gfpflags_allow_blocking(gfp_mask)) {
-		unsigned long freed = 0;
-		blocking_notifier_call_chain(&vmap_notify_list, 0, &freed);
-		if (freed > 0) {
-			purged = 0;
-			goto retry;
-		}
-	}
-
 	if (printk_ratelimit())
-		pr_warn("vmap allocation for size %lu failed: use vmalloc=<size> to increase size\n",
-			size);
+		pr_warn("vmap allocation for size %lu failed: "
+			"use vmalloc=<size> to increase size.\n", size);
 	kfree(va);
 	return ERR_PTR(-EBUSY);
 }
-
-int register_vmap_purge_notifier(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_register(&vmap_notify_list, nb);
-}
-EXPORT_SYMBOL_GPL(register_vmap_purge_notifier);
-
-int unregister_vmap_purge_notifier(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_unregister(&vmap_notify_list, nb);
-}
-EXPORT_SYMBOL_GPL(unregister_vmap_purge_notifier);
 
 static void __free_vmap_area(struct vmap_area *va)
 {
@@ -569,21 +534,22 @@ static void unmap_vmap_area(struct vmap_area *va)
 static void vmap_debug_free_range(unsigned long start, unsigned long end)
 {
 	/*
-	 * Unmap page tables and force a TLB flush immediately if pagealloc
-	 * debugging is enabled.  This catches use after free bugs similarly to
-	 * those in linear kernel virtual address space after a page has been
-	 * freed.
+	 * Unmap page tables and force a TLB flush immediately if
+	 * CONFIG_DEBUG_PAGEALLOC is set. This catches use after free
+	 * bugs similarly to those in linear kernel virtual address
+	 * space after a page has been freed.
 	 *
-	 * All the lazy freeing logic is still retained, in order to minimise
-	 * intrusiveness of this debugging feature.
+	 * All the lazy freeing logic is still retained, in order to
+	 * minimise intrusiveness of this debugging feature.
 	 *
-	 * This is going to be *slow* (linear kernel virtual address debugging
-	 * doesn't do a broadcast TLB flush so it is a lot faster).
+	 * This is going to be *slow* (linear kernel virtual address
+	 * debugging doesn't do a broadcast TLB flush so it is a lot
+	 * faster).
 	 */
-	if (debug_pagealloc_enabled()) {
-		vunmap_page_range(start, end);
-		flush_tlb_kernel_range(start, end);
-	}
+#ifdef CONFIG_DEBUG_PAGEALLOC
+	vunmap_page_range(start, end);
+	flush_tlb_kernel_range(start, end);
+#endif
 }
 
 /*
@@ -639,7 +605,7 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 					int sync, int force_flush)
 {
 	static DEFINE_SPINLOCK(purge_lock);
-	struct llist_node *valist;
+	LIST_HEAD(valist);
 	struct vmap_area *va;
 	struct vmap_area *n_va;
 	int nr = 0;
@@ -658,14 +624,20 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 	if (sync)
 		purge_fragmented_blocks_allcpus();
 
-	valist = llist_del_all(&vmap_purge_list);
-	llist_for_each_entry(va, valist, purge_list) {
-		if (va->va_start < *start)
-			*start = va->va_start;
-		if (va->va_end > *end)
-			*end = va->va_end;
-		nr += (va->va_end - va->va_start) >> PAGE_SHIFT;
+	rcu_read_lock();
+	list_for_each_entry_rcu(va, &vmap_area_list, list) {
+		if (va->flags & VM_LAZY_FREE) {
+			if (va->va_start < *start)
+				*start = va->va_start;
+			if (va->va_end > *end)
+				*end = va->va_end;
+			nr += (va->va_end - va->va_start) >> PAGE_SHIFT;
+			list_add_tail(&va->purge_list, &valist);
+			va->flags |= VM_LAZY_FREEING;
+			va->flags &= ~VM_LAZY_FREE;
+		}
 	}
+	rcu_read_unlock();
 
 	if (nr)
 		atomic_sub(nr, &vmap_lazy_nr);
@@ -675,7 +647,7 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 
 	if (nr) {
 		spin_lock(&vmap_area_lock);
-		llist_for_each_entry_safe(va, n_va, valist, purge_list)
+		list_for_each_entry_safe(va, n_va, &valist, purge_list)
 			__free_vmap_area(va);
 		spin_unlock(&vmap_area_lock);
 	}
@@ -710,15 +682,9 @@ static void purge_vmap_area_lazy(void)
  */
 static void free_vmap_area_noflush(struct vmap_area *va)
 {
-	int nr_lazy;
-
-	nr_lazy = atomic_add_return((va->va_end - va->va_start) >> PAGE_SHIFT,
-				    &vmap_lazy_nr);
-
-	/* After this point, we may free va at any time */
-	llist_add(&va->purge_list, &vmap_purge_list);
-
-	if (unlikely(nr_lazy > lazy_max_pages()))
+	va->flags |= VM_LAZY_FREE;
+	atomic_add((va->va_end - va->va_start) >> PAGE_SHIFT, &vmap_lazy_nr);
+	if (unlikely(atomic_read(&vmap_lazy_nr) > lazy_max_pages()))
 		try_purge_vmap_area_lazy();
 }
 
@@ -741,7 +707,7 @@ static void free_unmap_vmap_area(struct vmap_area *va)
 	free_unmap_vmap_area_noflush(va);
 }
 
-struct vmap_area *find_vmap_area(unsigned long addr)
+static struct vmap_area *find_vmap_area(unsigned long addr)
 {
 	struct vmap_area *va;
 
@@ -1117,13 +1083,13 @@ EXPORT_SYMBOL_GPL(vm_unmap_aliases);
  */
 void vm_unmap_ram(const void *mem, unsigned int count)
 {
-	unsigned long size = (unsigned long)count << PAGE_SHIFT;
+	unsigned long size = count << PAGE_SHIFT;
 	unsigned long addr = (unsigned long)mem;
 
 	BUG_ON(!addr);
 	BUG_ON(addr < VMALLOC_START);
 	BUG_ON(addr > VMALLOC_END);
-	BUG_ON(!PAGE_ALIGNED(addr));
+	BUG_ON(addr & (PAGE_SIZE-1));
 
 	debug_check_no_locks_freed(mem, size);
 	vmap_debug_free_range(addr, addr+size);
@@ -1152,7 +1118,7 @@ EXPORT_SYMBOL(vm_unmap_ram);
  */
 void *vm_map_ram(struct page **pages, unsigned int count, int node, pgprot_t prot)
 {
-	unsigned long size = (unsigned long)count << PAGE_SHIFT;
+	unsigned long size = count << PAGE_SHIFT;
 	unsigned long addr;
 	void *mem;
 
@@ -1376,13 +1342,13 @@ static struct vm_struct *__get_vm_area_node(unsigned long size,
 	struct vm_struct *area;
 
 	BUG_ON(in_interrupt());
+	if (flags & VM_IOREMAP)
+		align = 1ul << clamp_t(int, fls_long(size),
+				       PAGE_SHIFT, IOREMAP_MAX_ORDER);
+
 	size = PAGE_ALIGN(size);
 	if (unlikely(!size))
 		return NULL;
-
-	if (flags & VM_IOREMAP)
-		align = 1ul << clamp_t(int, get_count_order_long(size),
-				       PAGE_SHIFT, IOREMAP_MAX_ORDER);
 
 	area = kzalloc_node(sizeof(*area), gfp_mask & GFP_RECLAIM_MASK, node);
 	if (unlikely(!area))
@@ -1501,7 +1467,7 @@ static void __vunmap(const void *addr, int deallocate_pages)
 			addr))
 		return;
 
-	area = find_vmap_area((unsigned long)addr)->vm;
+	area = remove_vm_area(addr);
 	if (unlikely(!area)) {
 		WARN(1, KERN_ERR "Trying to vfree() nonexistent vm area (%p)\n",
 				addr);
@@ -1511,7 +1477,6 @@ static void __vunmap(const void *addr, int deallocate_pages)
 	debug_check_no_locks_freed(addr, get_vm_area_size(area));
 	debug_check_no_obj_freed(addr, get_vm_area_size(area));
 
-	remove_vm_area(addr);
 	if (deallocate_pages) {
 		int i;
 
@@ -1519,10 +1484,13 @@ static void __vunmap(const void *addr, int deallocate_pages)
 			struct page *page = area->pages[i];
 
 			BUG_ON(!page);
-			__free_pages(page, 0);
+			__free_page(page);
 		}
 
-		kvfree(area->pages);
+		if (area->flags & VM_VPAGES)
+			vfree(area->pages);
+		else
+			kfree(area->pages);
 	}
 
 	kfree(area);
@@ -1594,15 +1562,14 @@ void *vmap(struct page **pages, unsigned int count,
 		unsigned long flags, pgprot_t prot)
 {
 	struct vm_struct *area;
-	unsigned long size;		/* In bytes */
 
 	might_sleep();
 
 	if (count > totalram_pages)
 		return NULL;
 
-	size = (unsigned long)count << PAGE_SHIFT;
-	area = get_vm_area_caller(size, flags, __builtin_return_address(0));
+	area = get_vm_area_caller((count << PAGE_SHIFT), flags,
+					__builtin_return_address(0));
 	if (!area)
 		return NULL;
 
@@ -1621,6 +1588,7 @@ static void *__vmalloc_node(unsigned long size, unsigned long align,
 static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 				 pgprot_t prot, int node)
 {
+	const int order = 0;
 	struct page **pages;
 	unsigned int nr_pages, array_size, i;
 	const gfp_t nested_gfp = (gfp_mask & GFP_RECLAIM_MASK) | __GFP_ZERO;
@@ -1634,6 +1602,7 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 	if (array_size > PAGE_SIZE) {
 		pages = __vmalloc_node(array_size, 1, nested_gfp|__GFP_HIGHMEM,
 				PAGE_KERNEL, node, area->caller);
+		area->flags |= VM_VPAGES;
 	} else {
 		pages = kmalloc_node(array_size, nested_gfp, node);
 	}
@@ -1655,7 +1624,7 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 		if (node == NUMA_NO_NODE)
 			page = alloc_page(alloc_mask);
 		else
-			page = alloc_pages_node(node, alloc_mask, 0);
+			page = alloc_pages_node(node, alloc_mask, order);
 
 		if (unlikely(!page)) {
 			/* Successfully allocated i pages, free them in __vunmap() */
@@ -1663,7 +1632,7 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 			goto fail;
 		}
 		area->pages[i] = page;
-		page_tracker_set_type(page, TRACK_VMALLOC, 0);
+		page_tracker_set_type(page, TRACK_VMALLOC, order);
 		if (gfpflags_allow_blocking(gfp_mask))
 			cond_resched();
 	}
@@ -1673,8 +1642,8 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 	return area->addr;
 
 fail:
-	warn_alloc(gfp_mask,
-			  "vmalloc: allocation failure, allocated %ld of %ld bytes",
+	warn_alloc_failed(gfp_mask, order,
+			  "vmalloc: allocation failure, allocated %ld of %ld bytes\n",
 			  (area->nr_pages*PAGE_SIZE), area->size);
 	vfree(area->addr);
 	return NULL;
@@ -1738,8 +1707,9 @@ void *__vmalloc_node_range(unsigned long size, unsigned long align,
 	return addr;
 
 fail:
-	warn_alloc(gfp_mask,
-			  "vmalloc: allocation failure: %lu bytes", real_size);
+	warn_alloc_failed(gfp_mask, 0,
+			  "vmalloc: allocation failure: %lu bytes\n",
+			  real_size);
 	return NULL;
 }
 
@@ -2607,10 +2577,10 @@ static void *s_start(struct seq_file *m, loff_t *pos)
 	struct vmap_area *va;
 
 	spin_lock(&vmap_area_lock);
-	va = list_first_entry(&vmap_area_list, typeof(*va), list);
+	va = list_entry((&vmap_area_list)->next, typeof(*va), list);
 	while (n > 0 && &va->list != &vmap_area_list) {
 		n--;
-		va = list_next_entry(va, list);
+		va = list_entry(va->list.next, typeof(*va), list);
 	}
 	if (!n && &va->list != &vmap_area_list)
 		return va;
@@ -2624,7 +2594,7 @@ static void *s_next(struct seq_file *m, void *p, loff_t *pos)
 	struct vmap_area *va = p, *next;
 
 	++*pos;
-	next = list_next_entry(va, list);
+	next = list_entry(va->list.next, typeof(*va), list);
 	if (&next->list != &vmap_area_list)
 		return next;
 
@@ -2699,7 +2669,7 @@ static int s_show(struct seq_file *m, void *p)
 	if (v->flags & VM_USERMAP)
 		seq_puts(m, " user");
 
-	if (is_vmalloc_addr(v->pages))
+	if (v->flags & VM_VPAGES)
 		seq_puts(m, " vpages");
 
 #ifdef CONFIG_DEBUG_VMALLOC

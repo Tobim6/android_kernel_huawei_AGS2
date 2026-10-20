@@ -255,7 +255,6 @@ return:
 void nvt_hybrid_change_mode(uint8_t mode)
 {
 	uint8_t buf[8] = {0};
-	int32_t ret;
 
 	//---dummy read to resume TP before writing command---
 	nvt_hybrid_ts_i2c_dummy_read(nvt_hybrid_ts->client, NVT_HYBRID_I2C_FW_Address);
@@ -274,10 +273,7 @@ void nvt_hybrid_change_mode(uint8_t mode)
 	if (mode == NVT_HYBRID_NORMAL_MODE) {
 		buf[0] = 0x51;
 		buf[1] = 0xBB;
-		ret = nvt_hybrid_ts_i2c_write(nvt_hybrid_ts->client,
-			NVT_HYBRID_I2C_FW_Address, buf, 2);
-		if (ret)
-			TS_LOG_ERR("%s: write i2c error\n", __func__);
+		nvt_hybrid_ts_i2c_write(nvt_hybrid_ts->client, NVT_HYBRID_I2C_FW_Address, buf, 2);
 	}
 	TS_LOG_INFO("%s: mode = 0x%02X\n", __func__, mode);
 }
@@ -295,7 +291,6 @@ int8_t nvt_hybrid_get_fw_info(void)
 	uint8_t buf[64] = {0};
 	uint8_t ret = 0;
 	uint32_t retry_count = 0;
-	int32_t retval;
 
 info_retry:
 	//---dummy read to resume TP before writing command---
@@ -305,10 +300,7 @@ info_retry:
 	buf[0] = 0xFF;
 	buf[1] = 0x01;
 	buf[2] = 0x47;
-	retval = nvt_hybrid_ts_i2c_write(nvt_hybrid_ts->client,
-		NVT_HYBRID_I2C_FW_Address, buf, 3);
-	if (retval)
-		TS_LOG_ERR("%s: write i2c error\n", __func__);
+	nvt_hybrid_ts_i2c_write(nvt_hybrid_ts->client, NVT_HYBRID_I2C_FW_Address, buf, 3);
 
 	//---read fw info---
 	buf[0] = 0x78;
@@ -348,7 +340,6 @@ return:
 *******************************************************/
 uint8_t nvt_hybrid_get_fw_pipe(void)
 {
-	int32_t ret;
 	uint8_t buf[8]= {0};
 
 	//---dummy read to resume TP before writing command---
@@ -358,10 +349,8 @@ uint8_t nvt_hybrid_get_fw_pipe(void)
 	buf[0] = 0xFF;
 	buf[1] = 0x01;
 	buf[2] = 0x47;
-	ret = nvt_hybrid_ts_i2c_write(nvt_hybrid_ts->client,
-		NVT_HYBRID_I2C_FW_Address, buf, 3);
-	if (ret)
-		TS_LOG_ERR("%s: i2c write error\n", __func__);
+	nvt_hybrid_ts_i2c_write(nvt_hybrid_ts->client, NVT_HYBRID_I2C_FW_Address, buf, 3);
+
 	//---read fw status---
 	buf[0] = 0x51;
 	buf[1] = 0x00;
@@ -381,7 +370,6 @@ return:
 *******************************************************/
 void nvt_hybrid_read_mdata(uint32_t xdata_addr, uint32_t xdata_btn_addr)
 {
-	int32_t ret;
 	int32_t i = 0;
 	int32_t j = 0;
 	int32_t k = 0;
@@ -472,10 +460,7 @@ void nvt_hybrid_read_mdata(uint32_t xdata_addr, uint32_t xdata_btn_addr)
 	buf[0] = 0xFF;
 	buf[1] = 0x01;
 	buf[2] = 0x47;
-	ret = nvt_hybrid_ts_i2c_write(nvt_hybrid_ts->client,
-		NVT_HYBRID_I2C_FW_Address, buf, 3);
-	if (ret)
-		TS_LOG_ERR("%s: i2c write error\n", __func__);
+	nvt_hybrid_ts_i2c_write(nvt_hybrid_ts->client, NVT_HYBRID_I2C_FW_Address, buf, 3);
 }
 
 /*******************************************************

@@ -102,10 +102,11 @@ struct mcast_group {
 	struct list_head	pending_list;
 	struct list_head	active_list;
 	struct mcast_member	*last_join;
-	int			members[NUM_JOIN_MEMBERSHIP_TYPES];
+	int			members[3];
 	atomic_t		refcount;
 	enum mcast_group_state	state;
 	struct ib_sa_query	*query;
+	int			query_id;
 	u16			pkey_index;
 	u8			leave_state;
 	int			retries;
@@ -219,9 +220,8 @@ static void queue_join(struct mcast_member *member)
 }
 
 /*
- * A multicast group has four types of members: full member, non member,
- * sendonly non member and sendonly full member.
- * We need to keep track of the number of members of each
+ * A multicast group has three types of members: full member, non member, and
+ * send only member.  We need to keep track of the number of members of each
  * type based on their join state.  Adjust the number of members the belong to
  * the specified join states.
  */
@@ -229,7 +229,7 @@ static void adjust_membership(struct mcast_group *group, u8 join_state, int inc)
 {
 	int i;
 
-	for (i = 0; i < NUM_JOIN_MEMBERSHIP_TYPES; i++, join_state >>= 1)
+	for (i = 0; i < 3; i++, join_state >>= 1)
 		if (join_state & 0x1)
 			group->members[i] += inc;
 }
@@ -245,7 +245,7 @@ static u8 get_leave_state(struct mcast_group *group)
 	u8 leave_state = 0;
 	int i;
 
-	for (i = 0; i < NUM_JOIN_MEMBERSHIP_TYPES; i++)
+	for (i = 0; i < 3; i++)
 		if (!group->members[i])
 			leave_state |= (0x1 << i);
 
@@ -339,7 +339,11 @@ static int send_join(struct mcast_group *group, struct mcast_member *member)
 				       member->multicast.comp_mask,
 				       3000, GFP_KERNEL, join_handler, group,
 				       &group->query);
-	return (ret > 0) ? 0 : ret;
+	if (ret >= 0) {
+		group->query_id = ret;
+		ret = 0;
+	}
+	return ret;
 }
 
 static int send_leave(struct mcast_group *group, u8 leave_state)
@@ -359,7 +363,11 @@ static int send_leave(struct mcast_group *group, u8 leave_state)
 				       IB_SA_MCMEMBER_REC_JOIN_STATE,
 				       3000, GFP_KERNEL, leave_handler,
 				       group, &group->query);
-	return (ret > 0) ? 0 : ret;
+	if (ret >= 0) {
+		group->query_id = ret;
+		ret = 0;
+	}
+	return ret;
 }
 
 static void join_group(struct mcast_group *group, struct mcast_member *member,
@@ -518,11 +526,8 @@ static void join_handler(int status, struct ib_sa_mcmember_rec *rec,
 		process_join_error(group, status);
 	else {
 		int mgids_changed, is_mgid0;
-
-		if (ib_find_pkey(group->port->dev->device,
-				 group->port->port_num, be16_to_cpu(rec->pkey),
-				 &pkey_index))
-			pkey_index = MCAST_INVALID_PKEY_INDEX;
+		ib_find_pkey(group->port->dev->device, group->port->port_num,
+			     be16_to_cpu(rec->pkey), &pkey_index);
 
 		spin_lock_irq(&group->port->lock);
 		if (group->state == MCAST_BUSY &&
@@ -718,27 +723,14 @@ EXPORT_SYMBOL(ib_sa_get_mcmember_rec);
 
 int ib_init_ah_from_mcmember(struct ib_device *device, u8 port_num,
 			     struct ib_sa_mcmember_rec *rec,
-			     struct net_device *ndev,
-			     enum ib_gid_type gid_type,
 			     struct ib_ah_attr *ah_attr)
 {
 	int ret;
 	u16 gid_index;
 	u8 p;
 
-	if (rdma_protocol_roce(device, port_num)) {
-		ret = ib_find_cached_gid_by_port(device, &rec->port_gid,
-						 gid_type, port_num,
-						 ndev,
-						 &gid_index);
-	} else if (rdma_protocol_ib(device, port_num)) {
-		ret = ib_find_cached_gid(device, &rec->port_gid,
-					 IB_GID_TYPE_IB, NULL, &p,
-					 &gid_index);
-	} else {
-		ret = -EINVAL;
-	}
-
+	ret = ib_find_cached_gid(device, &rec->port_gid,
+				 NULL, &p, &gid_index);
 	if (ret)
 		return ret;
 
@@ -876,7 +868,7 @@ int mcast_init(void)
 {
 	int ret;
 
-	mcast_wq = alloc_ordered_workqueue("ib_mcast", WQ_MEM_RECLAIM);
+	mcast_wq = create_singlethread_workqueue("ib_mcast");
 	if (!mcast_wq)
 		return -ENOMEM;
 

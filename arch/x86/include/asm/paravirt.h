@@ -13,7 +13,17 @@
 #include <linux/bug.h>
 #include <linux/types.h>
 #include <linux/cpumask.h>
-#include <asm/frame.h>
+
+static inline int paravirt_enabled(void)
+{
+	return pv_info.paravirt_enabled;
+}
+
+static inline int paravirt_has_feature(unsigned int feature)
+{
+	WARN_ON_ONCE(!pv_info.paravirt_enabled);
+	return (pv_info.features & feature);
+}
 
 static inline void load_sp0(struct tss_struct *tss,
 			     struct thread_struct *thread)
@@ -80,6 +90,10 @@ static inline unsigned long __read_cr4(void)
 {
 	return PVOP_CALL0(unsigned long, pv_cpu_ops.read_cr4);
 }
+static inline unsigned long __read_cr4_safe(void)
+{
+	return PVOP_CALL0(unsigned long, pv_cpu_ops.read_cr4_safe);
+}
 
 static inline void __write_cr4(unsigned long x)
 {
@@ -115,31 +129,21 @@ static inline void wbinvd(void)
 
 #define get_kernel_rpl()  (pv_info.kernel_rpl)
 
-static inline u64 paravirt_read_msr(unsigned msr)
+static inline u64 paravirt_read_msr(unsigned msr, int *err)
 {
-	return PVOP_CALL1(u64, pv_cpu_ops.read_msr, msr);
+	return PVOP_CALL2(u64, pv_cpu_ops.read_msr, msr, err);
 }
 
-static inline void paravirt_write_msr(unsigned msr,
-				      unsigned low, unsigned high)
+static inline int paravirt_write_msr(unsigned msr, unsigned low, unsigned high)
 {
-	return PVOP_VCALL3(pv_cpu_ops.write_msr, msr, low, high);
+	return PVOP_CALL3(int, pv_cpu_ops.write_msr, msr, low, high);
 }
 
-static inline u64 paravirt_read_msr_safe(unsigned msr, int *err)
-{
-	return PVOP_CALL2(u64, pv_cpu_ops.read_msr_safe, msr, err);
-}
-
-static inline int paravirt_write_msr_safe(unsigned msr,
-					  unsigned low, unsigned high)
-{
-	return PVOP_CALL3(int, pv_cpu_ops.write_msr_safe, msr, low, high);
-}
-
+/* These should all do BUG_ON(_err), but our headers are too tangled. */
 #define rdmsr(msr, val1, val2)			\
 do {						\
-	u64 _l = paravirt_read_msr(msr);	\
+	int _err;				\
+	u64 _l = paravirt_read_msr(msr, &_err);	\
 	val1 = (u32)_l;				\
 	val2 = _l >> 32;			\
 } while (0)
@@ -151,7 +155,8 @@ do {						\
 
 #define rdmsrl(msr, val)			\
 do {						\
-	val = paravirt_read_msr(msr);		\
+	int _err;				\
+	val = paravirt_read_msr(msr, &_err);	\
 } while (0)
 
 static inline void wrmsrl(unsigned msr, u64 val)
@@ -159,23 +164,23 @@ static inline void wrmsrl(unsigned msr, u64 val)
 	wrmsr(msr, (u32)val, (u32)(val>>32));
 }
 
-#define wrmsr_safe(msr, a, b)	paravirt_write_msr_safe(msr, a, b)
+#define wrmsr_safe(msr, a, b)	paravirt_write_msr(msr, a, b)
 
 /* rdmsr with exception handling */
-#define rdmsr_safe(msr, a, b)				\
-({							\
-	int _err;					\
-	u64 _l = paravirt_read_msr_safe(msr, &_err);	\
-	(*a) = (u32)_l;					\
-	(*b) = _l >> 32;				\
-	_err;						\
+#define rdmsr_safe(msr, a, b)			\
+({						\
+	int _err;				\
+	u64 _l = paravirt_read_msr(msr, &_err);	\
+	(*a) = (u32)_l;				\
+	(*b) = _l >> 32;			\
+	_err;					\
 })
 
 static inline int rdmsrl_safe(unsigned msr, unsigned long long *p)
 {
 	int err;
 
-	*p = paravirt_read_msr_safe(msr, &err);
+	*p = paravirt_read_msr(msr, &err);
 	return err;
 }
 
@@ -286,6 +291,15 @@ static inline void slow_down_io(void)
 #endif
 }
 
+#ifdef CONFIG_SMP
+static inline void startup_ipi_hook(int phys_apicid, unsigned long start_eip,
+				    unsigned long start_esp)
+{
+	PVOP_VCALL3(pv_apic_ops.startup_ipi_hook,
+		    phys_apicid, start_eip, start_esp);
+}
+#endif
+
 static inline void paravirt_activate_mm(struct mm_struct *prev,
 					struct mm_struct *next)
 {
@@ -366,6 +380,23 @@ static inline void pte_update(struct mm_struct *mm, unsigned long addr,
 			      pte_t *ptep)
 {
 	PVOP_VCALL3(pv_mmu_ops.pte_update, mm, addr, ptep);
+}
+static inline void pmd_update(struct mm_struct *mm, unsigned long addr,
+			      pmd_t *pmdp)
+{
+	PVOP_VCALL3(pv_mmu_ops.pmd_update, mm, addr, pmdp);
+}
+
+static inline void pte_update_defer(struct mm_struct *mm, unsigned long addr,
+				    pte_t *ptep)
+{
+	PVOP_VCALL3(pv_mmu_ops.pte_update_defer, mm, addr, ptep);
+}
+
+static inline void pmd_update_defer(struct mm_struct *mm, unsigned long addr,
+				    pmd_t *pmdp)
+{
+	PVOP_VCALL3(pv_mmu_ops.pmd_update_defer, mm, addr, pmdp);
 }
 
 static inline pte_t __pte(pteval_t val)
@@ -657,6 +688,8 @@ static inline void __set_fixmap(unsigned /* enum fixed_addresses */ idx,
 
 #if defined(CONFIG_SMP) && defined(CONFIG_PARAVIRT_SPINLOCKS)
 
+#ifdef CONFIG_QUEUED_SPINLOCKS
+
 static __always_inline void pv_queued_spin_lock_slowpath(struct qspinlock *lock,
 							u32 val)
 {
@@ -677,6 +710,22 @@ static __always_inline void pv_kick(int cpu)
 {
 	PVOP_VCALL1(pv_lock_ops.kick, cpu);
 }
+
+#else /* !CONFIG_QUEUED_SPINLOCKS */
+
+static __always_inline void __ticket_lock_spinning(struct arch_spinlock *lock,
+							__ticket_t ticket)
+{
+	PVOP_VCALLEE2(pv_lock_ops.lock_spinning, lock, ticket);
+}
+
+static __always_inline void __ticket_unlock_kick(struct arch_spinlock *lock,
+							__ticket_t ticket)
+{
+	PVOP_VCALL2(pv_lock_ops.unlock_kick, lock, ticket);
+}
+
+#endif /* CONFIG_QUEUED_SPINLOCKS */
 
 #endif /* SMP && PARAVIRT_SPINLOCKS */
 
@@ -733,19 +782,15 @@ static __always_inline void pv_kick(int cpu)
  * call. The return value in rax/eax will not be saved, even for void
  * functions.
  */
-#define PV_THUNK_NAME(func) "__raw_callee_save_" #func
 #define PV_CALLEE_SAVE_REGS_THUNK(func)					\
 	extern typeof(func) __raw_callee_save_##func;			\
 									\
 	asm(".pushsection .text;"					\
-	    ".globl " PV_THUNK_NAME(func) ";"				\
-	    ".type " PV_THUNK_NAME(func) ", @function;"			\
-	    PV_THUNK_NAME(func) ":"					\
-	    FRAME_BEGIN							\
+	    ".globl __raw_callee_save_" #func " ; "			\
+	    "__raw_callee_save_" #func ": "				\
 	    PV_SAVE_ALL_CALLER_REGS					\
 	    "call " #func ";"						\
 	    PV_RESTORE_ALL_CALLER_REGS					\
-	    FRAME_END							\
 	    "ret;"							\
 	    ".popsection")
 
@@ -883,11 +928,23 @@ extern void default_banner(void);
 		  call PARA_INDIRECT(pv_irq_ops+PV_IRQ_irq_enable);	\
 		  PV_RESTORE_REGS(clobbers | CLBR_CALLEE_SAVE);)
 
+#define USERGS_SYSRET32							\
+	PARA_SITE(PARA_PATCH(pv_cpu_ops, PV_CPU_usergs_sysret32),	\
+		  CLBR_NONE,						\
+		  jmp PARA_INDIRECT(pv_cpu_ops+PV_CPU_usergs_sysret32))
+
 #ifdef CONFIG_X86_32
 #define GET_CR0_INTO_EAX				\
 	push %ecx; push %edx;				\
 	call PARA_INDIRECT(pv_cpu_ops+PV_CPU_read_cr0);	\
 	pop %edx; pop %ecx
+
+#define ENABLE_INTERRUPTS_SYSEXIT					\
+	PARA_SITE(PARA_PATCH(pv_cpu_ops, PV_CPU_irq_enable_sysexit),	\
+		  CLBR_NONE,						\
+		  jmp PARA_INDIRECT(pv_cpu_ops+PV_CPU_irq_enable_sysexit))
+
+
 #else	/* !CONFIG_X86_32 */
 
 /*

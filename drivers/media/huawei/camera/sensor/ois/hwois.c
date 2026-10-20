@@ -36,10 +36,8 @@
 #include <media/v4l2-subdev.h>
 #include "hwois.h"
 
-//lint -save -e429 -e563
+//lint -save -e429
 #define SD2Ois(sd) container_of(sd, hw_ois_t, subdev)
-extern int strncpy_s(char *strDest, size_t destMax, const char *strSrc, size_t count);
-extern int snprintf_s(char* strDest, size_t destMax, size_t count, const char* format, ...);
 
 int hw_ois_get_dt_data(struct platform_device *pdev, ois_t *ois)
 {
@@ -105,11 +103,8 @@ int hw_ois_config(hw_ois_t *hw_ois, void *arg)
 		rc = hw_ois->intf->vtbl->ois_i2c_write(hw_ois->intf, arg);
 		break;
 	case CFG_OIS_GET_OIS_NAME:
-		rc = strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name) - 1, hw_ois->ois_info->ois_name,
+		strncpy(cdata->cfg.name, hw_ois->ois_info->ois_name,
 			sizeof(cdata->cfg.name) - 1);
-		if (rc != 0) {
-			cam_err("%s copy name fail %d\n", __func__, __LINE__);
-		}
 		break;
 	case CFG_OIS_GET_SUPPORT_FLAG:
 		cdata->cfg.ois_sup = hw_ois->ois_info->ois_support;
@@ -213,14 +208,17 @@ int hw_ois_register(struct platform_device *pdev,
 
 	v4l2_subdev_init(subdev, &s_subdev_ops_hw_ois);
 	subdev->internal_ops = &s_subdev_internal_ops_hw_ois;
-	snprintf_s(subdev->name, sizeof(subdev->name),sizeof(subdev->name)-1,
+	snprintf(subdev->name, sizeof(subdev->name),
 			"%s", hw_ois_info->ois_name);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	v4l2_set_subdevdata(subdev, pdev);
 
-	init_subdev_media_entity(subdev,HWCAM_SUBDEV_OIS);
-	hwcam_cfgdev_register_subdev(subdev,HWCAM_SUBDEV_OIS);
-    intf->subdev = subdev;
+	media_entity_init(&subdev->entity, 0, NULL, 0);
+	subdev->entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
+	subdev->entity.group_id = HWCAM_SUBDEV_OIS;
+	subdev->entity.name = subdev->name;
+
+	hwcam_cfgdev_register_subdev(subdev);
 	hw_ois->intf = intf;
 	hw_ois->ois_info = hw_ois_info;
 	hw_ois->pdev = pdev;
@@ -229,15 +227,18 @@ register_fail:
 	return rc;
 }
 
-void hw_ois_unregister(struct v4l2_subdev* subdev)
+#define Intf2Hwois(si) container_of(si, hw_ois_t, intf)
+void hw_ois_unregister(hw_ois_intf_t *intf)
 {
-    hw_ois_t* hw_ois = SD2Ois(subdev);
+	struct v4l2_subdev* subdev = NULL;
+	hw_ois_t* hw_ois = Intf2Hwois(intf);
 
-    media_entity_cleanup(&subdev->entity);
-    hwcam_cfgdev_unregister_subdev(subdev);
+	subdev = &hw_ois->subdev;
+	media_entity_cleanup(&subdev->entity);
+	hwcam_cfgdev_unregister_subdev(subdev);
 
-    kzfree(hw_ois->ois_info);
-    kzfree(hw_ois);
+	kzfree(hw_ois->ois_info);
+	kzfree(hw_ois);
 }
 
 //lint -restore

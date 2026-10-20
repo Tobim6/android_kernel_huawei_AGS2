@@ -15,12 +15,9 @@
 #include <linux/types.h>                                                        // Kernel datatypes
 #include <linux/errno.h>                                                        // EINVAL, ERANGE, etc
 #include <linux/of_device.h>                                                    // Device tree functionality
-#ifdef CONFIG_USE_CAMERA3_ARCH
 #include <media/huawei/hw_extern_pmic.h>
-#endif
 #include <linux/workqueue.h>
 #include <linux/delay.h>
-#include <linux/of.h>
 
 /* Driver-specific includes */
 #include "fusb30x_global.h"                                                     // Driver-specific structures/types
@@ -28,14 +25,21 @@
 
 //#ifdef FSC_DEBUG
 #include "../core/core.h"                                                       // GetDeviceTypeCStatus
-#include "../core/TypeC.h"
 //#endif // FSC_DEBUG
 
 #include "fusb30x_driver.h"
 #include <huawei_platform/usb/hw_pd_dev.h>
 
+#ifdef CONFIG_CC_ANTI_CORROSION
+#include <huawei_platform/usb/hw_cc_anti_corrosion.h>
+#endif
 #ifdef CONFIG_POGO_PIN
 #include <huawei_platform/usb/huawei_pogopin.h>
+#endif
+
+#ifdef FSC_HAVE_CUSTOM_SRC2
+extern FSC_BOOL                huawei_emarker_detected_;
+extern int                     support_smart_holder;
 #endif
 /******************************************************************************
 * Driver functions
@@ -45,18 +49,19 @@ static int pd_dpm_wake_lock_call(struct notifier_block *fsc_nb, unsigned long ev
 {
 	struct fusb30x_chip *chip = container_of(fsc_nb, struct fusb30x_chip, fsc_nb);
 
-	switch (event) {
-	case PD_WAKE_LOCK:
-		FSC_PRINT("FUSB %s - wake lock node called\n", __func__);
-		wake_lock(&chip->fusb302_wakelock);
-		break;
-	case PD_WAKE_UNLOCK:
-		FSC_PRINT("FUSB %s - wake unlock node called\n", __func__);
-		wake_unlock(&chip->fusb302_wakelock);
-		break;
-	default:
-		FSC_PRINT("FUSB %s - unknown event: %ld\n", __func__, event);
-		break;
+	switch(event)
+	{
+		case PD_WAKE_LOCK:
+			FSC_PRINT("FUSB %s - wake lock node called\n", __func__);
+			wake_lock(&chip->fusb302_wakelock);
+			break;
+		case PD_WAKE_UNLOCK:
+			FSC_PRINT("FUSB %s - wake unlock node called\n", __func__);
+			wake_unlock(&chip->fusb302_wakelock);
+			break;
+		default:
+			FSC_PRINT("FUSB %s - unknown event: %d\n", __func__, event);
+			break;
 	}
 
 	return NOTIFY_OK;
@@ -94,6 +99,7 @@ static FSC_BOOL fusb_write_mask(FSC_U8 reg, FSC_U8 MASK, FSC_U8 SHIFT, FSC_U8 va
 
 static int is_cable_for_direct_charge(void)
 {
+	FSC_U8 val;
 	FSC_U8 cc2;
 	FSC_U8 cc1;
 	FSC_BOOL ret;
@@ -120,6 +126,7 @@ static int is_cable_for_direct_charge(void)
 	return 0;
 }
 
+#ifdef CONFIG_CC_ANTI_CORROSION
 void fusb30x_set_cc_mode(int mode)
 {
        if (!mode){
@@ -134,6 +141,21 @@ int fusb30x_get_cc_mode(void)
 {
        return 0;
 }
+struct cc_corrosion_ops fusb30x_corrosion_ops = {
+    .set_cc_mode = fusb30x_set_cc_mode,
+    .get_cc_mode = fusb30x_get_cc_mode,
+};
+#endif
+
+#ifdef FSC_HAVE_CUSTOM_SRC2
+int fusb302_is_cust_src2_cable(void)
+{
+	return huawei_emarker_detected_;
+}
+struct cable_vdo_ops fusb302_cable_vdo_ops = {
+	.is_cust_src2_cable = fusb302_is_cust_src2_cable,
+};
+#endif
 
 #ifdef CONFIG_POGO_PIN
 static int fusb30x_typec_detect_disable(FSC_BOOL disable)
@@ -146,20 +168,6 @@ struct cc_detect_ops fusb30x_cc_detect_ops = {
 };
 #endif
 
-#ifdef FSC_HAVE_CUSTOM_SRC2
-int fusb302_is_cust_src2_cable(void)
-{
-	if (pd_dpm_smart_holder_without_emark()) {
-		pr_info("%s:this is smart holder without emark\n", __func__);
-		return 1;
-	}
-	return get_emarker_detect_status();
-}
-struct cable_vdo_ops fusb302_cable_vdo_ops = {
-	.is_cust_src2_cable = fusb302_is_cust_src2_cable,
-};
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
-
 static struct cc_check_ops cc_check_ops = {
 	.is_cable_for_direct_charge = is_cable_for_direct_charge,
 };
@@ -170,17 +178,9 @@ static int fusb30x_probe (struct i2c_client* client,
     int ret = 0;
     struct fusb30x_chip* chip;
     struct i2c_adapter* adapter;
-    int need_not_config_extra_pmic=0;
-    if (of_property_read_u32(of_find_compatible_node(NULL,NULL, "huawei,pd_dpm"),"need_not_config_extra_pmic", &need_not_config_extra_pmic)) {
-	pr_err("get need_not_config_extra_pmic fail!\n");
-    }
-    pr_info("need_not_config_extra_pmic = %d!\n", need_not_config_extra_pmic);
-    if(!need_not_config_extra_pmic){
-#ifdef CONFIG_USE_CAMERA3_ARCH
-        hw_extern_pmic_config(FSC_PMIC_LDO_3,FUSB_VIN_3V3, 1);
-#endif
-        pr_info("%s:PD PMIC ENABLE IS CALLED\n", __func__);
-    }
+
+    hw_extern_pmic_config(FSC_PMIC_LDO_3,FUSB_VIN_3V3, 1);
+    pr_info("%s:PD PMIC ENABLE IS CALLED\n", __func__);
 
     if (!client)
     {
@@ -261,13 +261,16 @@ static int fusb30x_probe (struct i2c_client* client,
     fusb_InitializeTimer();
     pr_debug("FUSB  %s - Timers initialized!\n", __func__);
 
+#ifdef CONFIG_CC_ANTI_CORROSION
+    cc_corrosion_register_ops(&fusb30x_corrosion_ops);
+#endif
 #ifdef CONFIG_POGO_PIN
 	cc_detect_register_ops(&fusb30x_cc_detect_ops);
 #endif
 #ifdef FSC_HAVE_CUSTOM_SRC2
-	if (pd_dpm_get_is_support_smart_holder())
+	if (support_smart_holder)
 		pd_dpm_cable_vdo_ops_register(&fusb302_cable_vdo_ops);
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
+#endif
 #ifdef FSC_DEBUG
     /* Initialize debug sysfs file accessors */
     fusb_Sysfs_Init();
@@ -335,44 +338,6 @@ static int fusb30x_remove(struct i2c_client* client)
     fusb_GPIO_Cleanup();
     pr_debug("FUSB  %s - FUSB30x device removed from driver...\n", __func__);
     return 0;
-}
-
-static void fusb30x_shutdown(struct i2c_client *client)
-{
-	FSC_U8 reset = 0x01; /* regaddr is 0x01 */
-	FSC_U8 data = 0x40; /* data is 0x40 */
-	FSC_U8 length = 0x01; /* length is 0x01 */
-	FSC_BOOL ret = 0;
-	struct fusb30x_chip *chip = fusb30x_GetChip();
-
-	if (!chip) {
-		pr_err("FUSB shutdown - Chip structure is NULL!\n");
-		return;
-	}
-
-	core_enable_typec(false);
-	ret = fusb_I2C_WriteData(regControl3, length, &data);
-	if (ret != 0)
-		pr_err("send hardreset failed, ret = %d\n", ret);
-
-	/* Enable the pull-up on CC1 */
-	Registers.Switches.PU_EN1 = 1;
-	/* Disable the pull-down on CC1 */
-	Registers.Switches.PDWN1 = 0;
-	/* Enable the pull-up on CC2 */
-	Registers.Switches.PU_EN2 = 1;
-	/* Disable the pull-down on CC2 */
-	Registers.Switches.PDWN2 = 0;
-	/* Commit the switch state */
-	DeviceWrite(regSwitches0, 1, &Registers.Switches.byte[0]);
-	fusb_GPIO_Cleanup();
-	/* keep the cc open status 20ms */
-	mdelay(20);
-	ret = fusb_I2C_WriteData(regReset, length, &reset);
-	if (ret != 0)
-		pr_err("device Reset failed, ret = %d\n", ret);
-
-	pr_debug("FUSB shutdown - FUSB30x device shutdown!\n");
 }
 
 /*******************************************************************************

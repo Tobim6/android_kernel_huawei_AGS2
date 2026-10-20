@@ -37,19 +37,18 @@
 #include <huawei_platform/devdetect/hw_dev_dec.h>
 #endif
 #include <linux/raid/pq.h>
-#ifdef CONFIG_HISI_BCI_BATTERY
+#if defined CONFIG_HUAWEI_DSM
+#include <dsm/dsm_pub.h>
+#endif
 #include <linux/power/hisi/hisi_bci_battery.h>
-#endif
 #include <huawei_platform/power/huawei_charger_sh.h>
-#ifdef CONFIG_HISI_COUL
 #include <linux/power/hisi/coul/hisi_coul_drv.h>
-#endif
 #include <huawei_platform/power/charging_core_sh.h>
 #include <linux/workqueue.h>
 #include <inputhub_route.h>
+#include <protocol.h>
 #include <inputhub_bridge.h>
 #include <sensor_info.h>
-#include <huawei_platform/power/power_common_sh.h>
 
 struct charge_sysfs_lock sysfs_lock;
 struct mutex charge_usb_notify_lock;
@@ -66,12 +65,11 @@ struct hisi_charger_bootloader_info {
 	char reg[REG_NUM_SH];
 };
 
-/* TRUE: disable charger, FALSE: enable charger */
-static bool charger_disable_config[__MAX_DISABLE_CHAGER] = {0};
 static char reg_value[CHARGELOG_SIZE];
 static char reg_head[CHARGELOG_SIZE];
 static char bootloader_info[CHARGELOG_SIZE];
 static int ico_enable;
+static int usb_continuous_notify_times;
 static struct hisi_charger_bootloader_info hisi_charger_info = { 0 };
 static struct wake_lock charge_lock;
 static struct wake_lock wlock;
@@ -79,16 +77,15 @@ static enum charging_stat_t charging_status = CHARGING_CLOSE;
 
 extern struct CONFIG_ON_DDR *pConfigOnDDr;
 extern int g_iom3_state;
+extern atomic_t iom3_rec_state;
+extern sys_status_t iom3_sr_status;
 extern struct charge_core_info_sh *g_core_info_sh;
 extern struct charger_platform_data charger_dts_data;
 extern struct fcp_adapter_device_ops sh_fcp_hi6523_ops;
 extern struct fcp_adapter_device_ops sh_fcp_fsa9688_ops;
 
-int notify_sensorhub(uint8_t stype, uint8_t rw);
 static int charge_send_notify_to_sensorhub(struct charge_device_info_sh *di);
 static void fcp_reg_dump(char* pstr);
-static void charge_wake_lock(void);
-void charge_wake_unlock(void);
 extern char *get_charger_info_p(void);
 extern int coul_get_battery_capacity(void);
 extern int coul_get_battery_fcc (void);
@@ -100,107 +97,6 @@ extern int coul_get_battery_cc (void);
 extern int coul_get_battery_delta_rc (void);
 extern int coul_get_battery_ocv (void);
 extern int coul_get_battery_resistance (void);
-extern bool is_hisi_mbox_suspend(void);
-
-static int get_real_charger_flag(void)
-{
-    int i;
-    bool charger_flag = FALSE;
-
-    for (i = 0; i < __MAX_DISABLE_CHAGER; i++) {
-        charger_flag |= charger_disable_config[i];
-    }
-
-    return !charger_flag;
-}
-
-int set_charger_disable_flags_sh(unsigned int val,
-    enum disable_charger_type type)
-{
-    enum charge_status_event events = VCHRG_POWER_NONE_EVENT;
-
-    if (pConfigOnDDr == NULL) {
-        hwlog_err("set_charge_status_flags_sh pConfigOnDDr is NULL\n");
-        return -1;
-    }
-
-    if (type < 0 || type >= __MAX_DISABLE_CHAGER) {
-        hwlog_err("Set charge status to %d with wrong type(%d) in"
-            " set_charge_status_flags_sh\n", val, type);
-        return -EINVAL;
-    }
-
-    if (charging_status == CHARGING_OPEN) {
-        charger_disable_config[type] = val;
-        pConfigOnDDr->g_di.sysfs_data.charge_enable =
-            get_real_charger_flag();
-        pConfigOnDDr->g_di.sysfs_data.charge_limit = TRUE;
-        events = pConfigOnDDr->g_di.sysfs_data.charge_enable ?
-            VCHRG_START_CHARGING_EVENT : VCHRG_NOT_CHARGING_EVENT;
-        hisi_coul_charger_event_rcv(events);
-        notify_sensorhub(CHARGE_SYSFS_ENABLE_CHARGER, 0);
-        hwlog_info("set charge status = %d with type(%d) in"
-            " set_charge_status_flags_sh\n",
-            pConfigOnDDr->g_di.sysfs_data.charge_enable, type);
-    }
-
-    return 0;
-}
-
-static int dcp_sh_set_enable_charger(unsigned int val)
-{
-	enum charge_status_event events = VCHRG_POWER_NONE_EVENT;
-
-	if (NULL == pConfigOnDDr) {
-		hwlog_err("%s pConfigOnDDr is NULL\n", __func__);
-		return -1;
-	}
-
-	if ((val < 0) || (val > 1)) {
-		return -1;
-	}
-	wake_lock_timeout(&wlock, TIMEOUT_SEC * HZ);
-	charger_disable_config[CHARGER_SYS_NODE] = !val;
-	pConfigOnDDr->g_di.sysfs_data.charge_enable = get_real_charger_flag();
-	pConfigOnDDr->g_di.sysfs_data.charge_limit = TRUE;
-	/*why should send events in this command?
-		   because it will get the /sys/class/power_supply/Battery/status immediately
-		   to check if the enable/disable command set successfully or not in some product line station
-	*/
-	if (pConfigOnDDr->g_di.sysfs_data.charge_enable)
-			events = VCHRG_START_CHARGING_EVENT;
-	else
-			events = VCHRG_NOT_CHARGING_EVENT;
-	hisi_coul_charger_event_rcv(events);
-	if (is_hisi_mbox_suspend() == false) {
-		g_ops->set_charge_enable(pConfigOnDDr->g_di.sysfs_data.charge_enable);
-		hwlog_info("hisi mbox is not in suspend, so notify to sensorhub\n");
-		notify_sensorhub(CHARGE_SYSFS_ENABLE_CHARGER, 0);
-	}
-	hwlog_info("dcp sh set charge enable = %d\n", pConfigOnDDr->g_di.sysfs_data.charge_enable);
-	return 0;
-}
-
-static int dcp_sh_get_enable_charger(unsigned int *val)
-{
-	if (NULL == pConfigOnDDr) {
-		hwlog_err("%s pConfigOnDDr is NULL\n", __func__);
-		return -1;
-	}
-
-	notify_sensorhub(CHARGE_SYSFS_ENABLE_CHARGER, 1);
-	*val = pConfigOnDDr->g_di.sysfs_data.charge_enable;
-
-	return 0;
-}
-
-/* define public power interface */
-static struct power_if_ops dcp_sh_power_if_ops = {
-	.set_enable_charger = dcp_sh_set_enable_charger,
-	.get_enable_charger = dcp_sh_get_enable_charger,
-	.type_name = "dcp_sh",
-};
-
 
 /*lint -save -e* */
 struct sensorhub_scene g_scens = {
@@ -313,7 +209,7 @@ int sensorhub_charger_dsm_report(int err_no, int *val)
 			}
 			if (err_count[i].dump)
 				err_count[i].dump(dsm_buff);
-			if (!power_dsm_dmd_report(POWER_DSM_BATTERY, err_no, dsm_buff)) {
+			if (!dsm_report(err_no, dsm_buff)) {
 				/*when it be set 1,it will not report */
 				err_count[i].notify_enable = false;
 				ret = 0;
@@ -476,6 +372,7 @@ static int charge_rename_charger_type(enum hisi_charger_type type,
 		{
 			di->charger_type = CHARGER_TYPE_USB;
 			di->charger_source = POWER_SUPPLY_TYPE_USB;
+			usb_continuous_notify_times++;
 			ret = FALSE;
 		}
 		break;
@@ -530,12 +427,10 @@ static int charge_rename_charger_type(enum hisi_charger_type type,
 		ret = FALSE;
 		break;
 	}
+	if ((USB_ICO_CNT == usb_continuous_notify_times)
+		&& (1 == di->support_usb_nonstandard_ico))
+		ico_enable = 1;
 	return ret;
-}
-
-static void charger_event_notify(int event)
-{
-    blocking_notifier_call_chain(&charger_event_notify_head, event, NULL);
 }
 
 /**********************************************************
@@ -555,15 +450,12 @@ static void charge_send_uevent(struct charge_device_info_sh *di)
 
 	if (di->charger_source == POWER_SUPPLY_TYPE_MAINS) {
 		events = VCHRG_START_AC_CHARGING_EVENT;
-		charger_event_notify(CHARGER_START_CHARGING_EVENT);
 		hisi_coul_charger_event_rcv(events);
 	} else if (di->charger_source == POWER_SUPPLY_TYPE_USB) {
 		events = VCHRG_START_USB_CHARGING_EVENT;
-		charger_event_notify(CHARGER_START_CHARGING_EVENT);
 		hisi_coul_charger_event_rcv(events);
 	} else if (di->charger_source == POWER_SUPPLY_TYPE_BATTERY) {
 		events = VCHRG_STOP_CHARGING_EVENT;
-		charger_event_notify(CHARGER_STOP_CHARGING_EVENT);
 		hisi_coul_charger_event_rcv(events);
 	} else {
 		hwlog_err("[%s]error charger source!\n", __func__);
@@ -584,16 +476,6 @@ static enum fcp_check_stage_type fcp_get_stage(void)
 		return pConfigOnDDr->g_di.fcp_stage;
 }
 /*lint -restore*/
-
-
-static enum huawei_usb_charger_type huawei_get_charger_type(void)
-{
-	if (NULL == pConfigOnDDr) {
-		hwlog_err("[%s]pConfigOnDDr is not init!\n", __func__);
-		return CHARGER_REMOVED;
-	}
-	return pConfigOnDDr->g_di.charger_type;
-}
 
 /**********************************************************
 *  Function:       set_charge_state
@@ -646,7 +528,7 @@ void charge_type_dcp_detected_notify_sh(void)
 **********************************************************/
 static void charge_process_vr_charge_event(struct charge_device_info_sh *di)
 {
-	enum huawei_usb_charger_type type_bak;
+	enum usb_charger_type type_bak;
 	enum power_supply_type supply_bak;
 
 	type_bak = di->charger_type;
@@ -1357,8 +1239,7 @@ static ssize_t charge_sysfs_store(struct device *dev,
 	case CHARGE_SYSFS_ENABLE_CHARGER:
 		if ((strict_strtol(buf, 10, &val) < 0) || (val < 0) || (val > 1))
 			return -EINVAL;
-		charger_disable_config[CHARGER_SYS_NODE] = !val;
-		pConfigOnDDr->g_di.sysfs_data.charge_enable = get_real_charger_flag();
+		pConfigOnDDr->g_di.sysfs_data.charge_enable = val;
 		pConfigOnDDr->g_di.sysfs_data.charge_limit = TRUE;
 		/*why should send events in this command?
 		   because it will get the /sys/class/power_supply/Battery/status immediately
@@ -1589,6 +1470,14 @@ static void charge_parse_dts(struct charge_device_info_sh *di)
 	}
 
 	ret = of_property_read_u32(of_find_compatible_node(NULL, NULL, "huawei,charger_sensorhub"), \
+			"support_usb_nonstandard_ico", &di->support_usb_nonstandard_ico);
+	if (ret) {
+		hwlog_err("get support_usb_nonstandard_ico fail!\n");
+		di->support_usb_nonstandard_ico = 0;
+	}
+	hwlog_info("support_usb_nonstandard_ico = %d\n", di->support_usb_nonstandard_ico);
+
+	ret = of_property_read_u32(of_find_compatible_node(NULL, NULL, "huawei,charger_sensorhub"), \
 			"support_standard_ico", &di->support_standard_ico);
 	if (ret) {
 		hwlog_err("get support_standard_ico fail!\n");
@@ -1617,7 +1506,6 @@ static struct charge_extra_ops huawei_charge_extra_ops = {
 	.check_ts = charge_check_ts,
 	.check_otg_state = charge_check_otg_state,
 	.get_stage = fcp_get_stage,
-	.get_charger_type = huawei_get_charger_type,
 	.set_state = set_charge_state,
 	.get_charge_current = huawei_get_charge_current_max,
 };
@@ -1725,16 +1613,11 @@ static int charge_probe(struct platform_device *pdev)
 		}
 	}
 	g_di_sh = di;
-
+	
 	ret = charge_extra_ops_register(&huawei_charge_extra_ops);
-	if (ret) {
-		hwlog_err("register extra charge ops failed!\n");
-	}
-
-	if (power_if_ops_register(&dcp_sh_power_if_ops)) {
-		hwlog_err("register power_if_ops_register failed!\n");
-	}
-
+        if (ret) {
+    		hwlog_err("register extra charge ops failed!\n");
+        }
 	copy_bootloader_charger_info();
 	update_charging_info(g_di_sh);
 	hwlog_info("huawei sensorhub charger probe ok!\n");

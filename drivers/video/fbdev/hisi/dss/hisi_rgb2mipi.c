@@ -394,6 +394,7 @@ static int rgb2mipi_spi_cmds_tx(struct spi_device *spi_dev,
 	return 0;
 }
 
+
 static int rgb2mipi_swrite(struct spi_device *spi_dev, struct dsi_cmd_desc *cm)
 {
 	int dataLength = 0;
@@ -913,11 +914,11 @@ static int rgb2mipi_probe(struct platform_device *pdev)
 	}
 	hisifd = platform_get_drvdata(pdev);
 	if (NULL == hisifd) {
-		dev_err(&pdev->dev, "hisifd is NULL");
+		HISI_FB_ERR("hisifd is NULL");
 		return -EINVAL;
 	}
 	if (NULL == hisifd->panel_info.spi_dev) {
-		dev_err(&pdev->dev, "spi_dev is NULL");
+		HISI_FB_ERR("spi_dev is NULL");
 		return -EINVAL;
 	}
 
@@ -926,7 +927,7 @@ static int rgb2mipi_probe(struct platform_device *pdev)
 	/* alloc device */
 	dpe_dev = platform_device_alloc(DEV_NAME_DSS_DPE, pdev->id);
 	if (!dpe_dev) {
-		dev_err(&pdev->dev, "fb%d platform_device_alloc failed, error=%d!\n", hisifd->index, ret);
+		HISI_FB_ERR("fb%d platform_device_alloc failed, error=%d!\n", hisifd->index, ret);
 		ret = -ENOMEM;
 		goto err_device_alloc;
 	}
@@ -938,7 +939,7 @@ static int rgb2mipi_probe(struct platform_device *pdev)
 	ret = platform_device_add_data(dpe_dev, dev_get_platdata(&pdev->dev),
 		sizeof(struct hisi_fb_panel_data));
 	if (ret) {
-		dev_err(&pdev->dev, "fb%d platform_device_add_data failed error=%d!\n", hisifd->index, ret);
+		HISI_FB_ERR("fb%d platform_device_add_data failed error=%d!\n", hisifd->index, ret);
 		goto err_device_put;
 	}
 
@@ -961,7 +962,7 @@ static int rgb2mipi_probe(struct platform_device *pdev)
 	/* device add */
 	ret = platform_device_add(dpe_dev);
 	if (ret) {
-		dev_err(&pdev->dev, "fb%d platform_device_add failed, error=%d!\n", hisifd->index, ret);
+		HISI_FB_ERR("fb%d platform_device_add failed, error=%d!\n", hisifd->index, ret);
 		goto err_device_put;
 	}
 

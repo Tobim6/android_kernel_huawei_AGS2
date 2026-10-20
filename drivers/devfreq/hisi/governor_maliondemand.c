@@ -26,7 +26,7 @@
 #include <linux/hisi/hisi_devfreq.h>
 
 #ifdef CONFIG_HUAWEI_DUBAI
-#include <chipset_common/dubai/dubai.h>
+#include <huawei_platform/power/dubai/dubai.h>
 #endif
 
 /* Default constants for DevFreq-Mali-Ondemand (DFMO) */
@@ -471,7 +471,6 @@ static int devfreq_mali_ondemand_handler(struct devfreq *devfreq,
 
 static struct devfreq_governor devfreq_mali_ondemand = {
 	.name = "mali_ondemand",
-	.immutable = 1,
 	.get_target_freq = devfreq_mali_ondemand_func,
 	.event_handler = devfreq_mali_ondemand_handler,
 };

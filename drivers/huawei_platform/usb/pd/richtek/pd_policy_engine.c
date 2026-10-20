@@ -20,6 +20,9 @@
 #include <huawei_platform/usb/pd/richtek/pd_process_evt.h>
 #include <huawei_platform/usb/pd/richtek/pd_policy_engine.h>
 #include <huawei_platform/usb/pd/richtek/rt1711h.h>
+#ifdef CONFIG_HUAWEI_DSM
+#include <dsm/dsm_pub.h>
+#endif
 
 /* ---- Policy Engine State ---- */
 
@@ -165,11 +168,6 @@ static const char *const pe_state_name[] = {
 
 	"PE_DFP_VDM_ATTENTION_REQUEST",
 	"PE_DFP_VDM_UNKNOWN",
-
-#ifdef CONFIG_PD_DFP_RESET_CABLE
-	"PE_DFP_CBL_SEND_SOFT_RESET",
-	"PE_DFP_CBL_SEND_CABLE_RESET",
-#endif /* CONFIG_PD_DFP_RESET_CABLE */
 
 #ifdef CONFIG_USB_PD_ALT_MODE_DFP
 	"PE_DFP_VDM_DP_STATUS_UPDATE_REQUEST",
@@ -346,11 +344,6 @@ static const char *const pe_state_name[] = {
 	"D_ATTENTION",
 	"D_UNKNOWN",
 
-#ifdef CONFIG_PD_DFP_RESET_CABLE
-	"D_C_SRESET",
-	"D_C_CRESET",
-#endif /* CONFIG_PD_DFP_RESET_CABLE */
-
 #ifdef CONFIG_USB_PD_ALT_MODE_DFP
 	"D_DP_STATUS_REQ",
 	"D_DP_STATUS_ACK",
@@ -440,7 +433,6 @@ static void pe_idle1_entry(pd_port_t *pd_port, pd_event_t *pd_event)
 
 static void pe_idle2_entry(pd_port_t *pd_port, pd_event_t *pd_event)
 {
-	pd_port->pd_connected = false;
 	pd_set_rx_enable(pd_port, PD_RX_CAP_PE_IDLE);
 	pd_disable_timer(pd_port, PD_TIMER_PE_IDLE_TOUT);
 	pd_notify_pe_idle(pd_port);
@@ -668,11 +660,6 @@ static const pe_state_actions_t pe_state_actions[] = {
 	PE_STATE_ACTIONS(pe_dfp_vdm_attention_request),
 	PE_STATE_ACTIONS(pe_dfp_vdm_unknown),
 
-#ifdef CONFIG_PD_DFP_RESET_CABLE
-	PE_STATE_ACTIONS(pe_dfp_cbl_send_soft_reset),
-	PE_STATE_ACTIONS(pe_dfp_cbl_send_cable_reset),
-#endif /* CONFIG_PD_DFP_RESET_CABLE */
-
 #ifdef CONFIG_USB_PD_ALT_MODE_DFP
 	PE_STATE_ACTIONS(pe_dfp_vdm_dp_status_update_request),
 	PE_STATE_ACTIONS(pe_dfp_vdm_dp_status_update_acked),
@@ -820,10 +807,14 @@ static void pd_pe_state_change(
 
 	uint8_t old_state = pd_port->pe_state_curr;
 	uint8_t new_state = pd_port->pe_state_next;
+	char buf[1024] = { 0 };
 
-	if ((old_state >= PD_NR_PE_STATES) || (new_state >= PD_NR_PE_STATES))
-		PD_ERR("the pd nr pe states\n");
-
+	if((old_state >= PD_NR_PE_STATES) || (new_state >= PD_NR_PE_STATES)) {
+		snprintf(buf, sizeof(buf), "the pd nr pe states\n");
+#ifdef CONFIG_HUAWEI_DSM
+		rt_dsm_report(ERROR_RT_PD_NR_PE_STATES, buf);
+#endif
+	}
 	if ((new_state == PE_IDLE1) || (new_state == PE_IDLE2))
 		prev_exit_action = NULL;
 	else

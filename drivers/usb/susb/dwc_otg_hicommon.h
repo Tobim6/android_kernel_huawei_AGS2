@@ -2,8 +2,8 @@
 #define _DWC_OTG_HICOMMON_
 
 /* include platform head-file */
-#if defined(CONFIG_DEC_USB)
-#include "dwc_otg_dec.h"
+#if defined(CONFIG_HI6250_USB)
+#include "dwc_otg_hi6250.h"
 #else
 #error "Passable some error, It should be set a platform"
 #endif
@@ -22,6 +22,6 @@ void dwc_otg_hcd_shutdown(void);
 typedef ssize_t (*hiusb_debug_show_ops)(void *, char *, ssize_t);
 typedef ssize_t (*hiusb_debug_store_ops)(void *, const char *, ssize_t);
 void hiusb_debug_init(void *data);
-void hiusb_debug_quick_register(const char *name, void *dev_data, hiusb_debug_show_ops show, hiusb_debug_store_ops store);
+void hiusb_debug_quick_register(char *name, void *dev_data, hiusb_debug_show_ops show, hiusb_debug_store_ops store);
 
 #endif

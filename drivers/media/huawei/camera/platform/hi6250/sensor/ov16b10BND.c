@@ -14,7 +14,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 #define SENSOR_REG_SETTING_DELAY_1_MS 1
 #define SENSOR_REG_SETTING_DELAY_5_MS 5
 #define SENSOR_REG_SETTING_DELAY_10_MS 10
@@ -350,10 +349,7 @@ static int ov16b10BND_match_id(hwsensor_intf_t* si, void * data)
 
     sensor = I2S(si);
     cdata  = (struct sensor_cfg_data *)data;
-    rc = memset_s(cdata->cfg.name, DEVICE_NAME_SIZE, 0, DEVICE_NAME_SIZE);
-    if (rc != EOK) {
-        cam_err("%s. failed to memset_s write_data.", __func__);
-    }
+    memset_s(cdata->cfg.name, DEVICE_NAME_SIZE, 0, DEVICE_NAME_SIZE);
     if (!strncmp(sensor->board_info->name, sensor_dts_name, strlen(sensor_dts_name)))
     {
         p = devm_pinctrl_get(s_ov16b10BND.dev);
@@ -428,19 +424,18 @@ static int ov16b10BND_match_id(hwsensor_intf_t* si, void * data)
         cam_info("%s module_id_0 %d module_id_1 %d .\n",__func__, module_id_0, module_id_1);
         if((module_id_0 == GPIO_LOW_STATE) && (module_id_1 == GPIO_LOW_STATE)){
             //ofilm module
-	     strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name),  sensor_name[0], strlen(sensor_name[0]));
+            strncpy(cdata->cfg.name, sensor_name[0], strlen(sensor_name[0])+1);
             cdata->data = sensor->board_info->sensor_index;
             rc = 0;
         }
         else if((module_id_0 == GPIO_HIGH_STATE) && (module_id_1 == GPIO_HIGH_STATE)){
             //liteon module
-            strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[1], strlen(sensor_name[1]));
+            strncpy(cdata->cfg.name, sensor_name[1], strlen(sensor_name[1])+1);
             cdata->data = sensor->board_info->sensor_index;
             rc = 0;
         }
         else{
-            strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor->board_info->name,
-	         strlen(sensor->board_info->name));
+            strncpy(cdata->cfg.name, sensor->board_info->name, strlen(sensor->board_info->name)+1);
             cdata->data = sensor->board_info->sensor_index;
             cam_err("%s failed to get the module id value.\n",__func__);
             rc = 0;
@@ -449,8 +444,7 @@ static int ov16b10BND_match_id(hwsensor_intf_t* si, void * data)
         gpio_free(sensor->board_info->gpios[FSIN].gpio);
         goto pinctrl_exit;
     } else {
-        strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor->board_info->name, 
-	     strlen(sensor->board_info->name));
+        strncpy(cdata->cfg.name, sensor->board_info->name, strlen(sensor->board_info->name)+1);
         cdata->data = sensor->board_info->sensor_index;
         rc = 0;
         goto matchID_exit;
@@ -576,7 +570,7 @@ static int32_t ov16b10BND_platform_probe(struct platform_device* pdev)
     rc = rpmsg_sensor_register(pdev, (void *)&s_ov16b10BND);
     if (0 != rc){
         cam_err("%s rpmsg_sensor_register fail.\n", __func__);
-        hwsensor_unregister(Sensor2Pdev(s_ov16b10BND));
+        hwsensor_unregister(&s_ov16b10BND.intf);
         goto ov16b10BND_sensor_probe_fail;
     }
 
@@ -593,7 +587,7 @@ static int __init ov16b10BND_init_module(void)
 static void __exit ov16b10BND_exit_module(void)
 {
     rpmsg_sensor_unregister((void *)&s_ov16b10BND);
-    hwsensor_unregister(Sensor2Pdev(s_ov16b10BND));
+    hwsensor_unregister(&s_ov16b10BND.intf);
     platform_driver_unregister(&s_ov16b10BND_driver);
 }
 //lint -restore

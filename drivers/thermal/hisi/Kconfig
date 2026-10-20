@@ -21,13 +21,6 @@ config HISI_THERMAL_PERIPHERAL
 	  Enable this to plug the peripheral thermal sensor driver into the Linux
 	  thermal framework
 
-config HISI_THERMAL_PERIPHERAL_HIGHRESTEMP
-	bool "High resolution thermal format for Hisi peripheral thermal driver"
-	depends on HISI_THERMAL_PERIPHERAL
-	default n
-	help
-	  Enable this to use hi-resolution temperature format for PERIPHERAL thermal.
-
 config HISI_THERMAL_CONTEXTHUB
 	bool "Hisi contexthub thermal driver"
 	default n
@@ -72,12 +65,6 @@ config HISI_THERMAL_SHELL
 	default n
 	help
 	  Enable shell temp calculation
-config HISI_SHELL_TEMP_DEBUG
-	bool "Hisi shell temp debug configuration"
-	depends on HISI_THERMAL_SHELL
-	default n
-	help
-	  Enable debug node for shell temp calculation
 
 config HISI_THERMAL_AMBIENT
 	bool "Hisi ambient temp calculation"
@@ -86,9 +73,3 @@ config HISI_THERMAL_AMBIENT
 	default n
 	help
 	  Enable ambient temp calculation
-
-config HISI_HKADC_MODEM
-	bool "Hisi hkadc modem temp"
-	default n
-	help
-	  Enable hkadc modem temp

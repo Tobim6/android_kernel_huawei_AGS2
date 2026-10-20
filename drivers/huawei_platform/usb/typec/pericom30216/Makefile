@@ -1,1 +1,3 @@
-obj-$(CONFIG_HUAWEI_TYPEC_PERICOM30216) += pericom30216.o
+#Pericom30216 Type C Connector Driver
+
+obj-y	+= pericom30216.o

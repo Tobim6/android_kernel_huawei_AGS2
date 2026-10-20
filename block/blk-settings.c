@@ -78,6 +78,18 @@ void blk_queue_lld_busy(struct request_queue *q, lld_busy_fn *fn)
 EXPORT_SYMBOL_GPL(blk_queue_lld_busy);
 
 /**
+ * blk_urgent_request() - Set an urgent_request handler function for queue
+ * @q:		queue
+ * @fn:		handler for urgent requests
+ *
+ */
+void blk_urgent_request(struct request_queue *q, request_fn_proc *fn)
+{
+	q->urgent_request_fn = fn;
+}
+EXPORT_SYMBOL(blk_urgent_request);
+
+/**
  * blk_set_default_limits - reset limits to default values
  * @lim:  the queue_limits structure to reset
  *
@@ -88,7 +100,7 @@ void blk_set_default_limits(struct queue_limits *lim)
 {
 	lim->max_segments = BLK_MAX_SEGMENTS;
 	lim->max_integrity_segments = 0;
-	lim->seg_boundary_mask = BLK_SEG_BOUNDARY_MASK;/*lint !e570 */
+	lim->seg_boundary_mask = BLK_SEG_BOUNDARY_MASK;
 	lim->virt_boundary_mask = 0;
 	lim->max_segment_size = BLK_MAX_SEGMENT_SIZE;
 	lim->max_sectors = lim->max_hw_sectors = BLK_SAFE_MAX_SECTORS;
@@ -102,7 +114,7 @@ void blk_set_default_limits(struct queue_limits *lim)
 	lim->discard_misaligned = 0;
 	lim->discard_zeroes_data = 0;
 	lim->logical_block_size = lim->physical_block_size = lim->io_min = 512;
-	lim->bounce_pfn = (unsigned long)(BLK_BOUNCE_ANY >> PAGE_SHIFT);/*lint !e501 */
+	lim->bounce_pfn = (unsigned long)(BLK_BOUNCE_ANY >> PAGE_SHIFT);
 	lim->alignment_offset = 0;
 	lim->io_opt = 0;
 	lim->misaligned = 0;
@@ -172,7 +184,7 @@ void blk_queue_make_request(struct request_queue *q, make_request_fn *mfn)
 	/*
 	 * by default assume old behaviour and bounce for any highmem page
 	 */
-	blk_queue_bounce_limit(q, BLK_BOUNCE_HIGH);/*lint !e501 */
+	blk_queue_bounce_limit(q, BLK_BOUNCE_HIGH);
 }
 EXPORT_SYMBOL(blk_queue_make_request);
 
@@ -199,7 +211,7 @@ void blk_queue_bounce_limit(struct request_queue *q, u64 max_addr)
 	 * some IOMMUs can handle everything, but I don't know of a
 	 * way to test this here.
 	 */
-	if (b_pfn < (min_t(u64, 0xffffffffUL, BLK_BOUNCE_HIGH) >> PAGE_SHIFT))/*lint !e501 */
+	if (b_pfn < (min_t(u64, 0xffffffffUL, BLK_BOUNCE_HIGH) >> PAGE_SHIFT))
 		dma = 1;
 	q->limits.bounce_pfn = max(max_low_pfn, b_pfn);
 #else
@@ -239,8 +251,8 @@ void blk_queue_max_hw_sectors(struct request_queue *q, unsigned int max_hw_secto
 	struct queue_limits *limits = &q->limits;
 	unsigned int max_sectors;
 
-	if ((max_hw_sectors << 9) < PAGE_SIZE) {/*lint !e647 */
-		max_hw_sectors = 1 << (PAGE_SHIFT - 9);
+	if ((max_hw_sectors << 9) < PAGE_CACHE_SIZE) {
+		max_hw_sectors = 1 << (PAGE_CACHE_SHIFT - 9);
 		printk(KERN_INFO "%s: set to minimum %d\n",
 		       __func__, max_hw_sectors);
 	}
@@ -329,8 +341,8 @@ EXPORT_SYMBOL(blk_queue_max_segments);
  **/
 void blk_queue_max_segment_size(struct request_queue *q, unsigned int max_size)
 {
-	if (max_size < PAGE_SIZE) {
-		max_size = PAGE_SIZE;
+	if (max_size < PAGE_CACHE_SIZE) {
+		max_size = PAGE_CACHE_SIZE;
 		printk(KERN_INFO "%s: set to minimum %d\n",
 		       __func__, max_size);
 	}
@@ -518,8 +530,7 @@ EXPORT_SYMBOL(blk_queue_stack_limits);
 int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
 		     sector_t start)
 {
-	unsigned int top, bottom, alignment;
-	int ret = 0;
+	unsigned int top, bottom, alignment, ret = 0;
 
 	t->max_sectors = min_not_zero(t->max_sectors, b->max_sectors);
 	t->max_hw_sectors = min_not_zero(t->max_hw_sectors, b->max_hw_sectors);
@@ -761,8 +772,8 @@ EXPORT_SYMBOL_GPL(blk_queue_dma_drain);
  **/
 void blk_queue_segment_boundary(struct request_queue *q, unsigned long mask)
 {
-	if (mask < PAGE_SIZE - 1) {
-		mask = PAGE_SIZE - 1;
+	if (mask < PAGE_CACHE_SIZE - 1) {
+		mask = PAGE_CACHE_SIZE - 1;
 		printk(KERN_INFO "%s: set to minimum %lx\n",
 		       __func__, mask);
 	}
@@ -812,7 +823,6 @@ EXPORT_SYMBOL(blk_queue_dma_alignment);
  *    alignments without having them interfere.
  *
  **/
- /*lint -save -e574*/
 void blk_queue_update_dma_alignment(struct request_queue *q, int mask)
 {
 	BUG_ON(mask > PAGE_SIZE);
@@ -821,7 +831,6 @@ void blk_queue_update_dma_alignment(struct request_queue *q, int mask)
 		q->dma_alignment = mask;
 }
 EXPORT_SYMBOL(blk_queue_update_dma_alignment);
-/*lint -restore*/
 
 void blk_queue_flush_queueable(struct request_queue *q, bool queueable)
 {
@@ -836,8 +845,8 @@ EXPORT_SYMBOL_GPL(blk_queue_flush_queueable);
 
 /**
  * blk_set_queue_depth - tell the block layer about the device queue depth
- * @q:          the request queue for the device
- * @depth:      queue depth
+ * @q:		the request queue for the device
+ * @depth:		queue depth
  *
  */
 void blk_set_queue_depth(struct request_queue *q, unsigned int depth)
@@ -867,6 +876,8 @@ void blk_queue_write_cache(struct request_queue *q, bool wc, bool fua)
 	else
 		queue_flag_clear(QUEUE_FLAG_FUA, q);
 	spin_unlock_irq(q->queue_lock);
+
+	wbt_set_write_cache(q->rq_wb, test_bit(QUEUE_FLAG_WC, &q->queue_flags));
 }
 EXPORT_SYMBOL_GPL(blk_queue_write_cache);
 

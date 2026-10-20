@@ -39,7 +39,7 @@
 #include "../vendor_info.h"
 
 #define SVID_DEFAULT SVID1_SOP
-#define MODE_DEFAULT 0x3C46 // support E AND F
+#define MODE_DEFAULT 0x0C46
 #define SVID_AUTO_ENTRY 0xFF01
 #define MODE_AUTO_ENTRY 0x0001
 
@@ -71,7 +71,7 @@
 		InformIdentity		inform_id;
 #ifdef FSC_HAVE_CUSTOM_SRC2
 		InformCustSrc2CableVdo	inform_raw_vdo_data;
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
+#endif
 		InformSvids			inform_svids;
 		InformModes			inform_modes;
 		InformAttention		inform_attention;

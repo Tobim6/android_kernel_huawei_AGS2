@@ -76,6 +76,7 @@ int irq_set_irq_type(unsigned int irq, unsigned int type)
 	if (!desc)
 		return -EINVAL;
 
+	type &= IRQ_TYPE_SENSE_MASK;
 	ret = __irq_set_trigger(desc, type);
 	irq_put_desc_busunlock(desc, flags);
 	return ret;
@@ -337,6 +338,7 @@ void handle_nested_irq(unsigned int irq)
 	raw_spin_lock_irq(&desc->lock);
 
 	desc->istate &= ~(IRQS_REPLAY | IRQS_WAITING);
+	kstat_incr_irqs_this_cpu(desc);
 
 	action = desc->action;
 	if (unlikely(!action || irqd_irq_disabled(&desc->irq_data))) {
@@ -344,7 +346,6 @@ void handle_nested_irq(unsigned int irq)
 		goto out_unlock;
 	}
 
-	kstat_incr_irqs_this_cpu(desc);
 	irqd_set(&desc->irq_data, IRQD_IRQ_INPROGRESS);
 	raw_spin_unlock_irq(&desc->lock);
 
@@ -411,62 +412,19 @@ void handle_simple_irq(struct irq_desc *desc)
 		goto out_unlock;
 
 	desc->istate &= ~(IRQS_REPLAY | IRQS_WAITING);
+	kstat_incr_irqs_this_cpu(desc);
 
 	if (unlikely(!desc->action || irqd_irq_disabled(&desc->irq_data))) {
 		desc->istate |= IRQS_PENDING;
 		goto out_unlock;
 	}
 
-	kstat_incr_irqs_this_cpu(desc);
 	handle_irq_event(desc);
 
 out_unlock:
 	raw_spin_unlock(&desc->lock);
 }
 EXPORT_SYMBOL_GPL(handle_simple_irq);
-
-/**
- *	handle_untracked_irq - Simple and software-decoded IRQs.
- *	@desc:	the interrupt description structure for this irq
- *
- *	Untracked interrupts are sent from a demultiplexing interrupt
- *	handler when the demultiplexer does not know which device it its
- *	multiplexed irq domain generated the interrupt. IRQ's handled
- *	through here are not subjected to stats tracking, randomness, or
- *	spurious interrupt detection.
- *
- *	Note: Like handle_simple_irq, the caller is expected to handle
- *	the ack, clear, mask and unmask issues if necessary.
- */
-void handle_untracked_irq(struct irq_desc *desc)
-{
-	unsigned int flags = 0;
-
-	raw_spin_lock(&desc->lock);
-
-	if (!irq_may_run(desc))
-		goto out_unlock;
-
-	desc->istate &= ~(IRQS_REPLAY | IRQS_WAITING);
-
-	if (unlikely(!desc->action || irqd_irq_disabled(&desc->irq_data))) {
-		desc->istate |= IRQS_PENDING;
-		goto out_unlock;
-	}
-
-	desc->istate &= ~IRQS_PENDING;
-	irqd_set(&desc->irq_data, IRQD_IRQ_INPROGRESS);
-	raw_spin_unlock(&desc->lock);
-
-	__handle_irq_event_percpu(desc, &flags);
-
-	raw_spin_lock(&desc->lock);
-	irqd_clear(&desc->irq_data, IRQD_IRQ_INPROGRESS);
-
-out_unlock:
-	raw_spin_unlock(&desc->lock);
-}
-EXPORT_SYMBOL_GPL(handle_untracked_irq);
 
 /*
  * Called unconditionally from handle_level_irq() and only for oneshot
@@ -504,6 +462,7 @@ void handle_level_irq(struct irq_desc *desc)
 		goto out_unlock;
 
 	desc->istate &= ~(IRQS_REPLAY | IRQS_WAITING);
+	kstat_incr_irqs_this_cpu(desc);
 
 	/*
 	 * If its disabled or no action available
@@ -514,7 +473,6 @@ void handle_level_irq(struct irq_desc *desc)
 		goto out_unlock;
 	}
 
-	kstat_incr_irqs_this_cpu(desc);
 	handle_irq_event(desc);
 
 	cond_unmask_irq(desc);
@@ -574,6 +532,7 @@ void handle_fasteoi_irq(struct irq_desc *desc)
 		goto out;
 
 	desc->istate &= ~(IRQS_REPLAY | IRQS_WAITING);
+	kstat_incr_irqs_this_cpu(desc);
 
 	/*
 	 * If its disabled or no action available
@@ -585,7 +544,6 @@ void handle_fasteoi_irq(struct irq_desc *desc)
 		goto out;
 	}
 
-	kstat_incr_irqs_this_cpu(desc);
 	if (desc->istate & IRQS_ONESHOT)
 		mask_irq(desc);
 
@@ -755,6 +713,7 @@ void handle_percpu_devid_irq(struct irq_desc *desc)
 {
 	struct irq_chip *chip = irq_desc_get_chip(desc);
 	struct irqaction *action = desc->action;
+	void *dev_id = raw_cpu_ptr(action->percpu_dev_id);
 	unsigned int irq = irq_desc_get_irq(desc);
 	irqreturn_t res;
 
@@ -763,26 +722,15 @@ void handle_percpu_devid_irq(struct irq_desc *desc)
 	if (chip->irq_ack)
 		chip->irq_ack(&desc->irq_data);
 
-	if (likely(action)) {
-		trace_irq_handler_entry(irq, action);
-		res = action->handler(irq, raw_cpu_ptr(action->percpu_dev_id));
-		trace_irq_handler_exit(irq, action, res);
-	} else {
-		unsigned int cpu = smp_processor_id();
-		bool enabled = cpumask_test_cpu(cpu, desc->percpu_enabled);
-
-		if (enabled)
-			irq_percpu_disable(desc, cpu);
-
-		pr_err_once("Spurious%s percpu IRQ%u on CPU%u\n",
-			    enabled ? " and unmasked" : "", irq, cpu);
-	}
+	trace_irq_handler_entry(irq, action);
+	res = action->handler(irq, dev_id);
+	trace_irq_handler_exit(irq, action, res);
 
 	if (chip->irq_eoi)
 		chip->irq_eoi(&desc->irq_data);
 }
 
-static void
+void
 __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 		     int is_chained, const char *name)
 {
@@ -829,21 +777,6 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 	desc->name = name;
 
 	if (handle != handle_bad_irq && is_chained) {
-		unsigned int type = irqd_get_trigger_type(&desc->irq_data);
-
-		/*
-		 * We're about to start this interrupt immediately,
-		 * hence the need to set the trigger configuration.
-		 * But the .set_type callback may have overridden the
-		 * flow handler, ignoring that we're dealing with a
-		 * chained interrupt. Reset it immediately because we
-		 * do know better.
-		 */
-		if (type != IRQ_TYPE_NONE) {
-			__irq_set_trigger(desc, type);
-			desc->handle_irq = handle;
-		}
-
 		irq_settings_set_noprobe(desc);
 		irq_settings_set_norequest(desc);
 		irq_settings_set_nothread(desc);
@@ -895,14 +828,12 @@ EXPORT_SYMBOL_GPL(irq_set_chip_and_handler_name);
 
 void irq_modify_status(unsigned int irq, unsigned long clr, unsigned long set)
 {
-	unsigned long flags, trigger, tmp;
+	unsigned long flags;
 	struct irq_desc *desc = irq_get_desc_lock(irq, &flags, 0);
 
 	if (!desc)
 		return;
 	irq_settings_clr_and_set(desc, clr, set);
-
-	trigger = irqd_get_trigger_type(&desc->irq_data);
 
 	irqd_clear(&desc->irq_data, IRQD_NO_BALANCING | IRQD_PER_CPU |
 		   IRQD_TRIGGER_MASK | IRQD_LEVEL | IRQD_MOVE_PCNTXT);
@@ -915,11 +846,7 @@ void irq_modify_status(unsigned int irq, unsigned long clr, unsigned long set)
 	if (irq_settings_is_level(desc))
 		irqd_set(&desc->irq_data, IRQD_LEVEL);
 
-	tmp = irq_settings_get_trigger_mask(desc);
-	if (tmp != IRQ_TYPE_NONE)
-		trigger = tmp;
-
-	irqd_set(&desc->irq_data, trigger);
+	irqd_set(&desc->irq_data, irq_settings_get_trigger_mask(desc));
 
 	irq_put_desc_unlock(desc, flags);
 }
@@ -1023,7 +950,6 @@ void irq_chip_ack_parent(struct irq_data *data)
 	data = data->parent_data;
 	data->chip->irq_ack(data);
 }
-EXPORT_SYMBOL_GPL(irq_chip_ack_parent);
 
 /**
  * irq_chip_mask_parent - Mask the parent interrupt
@@ -1034,7 +960,6 @@ void irq_chip_mask_parent(struct irq_data *data)
 	data = data->parent_data;
 	data->chip->irq_mask(data);
 }
-EXPORT_SYMBOL_GPL(irq_chip_mask_parent);
 
 /**
  * irq_chip_unmask_parent - Unmask the parent interrupt
@@ -1045,7 +970,6 @@ void irq_chip_unmask_parent(struct irq_data *data)
 	data = data->parent_data;
 	data->chip->irq_unmask(data);
 }
-EXPORT_SYMBOL_GPL(irq_chip_unmask_parent);
 
 /**
  * irq_chip_eoi_parent - Invoke EOI on the parent interrupt
@@ -1056,7 +980,6 @@ void irq_chip_eoi_parent(struct irq_data *data)
 	data = data->parent_data;
 	data->chip->irq_eoi(data);
 }
-EXPORT_SYMBOL_GPL(irq_chip_eoi_parent);
 
 /**
  * irq_chip_set_affinity_parent - Set affinity on the parent interrupt
@@ -1092,7 +1015,6 @@ int irq_chip_set_type_parent(struct irq_data *data, unsigned int type)
 
 	return -ENOSYS;
 }
-EXPORT_SYMBOL_GPL(irq_chip_set_type_parent);
 
 /**
  * irq_chip_retrigger_hierarchy - Retrigger an interrupt in hardware
@@ -1165,44 +1087,4 @@ int irq_chip_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 	pos->chip->irq_compose_msi_msg(pos, msg);
 
 	return 0;
-}
-
-/**
- * irq_chip_pm_get - Enable power for an IRQ chip
- * @data:	Pointer to interrupt specific data
- *
- * Enable the power to the IRQ chip referenced by the interrupt data
- * structure.
- */
-int irq_chip_pm_get(struct irq_data *data)
-{
-	int retval;
-
-	if (IS_ENABLED(CONFIG_PM) && data->chip->parent_device) {
-		retval = pm_runtime_get_sync(data->chip->parent_device);
-		if (retval < 0) {
-			pm_runtime_put_noidle(data->chip->parent_device);
-			return retval;
-		}
-	}
-
-	return 0;
-}
-
-/**
- * irq_chip_pm_put - Disable power for an IRQ chip
- * @data:	Pointer to interrupt specific data
- *
- * Disable the power to the IRQ chip referenced by the interrupt data
- * structure, belongs. Note that power will only be disabled, once this
- * function has been called for all IRQs that have called irq_chip_pm_get().
- */
-int irq_chip_pm_put(struct irq_data *data)
-{
-	int retval = 0;
-
-	if (IS_ENABLED(CONFIG_PM) && data->chip->parent_device)
-		retval = pm_runtime_put(data->chip->parent_device);
-
-	return (retval < 0) ? retval : 0;
 }

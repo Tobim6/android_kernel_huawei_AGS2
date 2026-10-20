@@ -1,6 +1,5 @@
 #ifndef __USBUDIO_MAILBOX_H
 #define __USBUDIO_MAILBOX_H
-#include "../hifi/usbaudio_ioctl.h"
 
 enum IRQ_RT
 {
@@ -49,17 +48,6 @@ enum USBAUDIO_CHN_MSG_TYPE {
 	USBAUDIO_CHN_MSG_NV_CHECK_RCV = 0xFF10,    /* dsp->acpu */
 };
 
-enum USBAUDIO_TABLE_SAMPLERATE {
-	USBAUDIO_TABLE_SAMPLERATE_44100,
-	USBAUDIO_TABLE_SAMPLERATE_48000,
-	USBAUDIO_TABLE_SAMPLERATE_88200,
-	USBAUDIO_TABLE_SAMPLERATE_96000,
-	USBAUDIO_TABLE_SAMPLERATE_176400,
-	USBAUDIO_TABLE_SAMPLERATE_192000,
-	USBAUDIO_TABLE_SAMPLERATE_384000,
-	USBAUDIO_TABLE_MAX,
-};
-
 struct usbaudio_epdesc {
 	unsigned char bLength;
 	unsigned char bDescriptorType;
@@ -102,14 +90,14 @@ struct usbaudio_formats {
 	unsigned char protocol;		/* UAC_VERSION_1/2 */
 	unsigned int maxpacksize;	/* max. packet size */
 	unsigned int rates;
-	unsigned int rate_table[USBAUDIO_TABLE_MAX];
+	unsigned int rate_table[5];
 	unsigned char clock;		/* associated clock */
 };
 
 struct usbaudio_pcms {
-	struct usbaudio_formats fmts[USBAUDIO_PCM_NUM];
-	struct usbaudio_ifdesc ifdesc[USBAUDIO_PCM_NUM];
-	struct usbaudio_epdesc epdesc[USBAUDIO_PCM_NUM];
+	struct usbaudio_formats fmts[2];
+	struct usbaudio_ifdesc ifdesc[2];
+	struct usbaudio_epdesc epdesc[2];
 	unsigned int customsized;
 };
 
@@ -124,11 +112,10 @@ struct usbaudio_disconnect_rcv_data {
 struct usbaudio_rcv_msg {
 	USBAUDIO_CHN_COMMON
 	union {
-		unsigned int rate;
+		unsigned int ret_val;
 		struct usbaudio_probe_rcv_data probe_rcv_data;
 		struct usbaudio_disconnect_rcv_data disconnect_rcv_data;
 	};
-	unsigned int period;
 };
 
 struct usbaudio_disconnect_msg {

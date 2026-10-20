@@ -21,10 +21,8 @@
 #include <linux/list.h>
 #include <governor.h>
 
-#include <linux/hisi/hisi_devfreq.h>
-
 #ifdef CONFIG_HUAWEI_DUBAI
-#include <chipset_common/dubai/dubai.h>
+#include <huawei_platform/power/dubai/dubai.h>
 #endif
 
 #define DEFAULT_GO_HISPEED_LOAD		90
@@ -35,11 +33,7 @@
 #define NTARGET_LOAD			1
 #define NDELAY_TIME			0
 #define MAX_LOADING_WINDOW		50
-#define DFMO_OPENCL_BOOST_ON		(1)
-#define DFMO_OPENCL_BOOST_DN		(0)
-#define DFMO_MIN_OPENCL_BOOST_FREQ	(332000000)
-#define DFMO_MAX_OPENCL_BOOST_FREQ	(667000000)
-#define DFMO_DEFAULT_OPENCL_BOOST_FREQ	(415000000)
+
 #define SURPORT_POLICY_NUM		20
 #define SURPORT_NTARGET_LOAD_MAX	40
 #define POLICY_BUF_MAX			1024
@@ -80,49 +74,31 @@ struct devfreq_gpu_scene_aware_data {
 	unsigned int window_counter;
 	unsigned int window_idx;
 	int vsync;
-	int cl_boost;
-	unsigned int cl_boost_freq;
 	struct list_head policy_list;
 	struct scene_aware_policy *cur_policy;
 };
-
-static int devfreq_get_dev_status(struct devfreq *df, struct devfreq_dev_status* stat)
-{
-	int err = df->profile->get_dev_status(df->dev.parent, stat);
-
-#ifdef CONFIG_HUAWEI_DUBAI
-	if (stat->busy_time && stat->current_frequency)
-		dubai_update_gpu_info(stat->current_frequency, stat->busy_time,
-			stat->total_time, df->profile->polling_ms);
-#endif
-
-	return err;
-}
 
 static int devfreq_gpu_scene_aware_func(struct devfreq *df,
 					unsigned long *freq)
 {
 	struct devfreq_dev_status stat;
+	int err = df->profile->get_dev_status(df->dev.parent, &stat);
+	struct devfreq_gpu_scene_aware_data *data = df->data;
 	unsigned int i;
 	unsigned int targetload, vsync_equalize, util;
 	unsigned long a;
-	struct devfreq_gpu_scene_aware_data *data = NULL;
-	int err = 0;
-	struct hisi_devfreq_data *priv_data = NULL;
 
-	if ((NULL == df) || (NULL == df->data))
-		return -EINVAL;
+#ifdef CONFIG_HUAWEI_DUBAI
+	dubai_update_gpu_info(stat.current_frequency, stat.busy_time,
+		stat.total_time, df->profile->polling_ms);
+#endif
 
-	err = devfreq_get_dev_status(df, &stat);
 	if (err)
 		return err;
 
-	priv_data = stat.private_data;
-
-	if (NULL == priv_data)
+	if (data == NULL)
 		return -EINVAL;
 
-	data = df->data;
 	*freq = stat.current_frequency;
 
 	if (unlikely(0 == stat.total_time || 0 == (*freq))) {
@@ -133,7 +109,6 @@ static int devfreq_gpu_scene_aware_func(struct devfreq *df,
 	util = stat.busy_time * 100 / stat.total_time;
 	data->util_sum += (*freq) * util;
 	data->vsync = stat.private_data ? 1 : 0;
-	data->cl_boost= priv_data->cl_boost ? 1 : 0;
 	vsync_equalize = (data->vsync) ? 100 : data->cur_policy->para[VSYNC_EQUALIZE];
 
 	if (data->window_counter >= data->cur_policy->para[LOADING_WINDOW])
@@ -164,9 +139,6 @@ static int devfreq_gpu_scene_aware_func(struct devfreq *df,
 		*freq = data->cur_policy->para[HISPEED_FREQ];
 
 check_barrier:
-	/* Not less than cl_boost_freq, if necessary. */
-	if (data && data->cl_boost && (*freq < data->cl_boost_freq))
-		*freq = (unsigned long)data->cl_boost_freq;
 	if (df->min_freq && *freq < df->min_freq)
 		*freq = df->min_freq;
 	if (df->max_freq && *freq > df->max_freq)
@@ -193,8 +165,6 @@ static ssize_t show_##object					\
 
 show_one(vsync)
 show_one(utilisation)
-show_one(cl_boost)
-show_one(cl_boost_freq)
 
 static void refresh_load_buffer(struct devfreq *devfreq,
 		struct scene_aware_policy *new_policy)
@@ -310,7 +280,7 @@ static int extract_sub_para(const char *buf,
 	return 0;
 }
 
-static inline int check_tokens(const unsigned int *ntokens_sub)
+static inline int check_tokens(int *ntokens_sub)
 {
 	return (!(ntokens_sub[1] & 0x1) || ntokens_sub[1] > SURPORT_NTARGET_LOAD_MAX || ntokens_sub[0] != MAX_PARA);
 }
@@ -322,7 +292,7 @@ static struct scene_aware_policy *get_policy(const char *buf)
 
 	int i;
 	int ntokens = 1;
-	unsigned int ntokens_sub[3] = {1, 1, 1};
+	int ntokens_sub[3] = {1, 1, 1};
 	struct scene_aware_policy *policy;
 	int err = -EINVAL;
 
@@ -352,7 +322,7 @@ static struct scene_aware_policy *get_policy(const char *buf)
 	}
 
 	if (check_tokens(ntokens_sub)) {
-		pr_err("sub ntokens err:%u,%u\n", ntokens_sub[0], ntokens_sub[1]);
+		pr_err("sub ntokens err:%d,%d\n", ntokens_sub[0], ntokens_sub[1]);
 		goto err_parse;
 	}
 
@@ -520,51 +490,12 @@ static ssize_t store_scene_para(struct device *dev, struct device_attribute *att
 	return count;
 }
 
-static ssize_t store_cl_boost(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct devfreq *devfreq = to_devfreq(dev);
-	struct devfreq_gpu_scene_aware_data *data;
-	int input;
-	int ret = 0;
-	ret = sscanf(buf, "%d", &input);
-	if (ret != 1 || input > DFMO_OPENCL_BOOST_ON || input < DFMO_OPENCL_BOOST_DN)
-		return -EINVAL;
-	mutex_lock(&devfreq->lock);
-	data = devfreq->data;
-	data->cl_boost = (unsigned int)input;
-	ret = update_devfreq(devfreq);
-	if (ret == 0)
-		ret = count;
-	mutex_unlock(&devfreq->lock);
-	return ret;
-}
-
-static ssize_t store_cl_boost_freq(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct devfreq *devfreq = to_devfreq(dev);
-	struct devfreq_gpu_scene_aware_data *data;
-	int input;
-	int ret = 0;
-	ret = sscanf(buf, "%d", &input);
-	if (ret != 1 || input > DFMO_MAX_OPENCL_BOOST_FREQ || input < DFMO_MIN_OPENCL_BOOST_FREQ)
-		return -EINVAL;
-	mutex_lock(&devfreq->lock);
-	data = devfreq->data;
-	data->cl_boost_freq = (unsigned int)input;
-	ret = update_devfreq(devfreq);
-	if (ret == 0)
-		ret = count;
-	mutex_unlock(&devfreq->lock);
-	return ret;
-}
-
 #define GPU_SCENE_AWARE_ATTR_RW(_name) \
 	static DEVICE_ATTR(_name, 0644, show_##_name, store_##_name)
 
 GPU_SCENE_AWARE_ATTR_RW(scene);
 GPU_SCENE_AWARE_ATTR_RW(scene_para);
-GPU_SCENE_AWARE_ATTR_RW(cl_boost);
-GPU_SCENE_AWARE_ATTR_RW(cl_boost_freq);
+
 
 #define GPU_SCENE_AWARE_ATTR_RO(_name) \
 	static DEVICE_ATTR(_name, 0444, show_##_name, NULL)
@@ -576,8 +507,6 @@ static struct attribute *dev_entries[] = {
 	&dev_attr_scene.attr,
 	&dev_attr_scene_para.attr,
 	&dev_attr_vsync.attr,
-	&dev_attr_cl_boost.attr,
-	&dev_attr_cl_boost_freq.attr,
 	&dev_attr_utilisation.attr,
 	NULL,
 };
@@ -609,7 +538,7 @@ static int gpu_scene_aware_init(struct devfreq *devfreq)
 		goto err_sa_data;
 	}
 
-	data->cur_policy->target_load = kzalloc(sizeof(unsigned int), GFP_KERNEL);
+	data->cur_policy->target_load = kmalloc(sizeof(unsigned int), GFP_KERNEL);
 	if (!(data->cur_policy->target_load)) {
 		pr_err("%s: alloc target load err\n", __func__);
 		goto err_cur_policy;
@@ -621,8 +550,6 @@ static int gpu_scene_aware_init(struct devfreq *devfreq)
 	data->cur_policy->para[VSYNC_EQUALIZE] = DEFAULT_VSYNC_EQULALIZE;
 	data->cur_policy->para[LOADING_WINDOW] = DEFAULT_LOADING_WINDOW;
 	data->cur_policy->ntarget_load = NTARGET_LOAD;
-	data->cl_boost = DFMO_OPENCL_BOOST_DN;
-	data->cl_boost_freq = DFMO_DEFAULT_OPENCL_BOOST_FREQ;
 	*(data->cur_policy->target_load) = TARGET_LOAD;
 	data->cur_policy->ndelay_time = NDELAY_TIME;
 	INIT_LIST_HEAD(&data->policy_list);
@@ -694,15 +621,8 @@ static int devfreq_gpu_scene_aware_handler(struct devfreq *devfreq,
 		break;
 
 	case DEVFREQ_GOV_SUSPEND:
-	{
-	#ifdef CONFIG_HUAWEI_DUBAI
-		/* we have to get the busy/freq info and report to dubai before devfreq suspend. */
-		struct devfreq_dev_status stat;
-		devfreq_get_dev_status(devfreq, &stat);
-	#endif
 		devfreq_monitor_suspend(devfreq);
 		break;
-	}
 
 	case DEVFREQ_GOV_RESUME:
 		devfreq_monitor_resume(devfreq);
@@ -717,7 +637,6 @@ static int devfreq_gpu_scene_aware_handler(struct devfreq *devfreq,
 
 static struct devfreq_governor devfreq_gpu_scene_aware = {
 	.name = "gpu_scene_aware",
-	.immutable = 1,
 	.get_target_freq = devfreq_gpu_scene_aware_func,
 	.event_handler = devfreq_gpu_scene_aware_handler,
 };

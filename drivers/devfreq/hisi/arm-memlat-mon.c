@@ -31,11 +31,10 @@
 #include "governor.h"
 #include "governor_memlat.h"
 #include <linux/perf_event.h>
-#include <linux/version.h>
 
 enum ev_index {
 	INST_IDX,
-	CM_IDX,
+	L2DM_IDX,
 	CYC_IDX,
 	NUM_EVENTS
 };
@@ -48,31 +47,21 @@ struct event_data {
 	unsigned long prev_count;
 };
 
-struct cpu_pmu_stats {
+struct memlat_hwmon_data {
 	struct event_data events[NUM_EVENTS];
 	ktime_t prev_ts;
+	struct mutex mutex;
+	bool init_pending;
 };
+static DEFINE_PER_CPU(struct memlat_hwmon_data, pm_data);
 
 struct cpu_grp_info {
 	cpumask_t cpus;
-	cpumask_t inited_cpus;
-	unsigned int event_ids[NUM_EVENTS];
-	struct cpu_pmu_stats *cpustats;
 	struct memlat_hwmon hw;
 	struct notifier_block arm_memlat_cpu_notif;
-	struct list_head mon_list;
 };
 
-#define to_cpustats(cpu_grp, cpu) \
-	(&cpu_grp->cpustats[cpu - cpumask_first(&cpu_grp->cpus)])
-#define to_devstats(cpu_grp, cpu) \
-	(&cpu_grp->hw.core_stats[cpu - cpumask_first(&cpu_grp->cpus)])
-#define to_cpu_grp(hwmon) container_of(hwmon, struct cpu_grp_info, hw)
-
-static LIST_HEAD(memlat_mon_list);
-static DEFINE_MUTEX(list_lock);
-
-static unsigned long compute_freq(struct cpu_pmu_stats *cpustats,
+static unsigned long compute_freq(struct memlat_hwmon_data *hw_data,
 						unsigned long cyc_cnt)
 {
 	ktime_t ts;
@@ -80,10 +69,10 @@ static unsigned long compute_freq(struct cpu_pmu_stats *cpustats,
 	unsigned long freq = 0;
 
 	ts = ktime_get();
-	diff = ktime_to_us(ktime_sub(ts, cpustats->prev_ts));
+	diff = ktime_to_us(ktime_sub(ts, hw_data->prev_ts));
 	if (!diff)
 		diff = 1;
-	cpustats->prev_ts = ts;
+	hw_data->prev_ts = ts;
 	freq = cyc_cnt;
 	do_div(freq, diff);
 
@@ -109,66 +98,82 @@ static inline unsigned long read_event(struct event_data *event)
 
 static void read_perf_counters(int cpu, struct cpu_grp_info *cpu_grp)
 {
-	struct cpu_pmu_stats *cpustats = to_cpustats(cpu_grp, cpu);
-	struct dev_stats *devstats = to_devstats(cpu_grp, cpu);
+	int cpu_idx;
+	struct memlat_hwmon_data *hw_data = &per_cpu(pm_data, cpu);
+	struct memlat_hwmon *hw = &cpu_grp->hw;
 	unsigned long cyc_cnt;
 
-	devstats->inst_count = read_event(&cpustats->events[INST_IDX]);
-	devstats->mem_count = read_event(&cpustats->events[CM_IDX]);
-	cyc_cnt = read_event(&cpustats->events[CYC_IDX]);
-	devstats->freq = compute_freq(cpustats, cyc_cnt);
+	mutex_lock(&hw_data->mutex);
+	if (hw_data->init_pending) {
+		mutex_unlock(&hw_data->mutex);
+		return;
+	}
+
+	cpu_idx = cpu - cpumask_first(&cpu_grp->cpus);
+
+	hw->core_stats[cpu_idx].inst_count =
+			read_event(&hw_data->events[INST_IDX]);
+
+	hw->core_stats[cpu_idx].mem_count =
+			read_event(&hw_data->events[L2DM_IDX]);
+
+	cyc_cnt = read_event(&hw_data->events[CYC_IDX]);
+	mutex_unlock(&hw_data->mutex);
+
+	hw->core_stats[cpu_idx].freq = compute_freq(hw_data, cyc_cnt);
 }
 
 static unsigned long get_cnt(struct memlat_hwmon *hw)
 {
 	int cpu;
-	struct cpu_grp_info *cpu_grp = to_cpu_grp(hw);
+	struct cpu_grp_info *cpu_grp = container_of(hw,
+					struct cpu_grp_info, hw);
 
-	for_each_cpu(cpu, &cpu_grp->inited_cpus)
+	for_each_cpu(cpu, &cpu_grp->cpus)
 		read_perf_counters(cpu, cpu_grp);
 
 	return 0;
 }
 
-static void delete_events(struct cpu_pmu_stats *cpustats)
+static void delete_events(struct memlat_hwmon_data *hw_data)
 {
-	unsigned int i;
+	int i, ret;
 
-	for (i = 0; i < ARRAY_SIZE(cpustats->events); i++) {
-		cpustats->events[i].prev_count = 0;
-		perf_event_release_kernel(cpustats->events[i].pevent);
+	for (i = 0; i < NUM_EVENTS; i++) {
+		hw_data->events[i].prev_count = 0;
+		ret = perf_event_release_kernel(hw_data->events[i].pevent);
+		if (ret)
+			pr_err("delete_events %d error %d!\n", i, ret);
 	}
 }
 
 static void stop_hwmon(struct memlat_hwmon *hw)
 {
-	int cpu;
-	struct cpu_grp_info *cpu_grp = to_cpu_grp(hw);
-	struct dev_stats *devstats;
+	int cpu, idx;
+	struct memlat_hwmon_data *hw_data;
+	struct cpu_grp_info *cpu_grp = container_of(hw,
+					struct cpu_grp_info, hw);
 
 	get_online_cpus();
-	for_each_cpu(cpu, &cpu_grp->inited_cpus) {
-		delete_events(to_cpustats(cpu_grp, cpu));
+	for_each_cpu(cpu, &cpu_grp->cpus) {
+		hw_data = &per_cpu(pm_data, cpu);
+		mutex_lock(&hw_data->mutex);
+		if (hw_data->init_pending)
+			hw_data->init_pending = false;
+		else
+			delete_events(hw_data);
+		mutex_unlock(&hw_data->mutex);
+		mutex_destroy(&hw_data->mutex);
 
 		/* Clear governor data */
-		devstats = to_devstats(cpu_grp, cpu);
-		devstats->inst_count = 0;
-		devstats->mem_count = 0;
-		devstats->freq = 0;
+		idx = cpu - cpumask_first(&cpu_grp->cpus);
+		hw->core_stats[idx].inst_count = 0;
+		hw->core_stats[idx].mem_count = 0;
+		hw->core_stats[idx].freq = 0;
 	}
-	mutex_lock(&list_lock);
-	if (!cpumask_equal(&cpu_grp->cpus, &cpu_grp->inited_cpus))
-		list_del(&cpu_grp->mon_list);
-	mutex_unlock(&list_lock);
-	cpumask_clear(&cpu_grp->inited_cpus);
-
 	put_online_cpus();
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 	unregister_cpu_notifier(&cpu_grp->arm_memlat_cpu_notif);
-#else
-	cpuhp_remove_state_nocalls(CPUHP_AP_HISI_ARM_MEMLAT_MON_NOTIFY_PREPARE);
-#endif
 }
 
 static struct perf_event_attr *alloc_attr(void)
@@ -177,135 +182,120 @@ static struct perf_event_attr *alloc_attr(void)
 
 	attr = kzalloc(sizeof(struct perf_event_attr), GFP_KERNEL);
 	if (!attr)
-		return attr;
+		return ERR_PTR(-ENOMEM);
 
 	attr->type = PERF_TYPE_RAW;
 	attr->size = sizeof(struct perf_event_attr);
 	attr->pinned = 1;
-	attr->exclude_idle = 1;
 
 	return attr;
 }
 
-static int set_events(struct cpu_grp_info *cpu_grp, int cpu)
+static int set_events(struct memlat_hwmon_data *hw_data, int cpu)
 {
 	struct perf_event *pevent;
 	struct perf_event_attr *attr;
 	int err;
-	unsigned int i = 0, j = 0;
-	struct cpu_pmu_stats *cpustats = to_cpustats(cpu_grp, cpu);
 
 	/* Allocate an attribute for event initialization */
 	attr = alloc_attr();
-	if (!attr)
-		return -ENOMEM;
+	if (IS_ERR(attr))
+		return PTR_ERR(attr);
 
-	for (i = 0; i < ARRAY_SIZE(cpustats->events); i++) {
-		attr->config = cpu_grp->event_ids[i];
-		pevent = perf_event_create_kernel_counter(attr, cpu, NULL,
-							  NULL, NULL);
-		if (IS_ERR(pevent))
-			goto err_out;
-		cpustats->events[i].pevent = pevent;
-		perf_event_enable(pevent);
-	}
+	attr->config = INST_EV;
+	pevent = perf_event_create_kernel_counter(attr, cpu, NULL, NULL, NULL);
+	if (IS_ERR(pevent))
+		goto err_out;
+	hw_data->events[INST_IDX].pevent = pevent;
+	perf_event_enable(hw_data->events[INST_IDX].pevent);
+
+	attr->config = L2DM_EV;
+	pevent = perf_event_create_kernel_counter(attr, cpu, NULL, NULL, NULL);
+	if (IS_ERR(pevent))
+		goto err_out;
+	hw_data->events[L2DM_IDX].pevent = pevent;
+	perf_event_enable(hw_data->events[L2DM_IDX].pevent);
+
+	attr->config = CYC_EV;
+	pevent = perf_event_create_kernel_counter(attr, cpu, NULL, NULL, NULL);
+	if (IS_ERR(pevent))
+		goto err_out;
+	hw_data->events[CYC_IDX].pevent = pevent;
+	perf_event_enable(hw_data->events[CYC_IDX].pevent);
 
 	kfree(attr);
 	return 0;
 
 err_out:
-	pr_err("fail to create %d events\n", i);
-	for (j = 0; j < i; j++) {
-		perf_event_release_kernel(cpustats->events[j].pevent);
-		cpustats->events[j].pevent = NULL;
-	}
 	err = PTR_ERR(pevent);
+	pr_err("fail to create events error %d!\n", err);
 	kfree(attr);
 	return err;
 }
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 static int arm_memlat_cpu_callback(struct notifier_block *nb,
 		unsigned long action, void *hcpu)
 {
 	unsigned long cpu = (unsigned long)hcpu;
-	struct cpu_grp_info *cpu_grp, *tmp;
+	struct memlat_hwmon_data *hw_data = &per_cpu(pm_data, cpu);
 
-	if (action != CPU_ONLINE)
-		return NOTIFY_OK;
+	switch (action & ~CPU_TASKS_FROZEN) {
+		case CPU_DOWN_PREPARE:
+			mutex_lock(&hw_data->mutex);
+			if (!hw_data->init_pending) {
+				hw_data->init_pending = true;
+				delete_events(hw_data);
+			}
+			mutex_unlock(&hw_data->mutex);
+			break;
 
-	mutex_lock(&list_lock);
-	list_for_each_entry_safe(cpu_grp, tmp, &memlat_mon_list, mon_list) {
-		if (!cpumask_test_cpu(cpu, &cpu_grp->cpus) ||
-		    cpumask_test_cpu(cpu, &cpu_grp->inited_cpus))
-			continue;
-		if (set_events(cpu_grp, cpu))
-			pr_warn("Failed to create perf ev for CPU%lu\n", cpu);
-		else
-			cpumask_set_cpu(cpu, &cpu_grp->inited_cpus);
-		if (cpumask_equal(&cpu_grp->cpus, &cpu_grp->inited_cpus))
-			list_del(&cpu_grp->mon_list);
-	}
-	mutex_unlock(&list_lock);
+		case CPU_DOWN_FAILED:
+		case CPU_ONLINE:
+			mutex_lock(&hw_data->mutex);
+				if (hw_data->init_pending) {
+					if (set_events(hw_data, cpu)) {
+						pr_err("Failed to create perf event for CPU%lu\n", cpu);
+					} else  {
+						hw_data->init_pending = false;
+					}
+			}
+			mutex_unlock(&hw_data->mutex);
+			break;
+	};
 
 	return NOTIFY_OK;
 }
-#else
-static int __ref arm_memlat_cpu_online(unsigned int cpu)
-{
-	struct cpu_grp_info *cpu_grp, *tmp;
-
-	mutex_lock(&list_lock);
-	list_for_each_entry_safe(cpu_grp, tmp, &memlat_mon_list, mon_list) {
-		if (!cpumask_test_cpu(cpu, &cpu_grp->cpus) ||
-		    cpumask_test_cpu(cpu, &cpu_grp->inited_cpus))
-			continue;
-		if (set_events(cpu_grp, cpu))
-			pr_warn("Failed to create perf ev for CPU%lu\n", cpu);
-		else
-			cpumask_set_cpu(cpu, &cpu_grp->inited_cpus);
-		if (cpumask_equal(&cpu_grp->cpus, &cpu_grp->inited_cpus))
-			list_del(&cpu_grp->mon_list);
-	}
-	mutex_unlock(&list_lock);
-	return 0;
-}
-#endif
 
 static int start_hwmon(struct memlat_hwmon *hw)
 {
 	int cpu, ret = 0;
-	struct cpu_grp_info *cpu_grp = to_cpu_grp(hw);
+	struct memlat_hwmon_data *hw_data;
+	struct cpu_grp_info *cpu_grp = container_of(hw,
+					struct cpu_grp_info, hw);
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 	register_cpu_notifier(&cpu_grp->arm_memlat_cpu_notif);
-#else
-	cpuhp_setup_state_nocalls(CPUHP_AP_HISI_ARM_MEMLAT_MON_NOTIFY_PREPARE, "arm-memlat-mon:online",
-				  arm_memlat_cpu_online, NULL);
-#endif
 
 	get_online_cpus();
 	for_each_cpu(cpu, &cpu_grp->cpus) {
-		ret = set_events(cpu_grp, cpu);
+		hw_data = &per_cpu(pm_data, cpu);
+		mutex_init(&hw_data->mutex);
+		mutex_lock(&hw_data->mutex);
+		ret = set_events(hw_data, cpu);
 		if (ret) {
 			if (!cpu_online(cpu)) {
+				hw_data->init_pending = true;
 				ret = 0;
 			} else {
 				pr_warn("Perf event init failed on CPU%d\n",
 					cpu);
+				mutex_unlock(&hw_data->mutex);
 				break;
 			}
-		} else {
-			cpumask_set_cpu(cpu, &cpu_grp->inited_cpus);
 		}
+		mutex_unlock(&hw_data->mutex);
 	}
-	mutex_lock(&list_lock);
-	if (!cpumask_equal(&cpu_grp->cpus, &cpu_grp->inited_cpus))
-		list_add_tail(&cpu_grp->mon_list, &memlat_mon_list);
-	mutex_unlock(&list_lock);
 
 	put_online_cpus();
-
 	return ret;
 }
 
@@ -335,21 +325,18 @@ static int get_mask_from_dev_handle(struct platform_device *pdev,
 	return ret;
 }
 
-/*lint -e429 */
+/*lint -e429*/
 static int arm_memlat_mon_driver_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct memlat_hwmon *hw;
 	struct cpu_grp_info *cpu_grp;
 	int cpu, ret;
-	u32 event_id = 0;
 
 	cpu_grp = devm_kzalloc(dev, sizeof(*cpu_grp), GFP_KERNEL);
 	if (!cpu_grp)
 		return -ENOMEM;
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 	cpu_grp->arm_memlat_cpu_notif.notifier_call = arm_memlat_cpu_callback;
-#endif
 	hw = &cpu_grp->hw;
 
 	hw->dev = dev;
@@ -364,41 +351,15 @@ static int arm_memlat_mon_driver_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	/* the hw->cpus field is used by memlat governor */
 	cpumask_copy(&hw->cpus, &cpu_grp->cpus);
-
 	hw->num_cores = cpumask_weight(&cpu_grp->cpus);
 	hw->core_stats = devm_kzalloc(dev, hw->num_cores *
 				sizeof(*(hw->core_stats)), GFP_KERNEL);
 	if (!hw->core_stats)
 		return -ENOMEM;
 
-	cpu_grp->cpustats = devm_kzalloc(dev, hw->num_cores *
-			sizeof(*(cpu_grp->cpustats)), GFP_KERNEL);
-	if (!cpu_grp->cpustats)
-		return -ENOMEM;
-
-	cpu_grp->event_ids[CYC_IDX] = CYC_EV;
-
-	ret = of_property_read_u32(dev->of_node, "hisi,cachemiss-ev",
-				   &event_id);
-	if (ret) {
-		dev_dbg(dev, "Cache Miss event not specified. Using def:0x%x\n",
-			L2DM_EV);
-		event_id = L2DM_EV;
-	}
-	cpu_grp->event_ids[CM_IDX] = event_id;
-
-	ret = of_property_read_u32(dev->of_node, "hisi,inst-ev", &event_id);
-	if (ret) {
-		dev_dbg(dev, "Inst event not specified. Using def:0x%x\n",
-			INST_EV);
-		event_id = INST_EV;
-	}
-	cpu_grp->event_ids[INST_IDX] = event_id;
-
 	for_each_cpu(cpu, &cpu_grp->cpus)
-		to_devstats(cpu_grp, cpu)->id = cpu;
+		hw->core_stats[cpu - cpumask_first(&cpu_grp->cpus)].id = cpu;
 
 	hw->start_hwmon = &start_hwmon;
 	hw->stop_hwmon = &stop_hwmon;
@@ -412,7 +373,7 @@ static int arm_memlat_mon_driver_probe(struct platform_device *pdev)
 
 	return 0;
 }
-/*lint +e429 */
+/*lint +e429*/
 
 static struct of_device_id match_table[] = {
 	{ .compatible = "hisi,arm-memlat-mon" },

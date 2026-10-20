@@ -15,8 +15,6 @@
 #include <linux/string.h>
 
 #include <hisi_noc_info.h>
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_NOC_TAG
 
 #define CFG_INITFLOW_ARRAY_SIZE			22
 #define CFG_TARGETFLOW_ARRAY_SIZE		33
@@ -1343,7 +1341,7 @@ unsigned int hisi_noc_clock_enable_hi3650(struct hisi_noc_device *noc_dev,
 			continue;
 
 		clock_reg =
-		    (void __iomem *)(uintptr_t)((uintptr_t)noc_dev->pcrgctrl_base +
+		    (void __iomem *)((unsigned long)noc_dev->pcrgctrl_base +
 					node->crg_clk[i].offset);
 		reg_value = readl_relaxed(clock_reg);
 

@@ -54,7 +54,7 @@ static inline bool argo_time_to_init(struct tcp_sock *tp, struct sk_buff *skb)
 
 	ARGO_LOGD("Argo time to init dest addr: %x, dest port: %u, "
 		  "sysctl_tcp_argo: %u, dev name: %s,"
-		  "argo: %pK, tstamp: %x, "
+		  "argo: %p, tstamp: %x, "
 		  "sack: %x, syn: %x.",
 		  ((struct sock *)tp)->sk_daddr, ((struct sock *)tp)->sk_dport,
 		  sysctl_tcp_argo, skb->dev->name,
@@ -216,12 +216,6 @@ EXPORT_SYMBOL(argo_calc_high_seq);
 void argo_calc_delay_ack_nums(struct sock *sk, u32 seq, u32 end_seq)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-	int is_skb_queue_empty = 0;
-#if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,0)
-	is_skb_queue_empty = RB_EMPTY_ROOT(&tp->out_of_order_queue);
-#else
-	is_skb_queue_empty = skb_queue_empty((struct sk_buff_head *)&tp->out_of_order_queue);
-#endif
 
 	if (!tp->argo)
 		return;
@@ -232,7 +226,7 @@ void argo_calc_delay_ack_nums(struct sock *sk, u32 seq, u32 end_seq)
 		  "disable_argo: %u.",
 		  sk->sk_daddr, sk->sk_dport,
 		  seq, end_seq, tp->argo->snd_high_seq,
-		  tp->rcv_nxt, is_skb_queue_empty,
+		  tp->rcv_nxt, skb_queue_empty(&tp->out_of_order_queue),
 		  tp->argo->disable_argo);
 
 	if (!after(end_seq, seq))
@@ -240,7 +234,7 @@ void argo_calc_delay_ack_nums(struct sock *sk, u32 seq, u32 end_seq)
 
 	if (tp->argo->snd_high_seq &&
 	    !before(tp->rcv_nxt, tp->argo->snd_high_seq) &&
-	    !is_skb_queue_empty) {
+	    !skb_queue_empty(&tp->out_of_order_queue)) {
 		ARGO_LOGD("Argo disable because of lost packet "
 			  "between high_seq and snd_nxt. "
 			  "dest addr: %x, dest port: %u.",
@@ -250,13 +244,13 @@ void argo_calc_delay_ack_nums(struct sock *sk, u32 seq, u32 end_seq)
 	}
 
 	if (tp->argo->snd_high_seq && !tp->argo->disable_argo &&
-	    is_skb_queue_empty) {
+	    skb_queue_empty(&tp->out_of_order_queue)) {
 		ARGO_LOGI("Argo start dealy ack. "
 			  "dest addr: %x, dest port: %u.",
 			  sk->sk_daddr, sk->sk_dport);
 		tp->argo->delay_ack_nums = 1;
 	} else if (tp->argo->disable_argo &&
-		   is_skb_queue_empty) {
+		   skb_queue_empty(&tp->out_of_order_queue)) {
 		ARGO_LOGI("Argo clear hints because of disable argo. "
 			  "dest addr: %x, dest port: %u.",
 			  sk->sk_daddr, sk->sk_dport);
@@ -273,7 +267,7 @@ int argo_delay_acks_in_fastpath(struct sock *sk, struct tcp_sock *tp)
 	if (tp->argo && sysctl_tcp_argo && !tp->rx_opt.num_sacks &&
 	    tp->argo->delay_ack_nums == ARGO_DELACK_THRESH) {
 		ARGO_LOGD("Argo fast path delay ack. "
-			  "dest addr: %x, dest port: %u, tp argo: %pK, "
+			  "dest addr: %x, dest port: %u, tp argo: %p, "
 			  "sysctl_tcp_argo: %u, num_sacks: %u, "
 			  "delay ack nums: %u, snd_nxt: %u, "
 			  "argo high_snd_nxt: %u.",
@@ -302,14 +296,14 @@ int argo_delay_acks_in_fastpath(struct sock *sk, struct tcp_sock *tp)
 	} else if (tp->argo && sysctl_tcp_argo && tp->argo->delay_ack_nums &&
 		   tp->argo->delay_ack_nums < ARGO_DELACK_THRESH) {
 			ARGO_LOGD("Argo fast path delay ack. "
-				  "dest addr: %x, dest port: %u, tp argo: %pK, "
+				  "dest addr: %x, dest port: %u, tp argo: %p, "
 				  "sysctl_tcp_argo: %u, delay ack nums: %u.",
 				  sk->sk_daddr, sk->sk_dport, tp->argo,
 				  sysctl_tcp_argo, tp->argo->delay_ack_nums);
 		tp->argo->delay_ack_nums++;
 	} else if (tp->argo && !sysctl_tcp_argo) {
 		ARGO_LOGD("Argo fast path delay ack. "
-			  "dest addr: %x, dest port: %u, tp argo: %pK, "
+			  "dest addr: %x, dest port: %u, tp argo: %p, "
 			  "sysctl_tcp_argo: %u.",
 			  sk->sk_daddr, sk->sk_dport, tp->argo,
 			  sysctl_tcp_argo);

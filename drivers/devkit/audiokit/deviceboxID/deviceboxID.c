@@ -67,8 +67,6 @@ enum Box_vendor {
 	BOX_NAME_GOER,
 	BOX_NAME_GD,
 	BOX_NAME_LC,
-	BOX_NAME_LX,
-	BOX_NAME_XW,
 	BOX_NAME_PU,
 	BOX_NAME_PD,
 	BOX_NAME_NP,
@@ -76,7 +74,7 @@ enum Box_vendor {
 	BOX_VENDOR_MAX
 };
 
-static char *boxtable[BOX_VENDOR_MAX]={"", "AAC", "GOER", "GD ", "LC ", "LX ", "XW ", "PU ", "PD ", "NP ", "QS "};
+static char *boxtable[BOX_VENDOR_MAX]={"", "AAC", "GOER", "GD ", "LC ",  "PU ", "PD ", "NP ", "QS "};
 
 enum {
 	DEVICEBOX_ID_MODE_USE_GPIO	= 0x0,
@@ -217,16 +215,6 @@ static long deviceboxID_ioctl(struct file *file, unsigned int command,
   */
 	return deviceboxID_do_ioctl(file, command, (void __user *)arg, 0);
 }
-/*lint -restore*/
-static long deviceboxID_compat_ioctl(struct file *file, unsigned int command,
-						  unsigned long arg)
-{
- /**
-  * The use of parameters "0" is to meet format of linux driver,
-  * it has no practical significance.
-  */
-	return deviceboxID_do_ioctl(file, command, (void __user *)compat_ptr(arg), 0);
-}
 
 /*lint -save -e528 */
 static const struct of_device_id deviceboxID_match[] = {
@@ -242,7 +230,7 @@ static const struct file_operations deviceboxID_fops = {
 	.owner          = THIS_MODULE,
 	.unlocked_ioctl = deviceboxID_ioctl,
 #ifdef CONFIG_COMPAT
-	.compat_ioctl = deviceboxID_compat_ioctl,
+	.compat_ioctl = deviceboxID_ioctl,
 #endif
 };
 
@@ -261,7 +249,6 @@ char *get_box_name(int map_id)
 	}
 }
 
-#ifdef DEVICEBOXID_DEBUG
 static ssize_t deviceboxID_info_show(struct device *dev,
 				 struct device_attribute *attr, char *buf)
 {
@@ -325,7 +312,6 @@ static struct attribute *deviceboxID_attributes[] = {
 static const struct attribute_group deviceboxID_attr_group = {
 	.attrs = deviceboxID_attributes,
 };
-#endif
 
 static int get_check_mode(struct device_node *dev_node)
 {
@@ -409,10 +395,7 @@ static int get_gpio_status(struct device_node *node, char *propname, int box_ind
 	}
 
 	/* set gpio to input status */
-	ret = gpio_direction_input(deviceboxID.box_info[box_index].gpio_id[gpio_index]);
-	if (ret) {
-		pr_err("%s:set gpio to input status error! ret is %d\n", __func__, ret);
-	}
+	gpio_direction_input(deviceboxID.box_info[box_index].gpio_id[gpio_index]);
 
 	deviceboxID.box_info[box_index].gpio_status[gpio_index] = gpio_get_value_cansleep(deviceboxID.box_info[box_index].gpio_id[gpio_index]);
 
@@ -712,13 +695,13 @@ static int deviceboxID_probe(struct platform_device *pdev)
 			pr_err("%s:could not set pins to default state.\n", __func__);
 			return -ENOENT;
 		}
-#ifdef DEVICEBOXID_DEBUG
+
 		/* create sysfs for debug function */
 		if ((sysfs_create_group(&pdev->dev.kobj, &deviceboxID_attr_group)) < 0) {
 			pr_err("%s:failed to register sysfs\n", __func__);
 			return -ENOENT;
 		}
-#endif
+
 		if (NULL != deviceboxID.pull_up_vdd) {
 			if (boxID_regulator_config(deviceboxID.pull_up_vdd, true) == 0) {
 				if (boxID_regulator_set(deviceboxID.pull_up_vdd, true)) {
@@ -781,9 +764,8 @@ err_get_gpio_status:
 			}
 		}
 	}
-#ifdef DEVICEBOXID_DEBUG
+
 	sysfs_remove_group(&pdev->dev.kobj, &deviceboxID_attr_group);
-#endif
 
 	return ret;
 }
@@ -809,9 +791,8 @@ static int deviceboxID_remove(struct platform_device *pdev)
 				}
 			}
 		}
-#ifdef DEVICEBOXID_DEBUG
+
 		sysfs_remove_group(&pdev->dev.kobj, &deviceboxID_attr_group);
-#endif
 		misc_deregister(&deviceboxID_device);
 	}
 

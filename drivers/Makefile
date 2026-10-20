@@ -12,18 +12,18 @@ obj-$(CONFIG_GENERIC_PHY)	+= phy/
 
 # GPIO must come after pinctrl as gpios may need to mux pins etc
 obj-$(CONFIG_PINCTRL)		+= pinctrl/
-obj-$(CONFIG_GPIOLIB)		+= gpio/
+obj-y				+= gpio/
 obj-y				+= pwm/
 obj-$(CONFIG_PCI)		+= pci/
 obj-$(CONFIG_PARISC)		+= parisc/
 obj-$(CONFIG_RAPIDIO)		+= rapidio/
 obj-y				+= video/
-obj-y				+= devkit/lcdkit/
+obj-$(CONFIG_LCDKIT_DRIVER)     += devkit/lcdkit/
 obj-$(CONFIG_HUAWEI_LCD_PANEL)  += huawei_platform/lcd/
 obj-y				+= idle/
 obj-$(CONFIG_HISI_BOOTDEVICE)   += bootdevice/
 # IPMI must come before ACPI in order to provide IPMI opregion support
-obj-y				+= char/ipmi/
+obj-$(CONFIG_IPMI_HANDLER)	+= char/ipmi/
 
 obj-$(CONFIG_ACPI)		+= acpi/
 obj-$(CONFIG_SFI)		+= sfi/
@@ -31,8 +31,6 @@ obj-$(CONFIG_SFI)		+= sfi/
 # was used and do nothing if so
 obj-$(CONFIG_PNP)		+= pnp/
 obj-y				+= amba/
-
-obj-y				+= clk/
 # Many drivers will want to use DMA so this has to be made available
 # really early.
 obj-$(CONFIG_DMADEVICES)	+= dma/
@@ -57,8 +55,11 @@ obj-y				+= char/
 # iommu/ comes before gpu as gpu are using iommu controllers
 obj-$(CONFIG_IOMMU_SUPPORT)	+= iommu/
 
+obj-$(CONFIG_GPU_GMC_GENERIC)	+= gpu/gmc/
+
 # gpu/ comes after char for AGP vs DRM startup and after iommu
-obj-y				+= gpu/
+obj-y				+= gpu/drm/ gpu/host1x/ gpu/ipu-v3/ gpu/vga/
+obj-$(CONFIG_MALI_MIDGARD)	+= gpu/arm/
 
 obj-$(CONFIG_CONNECTOR)		+= connector/
 
@@ -70,7 +71,6 @@ obj-$(CONFIG_PARPORT)		+= parport/
 obj-$(CONFIG_NVM)		+= lightnvm/
 obj-y				+= base/ block/ misc/ mfd/ nfc/
 obj-$(CONFIG_LIBNVDIMM)		+= nvdimm/
-obj-$(CONFIG_DEV_DAX)		+= dax/
 obj-$(CONFIG_DMA_SHARED_BUFFER) += dma-buf/
 obj-$(CONFIG_NUBUS)		+= nubus/
 obj-y				+= macintosh/
@@ -83,7 +83,6 @@ obj-$(CONFIG_TARGET_CORE)	+= target/
 obj-$(CONFIG_MTD)		+= mtd/
 obj-$(CONFIG_SPI)		+= spi/
 obj-$(CONFIG_SPMI)		+= spmi/
-obj-$(CONFIG_HSI)		+= hsi/
 obj-$(CONFIG_HISI_SPMI)		+= spmi_hisi/
 obj-y				+= hsi/
 obj-y				+= net/
@@ -115,7 +114,7 @@ obj-y				+= media/
 obj-$(CONFIG_PPS)		+= pps/
 obj-$(CONFIG_PTP_1588_CLOCK)	+= ptp/
 obj-$(CONFIG_W1)		+= w1/
-obj-y				+= power/
+obj-$(CONFIG_POWER_SUPPLY)	+= power/
 obj-$(CONFIG_HWMON)		+= hwmon/
 obj-$(CONFIG_THERMAL)		+= thermal/
 obj-$(CONFIG_WATCHDOG)		+= watchdog/
@@ -128,15 +127,17 @@ obj-$(CONFIG_EISA)		+= eisa/
 obj-y				+= lguest/
 obj-$(CONFIG_CPU_FREQ)		+= cpufreq/
 obj-$(CONFIG_CPU_IDLE)		+= cpuidle/
-obj-y				+= mmc/
+#obj-y				+= mmc/
+obj-$(CONFIG_MMC)		+= mmc/
 obj-$(CONFIG_MEMSTICK)		+= memstick/
+obj-y				+= leds/
 obj-$(CONFIG_SWITCH)		+= switch/
-obj-$(CONFIG_NEW_LEDS)		+= leds/
 obj-$(CONFIG_INFINIBAND)	+= infiniband/
 obj-$(CONFIG_SGI_SN)		+= sn/
 obj-y				+= firmware/
 obj-$(CONFIG_CRYPTO)		+= crypto/
 obj-$(CONFIG_SUPERH)		+= sh/
+obj-$(CONFIG_ARCH_SHMOBILE)	+= sh/
 ifndef CONFIG_ARCH_USES_GETTIMEOFFSET
 obj-y				+= clocksource/
 endif
@@ -147,10 +148,11 @@ obj-$(CONFIG_OF)		+= of/
 obj-$(CONFIG_SSB)		+= ssb/
 obj-$(CONFIG_BCMA)		+= bcma/
 obj-$(CONFIG_VHOST_RING)	+= vhost/
-obj-$(CONFIG_VHOST)		+= vhost/
 obj-$(CONFIG_VLYNQ)		+= vlynq/
 obj-$(CONFIG_STAGING)		+= staging/
 obj-y				+= platform/
+#common clk code
+obj-y				+= clk/
 
 obj-$(CONFIG_MAILBOX)		+= mailbox/
 obj-$(CONFIG_HWSPINLOCK)	+= hwspinlock/
@@ -174,13 +176,12 @@ obj-$(CONFIG_MCB)		+= mcb/
 obj-$(CONFIG_PERF_EVENTS)	+= perf/
 obj-$(CONFIG_RAS)		+= ras/
 obj-$(CONFIG_THUNDERBOLT)	+= thunderbolt/
-obj-$(CONFIG_TEE_CFC)		+= hwtracing/coresight/
 obj-y				+= hwtracing/intel_th/
+obj-$(CONFIG_TEE_CFC)		+= hwtracing/coresight/
 obj-$(CONFIG_STM)		+= hwtracing/stm/
 obj-$(CONFIG_ANDROID)		+= android/
 obj-$(CONFIG_NVMEM)		+= nvmem/
 obj-$(CONFIG_FPGA)		+= fpga/
-obj-$(CONFIG_TEE)		+= tee/
 
 obj-$(CONFIG_HI_VCODEC_VENC_HI3660) += vcodec/hi_vcodec/venc/drv/venc/
 obj-$(CONFIG_HI_VCODEC_VENC_HIVNA) += vcodec/hi_vcodec/venc_hivna/drv/venc/
@@ -195,27 +196,18 @@ obj-$(CONFIG_IMAGINATION_D5500_VCODEC)  += vcodec/imagination/D5500/
 endif
 obj-$(CONFIG_HISILICON_PLATFORM)+= hisi/
 obj-$(CONFIG_HUAWEI_PLATFORM) += huawei_platform/
-obj-$(CONFIG_HUAWEI_DSM)        += dsm/
-obj-$(CONFIG_HUAWEI_WPA_DMD) += wpa_dmd/
+obj-$(CONFIG_HUAWEI_DSM)	+= dsm/
 obj-$(CONFIG_CONNECTIVITY_HI110X) += connectivity/
-obj-$(CONFIG_LOGGER_EXTEND) += log/
-obj-$(CONFIG_CONTEXTHUB)        += contexthub/
+obj-$(CONFIG_LOG_EXCEPTION) += log_usertype/
+obj-$(CONFIG_CONTEXTHUB)	+= contexthub/
 obj-$(CONFIG_HW_GADGET) += hwusb/
 obj-$(CONFIG_HUAWEI_BFM) += hwbfm/
 obj-$(CONFIG_HW_ZEROHUNG) += hwzerohung/
-obj-$(CONFIG_HW_FDLEAK) += hwfdleak/
-obj-$(CONFIG_HW_ERECOVERY) += hwerecovery/
 obj-$(CONFIG_HW_WIFI)       += hwnet/
-obj-y += devkit/tpkit/
+obj-$(CONFIG_HUAWEI_TS_KIT) += devkit/tpkit/
 obj-$(CONFIG_AUDIOKIT) += devkit/audiokit/
 obj-$(CONFIG_HW_CPULOAD_NOTI) += cpuload/
 obj-$(CONFIG_HW_MEMORY_MONITOR) += mmonitor/
 obj-$(CONFIG_HW_MEMORY_MONITOR) += allocpages_delayacct/
 obj-y += cfi/
-obj-$(CONFIG_HUAWEI_DUBAI) += dubai/
-obj-$(CONFIG_HUAWEI_STORAGE_ROFA) += storage_rofa/
-obj-$(CONFIG_OASES) += oases/
-obj-$(CONFIG_OAE_FW_PATCH) += oae_fw_patch/
-
-# memory reclaim delay accounting
-obj-$(CONFIG_HW_RECLAIM_ACCT) += reclaim_acct/
+obj-$(CONFIG_HUAWEI_ABNS) += abns/

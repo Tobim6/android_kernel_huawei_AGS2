@@ -22,7 +22,6 @@
 
 #include <linux/vmalloc.h>
 #include <linux/types.h>
-#include <linux/semaphore.h>
 
 
 /*----c++ support-------------------------------------------------------------------*/
@@ -88,106 +87,15 @@ typedef struct
     char *src_log_file_path;
     void *log_save_context;
     void *log_save_additional_context;
-    bool save_log_after_reboot;
 } bfmr_log_src_t;
 
 #if BITS_PER_LONG == 32
-typedef   struct stat64   bfm_stat_t;
-#define   bfm_sys_lstat sys_lstat64
+            typedef   struct stat64   bfm_stat_t;
+            #define   bfm_sys_lstat sys_lstat64
 #else
-typedef   struct stat bfm_stat_t;
-#define   bfm_sys_lstat sys_newlstat
+            typedef   struct stat bfm_stat_t;
+            #define   bfm_sys_lstat sys_newlstat
 #endif
-
-typedef enum
-{
-    HW_FAULT_OCP = 0,
-    HW_FAULT_MAX_COUNT,
-} bfmr_hardware_fault_type_e;
-
-typedef enum
-{
-    HW_FAULT_STAGE_DURING_BOOTUP = 0,
-    HW_FAULT_STAGE_AFTER_BOOT_SUCCESS,
-    HW_FAULT_STAGE_MAX_COUNT,
-} bfmr_hardware_fault_stage_e;
-
-/* bootfail additional info */
-typedef struct bfmr_bootfail_addl_info
-{
-    char log_path[1024];
-    char detail_info[512];
-    bfmr_hardware_fault_type_e hardware_fault_type;
-    char reserved[2556];
-} bfmr_bootfail_addl_info_t;
-
-typedef struct bfmr_rrecord_misc_msg_param
-{
-    /* "boot-erecovery" */
-    char command[32];
-
-    /* main reason*/
-    int enter_erecovery_reason;
-
-    /* sub reason need for BI */
-    int enter_erecovery_reason_number;
-
-    /* boot stage when boot fail occurs */
-    int boot_fail_stage_for_erecovery;
-
-    /* boot fail no */
-    unsigned int boot_fail_no;
-
-    /* recovery method */
-    unsigned int recovery_method;
-
-    /* mark if the misc write success,yes:0xAA55AA55 */
-    unsigned int sync_misc_flag;
-
-    /* abnormal shutdown flag */
-    unsigned int abns_flag;
-
-    /* format data flag */
-    unsigned int format_data_flag;
-
-    /* original recovery method */
-    unsigned int original_recovery_method;
-
-    /* bopd mode value*/
-    unsigned long long bopd_mode_value;
-
-    /* reserved for future usage */
-    char reserved[948];
-} __attribute__((packed)) bfmr_rrecord_misc_msg_param_t;
-
-typedef struct
-{
-    char ldo_num[16];
-    char reserved[240];
-} ocp_excp_info_t;
-
-typedef struct
-{
-    ocp_excp_info_t excp_info;
-    bfmr_hardware_fault_type_e fault_type;
-    struct semaphore sem;
-} bfm_ocp_excp_info_t;
-
-typedef struct
-{
-    bfmr_hardware_fault_stage_e fault_stage;
-    union
-    {
-        ocp_excp_info_t ocp_excp_info;
-    } hw_excp_info;
-} bfmr_get_hw_fault_info_param_t;
-
-typedef struct bfmr_partition_mount_result_info
-{
-    char mount_point[32];
-    bool mount_result;
-} bfmr_partition_mount_result_info_t;
-
 
 /*----export macroes-----------------------------------------------------------------*/
 
@@ -213,10 +121,9 @@ typedef struct bfmr_partition_mount_result_info
 #define BFMR_SIZE_1K ((unsigned int)1024)
 #define BFMR_SIZE_2K ((unsigned int)2048)
 #define BFMR_SIZE_4K ((unsigned int)4096)
-#define BFMR_SIZE_32K ((unsigned int)32768)
 
 #define BFMR_DEV_FULL_PATH_MAX_LEN BFMR_SIZE_256
-#define BFMR_TEMP_BUF_LEN BFMR_SIZE_32K
+#define BFMR_TEMP_BUF_LEN BFMR_SIZE_4K
 #define BFMR_MAX_PATH BFMR_SIZE_4K
 
 #define ENTER_ERECOVERY_BY_PRESS_KEY (2001)
@@ -240,7 +147,6 @@ typedef struct bfmr_partition_mount_result_info
 #define ENTER_ERECOVERY_BECAUSE_CUST_MOUNT_FAILED (2020)
 #define ENTER_ERECOVERY_BECAUSE_PRODUCT_MOUNT_FAILED (2021)
 #define ENTER_ERECOVERY_BECAUSE_VERSION_MOUNT_FAILED (2022)
-#define ENTER_ERECOVERY_BECAUSE_HW_DEGRADE_BOOT_FAIL (2040)
 #define ENTER_ERECOVERY_UNKNOWN (2099)
 
 #define BFMR_PRINT_INVALID_PARAMS(format, ...) do {printk(KERN_ERR "func: %s line: %d invalid parameters: " format, __func__, __LINE__, ##__VA_ARGS__);} while (0)
@@ -262,17 +168,12 @@ do\
 
 #define BFMR_BOOTLOCK_FIELD_NAME "bootlock"
 #define BFMR_ENABLE_FIELD_NAME "hw_bfm_enable"
-#define BFR_ENABLE_FIELD_NAME "hw_bfr_enable"
 #define BFR_RRECORD_PART_NAME "rrecord"
-#define BFR_MISC_PART_OFFSET ((unsigned int)0x0)
 #define BFR_RRECORD_PART_MAX_COUNT (2)
 #define BFMR_DEV_NAME "hw_bfm"
 #define BFMR_DEV_PATH "/dev/hw_bfm"
 #define BFM_LOG_MAX_COUNT (10)
-#define BFM_LOG_MAX_COUNT_PER_DIR (10)
-#define BFM_MAX_INT_NUMBER_LEN (21)
-#define BFMR_BOPD_MODE_FIELD_NAME "bopd.mode"
-#define BFMR_MOUNT_NAME_SIZE (32)
+
 
 /*----global variables----------------------------------------------------------------*/
 
@@ -321,7 +222,6 @@ int bfmr_create_log_path(char *path);
 char* bfmr_convert_rtc_time_to_asctime(unsigned long long rtc_time);
 char* bfm_get_bootlock_value_from_cmdline(void);
 bool bfmr_has_been_enabled(void);
-bool bfr_has_been_enabled(void);
 void bfmr_enable_ctl(int enable_flag);
 char* bfmr_reverse_find_string(const char *psrc, const char *pstr_to_be_found);
 bool bfm_get_symbol_link_path(char *file_path, char *psrc_path, size_t src_path_size);
@@ -331,17 +231,8 @@ long bfmr_full_read_with_file_path(const char *pfile_path, char *buf, size_t buf
 long bfmr_full_write_with_file_path(const char *pfile_path, char *buf, size_t buf_size);
 void bfmr_unlink_file(char *pfile_path);
 int bfmr_get_uid_gid(uid_t *puid, gid_t *pgid);
-int bfmr_read_rrecord_misc_msg(bfmr_rrecord_misc_msg_param_t *pparam);
-int bfmr_write_rrecord_misc_msg(bfmr_rrecord_misc_msg_param_t *pparam);
 unsigned int bfmr_get_bootup_time(void);
-char* bfm_get_boot_stage_name(unsigned int boot_stage);
-bool bfm_is_beta_version(void);
-bool bfmr_is_oversea_commercail_version(void);
-int bfm_write_sub_bootfail_magic_num(unsigned int magic_num, void *phys_addr);
-int bfm_write_sub_bootfail_num(unsigned int bootfail_errno, void *phys_addr);
-int bfm_write_sub_bootfail_count(unsigned int bootfail_count, void *phys_addr);
 int bfmr_common_init(void);
-void bfmr_set_mount_state(char * bfmr_mount_point, bool mount_result);
 
 #ifdef __cplusplus
 }

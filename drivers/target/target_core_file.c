@@ -466,10 +466,6 @@ fd_execute_unmap(struct se_cmd *cmd, sector_t lba, sector_t nolb)
 	struct inode *inode = file->f_mapping->host;
 	int ret;
 
-	if (!nolb) {
-		return 0;
-	}
-
 	if (cmd->se_dev->dev_attrib.pi_prot_type) {
 		ret = fd_do_prot_unmap(cmd, lba, nolb);
 		if (ret)
@@ -526,7 +522,7 @@ fd_execute_rw(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
 	 */
 	if (cmd->data_length > FD_MAX_BYTES) {
 		pr_err("FILEIO: Not able to process I/O of %u bytes due to"
-		       "FD_MAX_BYTES: %u iovec count limitation\n",
+		       "FD_MAX_BYTES: %u iovec count limitiation\n",
 			cmd->data_length, FD_MAX_BYTES);
 		return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 	}
@@ -598,7 +594,8 @@ fd_execute_rw(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
 	if (ret < 0)
 		return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 
-	target_complete_cmd(cmd, SAM_STAT_GOOD);
+	if (ret)
+		target_complete_cmd(cmd, SAM_STAT_GOOD);
 	return 0;
 }
 

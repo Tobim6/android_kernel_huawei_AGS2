@@ -92,7 +92,6 @@ struct eth_dev {
 #define	WORK_RX_MEMORY		0
 
 	bool			zlp;
-	bool			no_skb_reserve;
 	u8			host_mac[ETH_ALEN];
 	u8			dev_mac[ETH_ALEN];
 };
@@ -221,11 +220,21 @@ void clear_ether_trace(void)
 
 static int ueth_change_mtu(struct net_device *net, int new_mtu)
 {
-	if (new_mtu <= ETH_HLEN || new_mtu > GETHER_MAX_ETH_FRAME_LEN)
-		return -ERANGE;
-	net->mtu = new_mtu;
+	struct eth_dev	*dev = netdev_priv(net);
+	unsigned long	flags;
+	int		status = 0;
 
-	return 0;
+	/* don't change MTU on "live" link (peer won't know) */
+	spin_lock_irqsave(&dev->lock, flags);
+	if (dev->port_usb)
+		status = -EBUSY;
+	else if (new_mtu <= ETH_HLEN || new_mtu > GETHER_MAX_ETH_FRAME_LEN)
+		status = -ERANGE;
+	else
+		net->mtu = new_mtu;
+	spin_unlock_irqrestore(&dev->lock, flags);
+
+	return status;
 }
 
 static void eth_get_drvinfo(struct net_device *net, struct ethtool_drvinfo *p)
@@ -315,8 +324,7 @@ rx_submit(struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 	 * but on at least one, checksumming fails otherwise.  Note:
 	 * RNDIS headers involve variable numbers of LE32 values.
 	 */
-	if (likely(!dev->no_skb_reserve))
-		skb_reserve(skb, NET_IP_ALIGN);
+	skb_reserve(skb, NET_IP_ALIGN);
 
 	req->buf = skb->data;
 	req->length = size;
@@ -347,7 +355,7 @@ static void rx_complete(struct usb_ep *ep, struct usb_request *req)
 
 	if (!hisi_uether_enable_get()) {
 		pr_err("rx_complete: bad uether\n");
-		return;
+		return ;
 	}
 
 	dev = ep->driver_data;
@@ -424,7 +432,7 @@ quiesce:
 
 clean:
 	spin_lock(&dev->req_lock);
-	if (dev->rx_reqs.next) {
+	if (list_is_valid(&dev->rx_reqs)) {
 		list_add(&req->list, &dev->rx_reqs);
 		is_disabled = 0;
 	}
@@ -432,7 +440,7 @@ clean:
 
 	if (is_disabled) {
 		pr_err("%s: rndis disabled during rx complete %d\n", __func__, req->status);
-		return;
+		return ;
 	}
 
 	if (queue)
@@ -586,13 +594,13 @@ static void tx_complete(struct usb_ep *ep, struct usb_request *req)
 
 	if (!hisi_uether_enable_get()) {
 		pr_err("tx_complete: bad uether\n");
-		return;
+		return ;
 	}
 
 	dev = ep->driver_data;
-	if (!dev) 
-		return;
-	
+	if (!dev) {
+		return ;
+	}
 	net = dev->net;
 	skb = req->context;
 
@@ -673,7 +681,7 @@ static void tx_complete(struct usb_ep *ep, struct usb_request *req)
 					dev->no_tx_req_used++;
 					u_ether_trace_1.xmit_packs_count--;
 					spin_unlock(&dev->req_lock);
-					netif_trans_update(net);
+					net->trans_start = jiffies;
 				}
 			} else {
 				spin_lock(&dev->req_lock);
@@ -739,7 +747,6 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 {
 	struct eth_dev		*dev = netdev_priv(net);
 	int			length = 0;
-	int			old_length = 0;
 	int			retval;
 	struct usb_request	*req = NULL;
 	unsigned long		flags;
@@ -831,8 +838,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 			/* Multi frame CDC protocols may store the frame for
 			 * later which is not a dropped frame.
 			 */
-			if (dev->port_usb &&
-					dev->port_usb->supports_multi_frame)
+			if (dev->port_usb->supports_multi_frame)
 				goto multiframe;
 
 			pr_err("%s: drop skb\n", __func__);
@@ -849,7 +855,6 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 
 	if (dev->port_usb->multi_pkt_xfer) {
 		memcpy(req->buf + req->length, skb->data, skb->len);
-		old_length = req->length;
 		req->length = req->length + skb->len;
 		length = req->length;
 		dev_kfree_skb_any(skb);
@@ -881,10 +886,9 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	req->complete = tx_complete;
 
 	/* NCM requires no zlp if transfer is dwNtbInMaxSize */
-	if (dev->port_usb &&
-	    dev->port_usb->is_fixed &&
+	if (dev->port_usb->is_fixed &&
 	    length == dev->port_usb->fixed_in_len &&
-	    (length % in->maxpacket) == 0) /*[false alarm]:it is a false alarm*/
+	    (length % in->maxpacket) == 0) /*lint !e613*//* [false alarm]:this is original code */
 		req->zero = 0;
 	else
 		req->zero = 1;
@@ -900,6 +904,20 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 
 	req->length = length;
 
+	/* throttle high/super speed IRQ rate back slightly */
+	if (gadget_is_dualspeed(dev->gadget) &&
+		(dev->gadget->speed == USB_SPEED_HIGH ||
+			dev->gadget->speed == USB_SPEED_SUPER)) {
+		dev->tx_qlen++;
+		if (dev->tx_qlen == (dev->qmult/2)) {
+			req->no_interrupt = 0;
+			dev->tx_qlen = 0;
+		} else {
+			req->no_interrupt = 1;
+		}
+	} else {
+		req->no_interrupt = 0;
+	}
 
 	u_ether_trace_1.xmit_submit_count++;
 	u_ether_trace_1.xmit_bytes_submit += req->length;
@@ -912,18 +930,12 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 		u_ether_trace_1.xmit_tx_queue_err_count++;
 		break;
 	case 0:
-		netif_trans_update(net);
+		net->trans_start = jiffies;
 	}
 
 	if (retval) {
 		if (!dev->port_usb->multi_pkt_xfer)
 			dev_kfree_skb_any(skb);
-		else {
-			req->length = old_length;
-			spin_lock_irqsave(&dev->req_lock, flags);
-			dev->no_tx_req_used--;
-			spin_unlock_irqrestore(&dev->req_lock, flags);
-		}
 drop:
 		dev->net->stats.tx_dropped++;
 multiframe:
@@ -957,7 +969,12 @@ static int eth_open(struct net_device *net)
 	struct gether	*link;
 
 	DBG(dev, "%s\n", __func__);
+#if 0
+	if (netif_carrier_ok(dev->net))
+		eth_start(dev, GFP_KERNEL);
+#else
 	eth_start(dev, GFP_KERNEL);
+#endif
 
 	spin_lock_irq(&dev->lock);
 	link = dev->port_usb;
@@ -1232,16 +1249,6 @@ void gether_set_gadget(struct net_device *net, struct usb_gadget *g)
 }
 EXPORT_SYMBOL_GPL(gether_set_gadget);
 
-void gether_set_gadget_without_set_netdev(struct net_device *net,
-		struct usb_gadget *g)
-{
-	struct eth_dev *dev;
-
-	dev = netdev_priv(net);
-	dev->gadget = g;
-}
-EXPORT_SYMBOL_GPL(gether_set_gadget_without_set_netdev);
-
 int gether_set_dev_addr(struct net_device *net, const char *dev_addr)
 {
 	struct eth_dev *dev;
@@ -1400,7 +1407,6 @@ struct net_device *gether_connect(struct gether *link)
 
 	if (result == 0) {
 		dev->zlp = link->is_zlp_ok;
-		dev->no_skb_reserve = link->no_skb_reserve;
 		DBG(dev, "qlen %d\n", qlen(dev->gadget, dev->qmult));
 
 		dev->header_len = link->header_len;

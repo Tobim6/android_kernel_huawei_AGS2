@@ -412,7 +412,6 @@ int goodix_ts_roi_init(struct goodix_ts_roi *roi);
 int goodix_pinctrl_select_normal(struct goodix_ts_data *ts);
 int goodix_pinctrl_select_suspend(struct goodix_ts_data *ts);
 int goodix_pinctr_int_ouput_low(void);
-int goodix_param_init(void);
 
 extern int goodix_get_rawdata(struct ts_rawdata_info *info,
 				struct ts_cmd_node *out_cmd);

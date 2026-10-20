@@ -1,1 +1,3 @@
-obj-$(CONFIG_HUAWEI_TYPEC_PTN5150H) += ptn5150h.o
+#nusb Type C Connector Driver
+
+obj-y	+= ptn5150h.o

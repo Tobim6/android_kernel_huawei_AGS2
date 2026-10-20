@@ -32,7 +32,7 @@
 #define SIGN_INIT_CALLBACKS_SIZE 20
 
 /* receive message from hifi£¬the size of msg_id (bytes)*/
-#define VOICE_PROXY_MSG_ID_SIZE (4)
+#define VOICE_PROXY_MSG_ID_SIZE (8)
 
 #define DTS_COMP_VOICE_PROXY_NAME "hisilicon,voice_proxy"
 
@@ -267,7 +267,7 @@ int32_t voice_proxy_create_data_node(struct voice_proxy_data_node **node, int8_t
 	return 0;
 }
 
-int32_t voice_proxy_mailbox_send_msg_cb(uint32_t mailcode, uint16_t msg_id, const void *buf, uint32_t size)
+int32_t voice_proxy_mailbox_send_msg_cb(uint32_t mailcode, uint16_t msg_id, void *buf, uint32_t size)
 {
 	int32_t ret;
 
@@ -304,7 +304,7 @@ static int32_t read_mailbox_msg_data_cb(void *mail_handle, int8_t *buf, int32_t 
 	return ret;
 }
 
-static int32_t send_mailbox_cnf_msg(uint16_t msg_id, uint16_t modem_no, uint32_t channel_id)
+static int32_t send_mailbox_cnf_msg(uint16_t msg_id, uint16_t modem_no)
 {
 	int32_t ret = 0;
 	struct voice_proxy_confirm cmd_cnf;
@@ -312,7 +312,6 @@ static int32_t send_mailbox_cnf_msg(uint16_t msg_id, uint16_t modem_no, uint32_t
 	memset(&cmd_cnf, 0, sizeof(cmd_cnf));/* unsafe_function_ignore: memset  */
 	cmd_cnf.msg_id = msg_id;
 	cmd_cnf.modem_no = modem_no;
-	cmd_cnf.channel_id = channel_id;
 	if (priv.send_mailbox_msg) {
 		/*call the mailbox to send the message to hifi*/
 		ret = priv.send_mailbox_msg(MAILBOX_MAILCODE_ACPU_TO_HIFI_VOICE_RT,
@@ -330,21 +329,21 @@ static int32_t send_mailbox_cnf_msg(uint16_t msg_id, uint16_t modem_no, uint32_t
 static void send_mailbox_cnf_work_queue(struct work_struct *work)
 {
 	int32_t ret = 0;
-	struct proxy_voice_cnf_cmd_code *command = NULL;
+	struct voice_proxy_cmd_node *command = NULL;
 
 	UNUSED_PARAMETER(work);
 
 	spin_lock_bh(&priv.cnf_queue_lock);
 	while (!list_empty_careful(&confirm_queue)) {
 		command = list_first_entry(&confirm_queue,
-                                                   struct proxy_voice_cnf_cmd_code,
+                                                   struct voice_proxy_cmd_node,
                                                    list_node);/*lint !e826*/
 
 		list_del_init(&command->list_node);
 		spin_unlock_bh(&priv.cnf_queue_lock);
 
 		//logi("receive msg id:%d\n", command->msg_id);
-		ret = send_mailbox_cnf_msg(command->msg_id, command->modem_no, command->channel_id);
+		ret = send_mailbox_cnf_msg(command->msg_id, command->modem_no);
 		if (ret) {
 			loge("send mailbox cnf msg fail\n");
 		}
@@ -357,9 +356,9 @@ static void send_mailbox_cnf_work_queue(struct work_struct *work)
 	spin_unlock_bh(&priv.cnf_queue_lock);
 }
 
-int32_t voice_proxy_add_work_queue_cmd(uint16_t msg_id, uint16_t modem_no, uint32_t channel_id)
+int32_t voice_proxy_add_work_queue_cmd(uint16_t msg_id, uint16_t modem_no)
 {
-	struct proxy_voice_cnf_cmd_code *command;
+	struct voice_proxy_cmd_node *command;
 
 	command = kzalloc(sizeof(*command), GFP_ATOMIC);
 	if (NULL == command) {
@@ -369,14 +368,13 @@ int32_t voice_proxy_add_work_queue_cmd(uint16_t msg_id, uint16_t modem_no, uint3
 
 	command->msg_id = msg_id;
 	command->modem_no = modem_no;
-	command->channel_id = channel_id;
 	//logi("msg id :0x%x\n",command->msg_id);
 
 	spin_lock_bh(&priv.cnf_queue_lock);
 	list_add_tail(&command->list_node, &confirm_queue);
 	spin_unlock_bh(&priv.cnf_queue_lock);
 
-	if (!queue_work(priv.send_mailbox_cnf_wq, &priv.send_mailbox_cnf_work)) {
+	if (queue_work(priv.send_mailbox_cnf_wq, &priv.send_mailbox_cnf_work)) {
 		loge("msg_id 0x%x no send mailbox cnf queue work\n", msg_id);
 	}
 
@@ -563,7 +561,7 @@ static int voice_proxy_write_thread(void *arg)
 /*
  * the interrupt handle function for receiving mailbox data
  */
-static void handle_mail(const void *usr_para, void *mail_handle, uint32_t mail_len)
+static void handle_mail(void *usr_para, void *mail_handle, uint32_t mail_len)
 {
 	int32_t i = 0;
 	int32_t ret_mail = 0;
@@ -677,7 +675,7 @@ void voice_proxy_mailbox_cb_register(mailbox_send_msg_cb send_cb,
 		register_cb((mb_msg_cb)handle_mail);
 }
 
-static int32_t voice_proxy_mailbox_cb_init(void)
+int32_t voice_proxy_mailbox_cb_init(void)
 {
 	int32_t ret;
 
@@ -686,14 +684,6 @@ static int32_t voice_proxy_mailbox_cb_init(void)
 	ret = register_mailbox_msg_cb((mb_msg_cb)handle_mail);
 
 	return ret;
-}
-
-static void voice_proxy_mailbox_cb_deinit(void)
-{
-	priv.send_mailbox_msg = NULL;
-	priv.read_mailbox_msg = NULL;
-
-	register_mailbox_msg_cb(NULL);
 }
 
 static void destory_thread(void)
@@ -765,12 +755,11 @@ static int voice_proxy_probe(struct platform_device *pdev)
 	return ret;
 
 ERR1:
-	voice_proxy_mailbox_cb_deinit();
+	voice_proxy_mailbox_cb_register(NULL, NULL, NULL);
 ERR:
 	if(priv.send_mailbox_cnf_wq) {
 		flush_workqueue(priv.send_mailbox_cnf_wq);
 		destroy_workqueue(priv.send_mailbox_cnf_wq);
-		priv.send_mailbox_cnf_wq = NULL;
 	}
 
 	return ret;
@@ -781,12 +770,11 @@ static int voice_proxy_remove(struct platform_device *pdev)
 	UNUSED_PARAMETER(pdev);
 
 	destory_thread();
-	voice_proxy_mailbox_cb_deinit();
+	voice_proxy_mailbox_cb_register(NULL, NULL, NULL);
 
 	if(priv.send_mailbox_cnf_wq) {
 		flush_workqueue(priv.send_mailbox_cnf_wq);
 		destroy_workqueue(priv.send_mailbox_cnf_wq);
-		priv.send_mailbox_cnf_wq = NULL;
 	}
 
 	return 0;

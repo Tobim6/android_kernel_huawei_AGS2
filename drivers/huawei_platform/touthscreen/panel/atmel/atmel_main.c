@@ -2021,7 +2021,7 @@ static void mxt_parse_module_dts(struct ts_device_data *chip_data)
 	if (description != NULL) {
 		TS_LOG_INFO("description = %s\n", description);
 		strncpy(mxt_g_data->description, description,
-			ATMEL_MAX_DESCRIPTION_LEN);
+			MAX_DESCRIPTION_LEN);
 	}
 
 	retval = of_property_read_u32(device, "roi_data_invert", &read_val);

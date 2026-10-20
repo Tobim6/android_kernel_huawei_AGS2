@@ -1,9 +1,5 @@
-#ifndef _HKIP_ATKINFO_H_
-#define _HKIP_ATKINFO_H_
-
 #define HHEE_EVENT_MAGIC			(0x6851895ba852fb79)
-
-#define MAX_UPLOAD_INFO_LEN 64
+#define HKIP_ATKINFO_IMONITOR_ID	(940000000)
 
 struct hkip_atkinfo {
     struct hhee_event_header *header;
@@ -14,6 +10,7 @@ struct hkip_atkinfo {
     struct timer_list timer;
 	/*make sure hkip don't upload attack logs no more 3 times each 24hours */
     unsigned int cycle_time;
+	unsigned short msg_handle;
 };
 
 /* Event types */
@@ -79,5 +76,4 @@ static inline int atkinfo_create_debugfs(struct hkip_atkinfo *atkinfo)
 {
 	return 0;
 }
-#endif
 #endif

@@ -17,8 +17,6 @@
 #include <linux/of.h>
 
 #include <linux/hisi/rdr_pub.h>
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_BLACKBOX_TAG
 #include "rdr_inner.h"
 #include "rdr_print.h"
 #include "rdr_field.h"
@@ -85,16 +83,12 @@ void rdr_field_baseinfo_init(void)
 	pbb->base_info.arg2 = 0;
 	pbb->base_info.e_core = 0;
 	pbb->base_info.e_type = 0;
-	pbb->base_info.e_subtype = 0;
 	pbb->base_info.start_flag = 0;
 	pbb->base_info.savefile_flag = 0;
 	pbb->base_info.reboot_flag = 0;
 	memset(pbb->base_info.e_module, 0, MODULE_NAME_LEN);
 	memset(pbb->base_info.e_desc, 0, STR_EXCEPTIONDESC_MAXLEN);
 	memset(pbb->base_info.datetime, 0, DATATIME_MAXLEN);
-
-	pbb->cleartext_info.savefile_flag = 0;
-
 	BB_PRINT_END();
 	return;
 }
@@ -107,15 +101,11 @@ void rdr_field_baseinfo_reinit(void)
 	pbb->base_info.arg2 = 0;
 	pbb->base_info.e_core = 0;
 	pbb->base_info.e_type = 0;
-	pbb->base_info.e_subtype = 0;
 	pbb->base_info.start_flag = RDR_PROC_EXEC_START;
 	pbb->base_info.savefile_flag = RDR_DUMP_LOG_START;
 	/* memset(pbb->base_info.e_module, 0, MODULE_NAME_LEN); */
 	/* memset(pbb->base_info.e_desc, 0, STR_EXCEPTIONDESC_MAXLEN); */
 	memset(pbb->base_info.datetime, 0, DATATIME_MAXLEN);
-
-	pbb->cleartext_info.savefile_flag = 0;
-
 	BB_PRINT_END();
 	return;
 }
@@ -127,16 +117,6 @@ void rdr_field_areainfo_init(void)
 		pbb->area_info[index].offset = rdr_area_mem_addr[index];
 		pbb->area_info[index].length = rdr_area_mem_size[index];
 	}
-}
-
-char *rdr_field_get_datetime(void)
-{
-	return (char *)(pbb->base_info.datetime);
-}
-
-void rdr_cleartext_dumplog_done(void)
-{
-	pbb->cleartext_info.savefile_flag = 1;
 }
 
 void rdr_field_dumplog_done(void)
@@ -156,8 +136,11 @@ void rdr_field_reboot_done(void)
 
 void rdr_field_top_init(void)
 {
+	u8 buildtime[RDR_BUILD_DATE_TIME_LEN];
+
 	BB_PRINT_START();
 
+	rdr_get_builddatetime(buildtime);
 	pbb->top_head.magic = FILE_MAGIC;
 	pbb->top_head.version = RDR_VERSION;
 	pbb->top_head.area_number = RDR_AREA_MAXIMUM;
@@ -186,14 +169,14 @@ int rdr_field_init(void)
 	pbb = hisi_bbox_map(rdr_reserved_phymem_addr(),
 			  rdr_reserved_phymem_size());
 	if (NULL == pbb) {
-		BB_PRINT_ERR("hisi_bbox_map pbb faild.");
+		BB_PRINT_PN("hisi_bbox_map pbb faild.");
 		ret = -1;
 		goto out;
 	}
 
 	tmp_pbb = vmalloc(rdr_reserved_phymem_size());
 	if (NULL == tmp_pbb) {
-		BB_PRINT_ERR("vmalloc tmp_pbb faild.");
+		BB_PRINT_PN("vmalloc tmp_pbb faild.");
 		ret = -1;
 		hisi_bbox_unmap(pbb);
 		pbb = NULL;
@@ -206,12 +189,12 @@ int rdr_field_init(void)
 
 	np = of_find_compatible_node(NULL, NULL, "hisilicon,hisifb");
 	if (!np) {
-		BB_PRINT_ERR("NOT FOUND device node 'hisilicon,hisifb'!\n");
+		printk("NOT FOUND device node 'hisilicon,hisifb'!\n");
 		return -ENXIO;
 	}
 	ret = of_property_read_u32(np, "fpga_flag", &fpga_flag);
 	if (ret) {
-		BB_PRINT_ERR("failed to get fpga_flag resource.\n");
+		printk("failed to get fpga_flag resource.\n");
 		return -ENXIO;
 	}
 	/* if the power_up of phone is the first time,
@@ -258,12 +241,11 @@ void rdr_save_args(u32 modid, u32 arg1, u32 arg2)
 	BB_PRINT_END();
 }
 
-void rdr_fill_edata(struct rdr_exception_info_s *e,const char *date)
+void rdr_fill_edata(struct rdr_exception_info_s *e, char *date)
 {
 	BB_PRINT_START();
 	pbb->base_info.e_core = e->e_from_core;
 	pbb->base_info.e_type = e->e_exce_type;
-	pbb->base_info.e_subtype = e->e_exce_subtype;
 	memcpy(pbb->base_info.datetime, date, DATATIME_MAXLEN);
 	memcpy(pbb->base_info.e_module, e->e_from_module, MODULE_NAME_LEN);
 	memcpy(pbb->base_info.e_desc, e->e_desc, STR_EXCEPTIONDESC_MAXLEN);
@@ -295,14 +277,12 @@ void rdr_show_base_info(int flag)
 	p->base_info.e_module[MODULE_NAME_LEN - 1] = '\0';
 	p->base_info.e_desc[STR_EXCEPTIONDESC_MAXLEN - 1] = '\0';
 	p->top_head.build_time[RDR_BUILD_DATE_TIME_LEN - 1] = '\0';
-
 	BB_PRINT_PN("========= print baseinfo start =========\n");
 	BB_PRINT_PN("modid        :[0x%x]\n", p->base_info.modid);
 	BB_PRINT_PN("arg1         :[0x%x]\n", p->base_info.arg1);
 	BB_PRINT_PN("arg2         :[0x%x]\n", p->base_info.arg2);
 	BB_PRINT_PN("coreid       :[0x%x]\n", p->base_info.e_core);
 	BB_PRINT_PN("reason       :[0x%x]\n", p->base_info.e_type);
-	BB_PRINT_PN("subtype      :[0x%x]\n", p->base_info.e_subtype);
 	BB_PRINT_PN("e data       :[%s]\n", p->base_info.datetime);
 	BB_PRINT_PN("e module     :[%s]\n", p->base_info.e_module);
 	BB_PRINT_PN("e desc       :[%s]\n", p->base_info.e_desc);
@@ -325,8 +305,4 @@ void rdr_show_base_info(int flag)
 			pbb->area_info[index].length);
 	}
 	BB_PRINT_PN("========= print areainfo e n d =========\n");
-
-	BB_PRINT_PN("========= print clear text start =========\n");
-	BB_PRINT_PN("savefile_flag:[0x%x]\n", p->cleartext_info.savefile_flag);
-	BB_PRINT_PN("========= print clear text e n d =========\n");
 }

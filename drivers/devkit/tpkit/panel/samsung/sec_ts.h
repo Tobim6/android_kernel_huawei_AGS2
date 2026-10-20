@@ -82,10 +82,6 @@
 #define SEC_TS_STR_FWPATH	"ts/"
 #define SEC_TS_STR_UNDERSCORE	"-"
 #define SEC_TS_STR_FWTYPE	".img"
-/* samsung tp default i2c address:0x48,  differentiation from blanc i2c addr:0x17 */
-#define SEC_TS_DEFAULT_I2C_ADDR	0x48
-/* Distinguish from device name with i2c address 0x17 */
-#define IC_SEC_Y761 "Y761_sec"
 
 #define SEC_TS_POWER_ON_DEALY_MS 100
 #define SEC_TS_BOOT_VER		0xBA
@@ -327,7 +323,6 @@
 #define SEC_TS_STATUS_EVENT		1
 #define SEC_TS_GESTURE_EVENT		2
 #define SEC_TS_EMPTY_EVENT		3
-#define SEC_TS_COORDINATE_WET		6
 
 #define SEC_TS_STATUSEVENT_SIZE		8
 #define SEC_TS_EVENT_BUFF_SIZE		13
@@ -360,7 +355,6 @@
 #define DO_FWUP				1
 
 #define SEC_TS_PID_ADDR			0x2AA00
-#define SEC_TS_Y761_PID_ADDR			0x2F800
 /* SEC_TS_INFO : Info acknowledge event */
 #define SEC_TS_ACK_BOOT_COMPLETE	0x00
 #define SEC_TS_ACK_WET_MODE	0x1
@@ -370,11 +364,6 @@
 #define SEC_TS_VENDOR_ACK_SELF_TEST_DONE	0x41
 #define SEC_TS_VENDOR_ACK_NOLH_DONE		0x42
 #define SEC_TS_VENDOR_ACK_SELFCHECK_DONE	0x69
-
-#define SEC_TS_VENDOR_ERROR_WDT_RESET		0x05
-#define SEC_TS_VENDOR_INFO_FREQ_HOPPING		0x80
-#define SEC_TS_VENDOR_INFO_NOISE_LEVEL_CHANGED		0x81
-#define SEC_TS_VENDOR_INFO_ENTER_PALM		0x63
 
 /* SEC_TS_STATUS_EVENT_USER_INPUT */
 #define SEC_TS_EVENT_FORCE_KEY	0x1
@@ -419,11 +408,6 @@
 #define SEC_TS_EVENT_CONTINUE		1
 #define SEC_TS_EVENT_STOP		0
 
-#define USE_IN_RECOVERY_MODE		1
-#define USE_NOT_IN_RECOVERY_MODE	0
-
-#define USE_IC_RESOLUTION		1
-#define USE_LCD_RESOLUTION		0
 enum {
 	BUILT_IN = 0,
 	UMS,
@@ -513,11 +497,6 @@ typedef enum {
 	SPONGE_EVENT_TYPE_AOD_HOMEKEY_RELEASE	= 0x0D,
 	SPONGE_EVENT_TYPE_AOD_HOMEKEY_RELEASE_NO_HAPTIC	= 0x0E
 } SPONGE_EVENT_TYPE;
-
-enum sec_ic_name {
-	DEFAULT  = 0,
-	S6SY761X = 1,
-};
 
 #define CMD_RESULT_WORD_LEN		10
 
@@ -737,8 +716,6 @@ struct sec_ts_data {
 	int touch_count;
 	int buff_count;
 	int tx_count;
-	int tx_default_num;
-	int rx_default_num;
 	int rx_count;
 	int i2c_burstmax;
 	int event_length;
@@ -818,15 +795,6 @@ struct sec_ts_data {
 	int (*sec_ts_read_sponge)(struct sec_ts_data *ts, u8 *data);
 	struct regulator *regulator_dvdd;
 	struct regulator *regulator_avdd;
-
-	struct pinctrl *pctrl;
-	struct pinctrl_state *pins_default;
-	struct pinctrl_state *pins_idle;
-	int ic_name;
-	int is_need_set_pinctrl;
-	int is_need_set_reseved_bit;
-	const char *default_projectid;
-	int is_need_calibrate_after_update_fw;
 };
 
 struct sec_ts_plat_data {
@@ -859,13 +827,6 @@ struct sec_ts_plat_data {
 	bool support_mt_pressure;
 	bool support_dex;
 	bool support_sidegesture;
-    /* convert ic resolution to real lcd resolution, fix inaccurate touch in recovery mode,
-     * there is no coordinate conversion in recovery mode.
-     */
-	int in_recovery_mode;
-	int use_ic_res;
-	int x_max_rc;
-	int y_max_rc;
 };
 
 int sec_ts_stop_device(struct sec_ts_data *ts);
@@ -902,7 +863,6 @@ int sec_ts_run_self_test(struct sec_ts_data *ts, struct ts_rawdata_info *info);
 int sec_ts_read_pid(struct sec_ts_data *ts);
 int sec_ts_get_rawcap_debug(struct sec_ts_data *ts, struct ts_diff_data_info *info);
 int sec_ts_get_delta_debug(struct sec_ts_data *ts, struct ts_diff_data_info *info);
-int sec_ts_do_once_calibrate(void);
 
 
 #if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)

@@ -1,4 +1,22 @@
+/******************************************************************************
 
+			  版权所有 (C), 2001-2011, 华为技术有限公司
+
+******************************************************************************
+文 件 名	 : drv_mailbox_platform.h
+版 本 号	 : 初稿
+作	者	 : 莫南 00176101
+生成日期	 : 2012年9月24日
+最近修改	 :
+功能描述	 : mailbox 各平台平台系统适配接口公共头文件
+函数列表	 :
+
+修改历史	 :
+1.日	  期   : 2012年9月24日
+作	  者   : 莫南 00176101
+修改内容   : 创建文件
+
+******************************************************************************/
 #ifndef _DRV_MAILBOX_PLATFORM_H_
 #define _DRV_MAILBOX_PLATFORM_H_
 
@@ -106,9 +124,9 @@ enum MAILBOX_DELAY_SCENE_E
 /*邮箱内部文件之间调用的接口*/
 extern MAILBOX_EXTERN void  mailbox_assert(unsigned int ErroNo);
 
-extern MAILBOX_EXTERN int mailbox_mutex_lock(void * const *mutexId);
+extern MAILBOX_EXTERN int mailbox_mutex_lock(void **mutexId);
 
-extern MAILBOX_EXTERN void mailbox_mutex_unlock(void * const *mutexId);
+extern MAILBOX_EXTERN void mailbox_mutex_unlock(void **mutexId);
 
 extern MAILBOX_EXTERN int mailbox_int_context(void);
 
@@ -144,7 +162,7 @@ extern MAILBOX_EXTERN int mailbox_wait_completion(void **mutexId, unsigned int t
 
 extern MAILBOX_EXTERN void mailbox_complete(void **wait_id);
 
-extern MAILBOX_EXTERN void mailbox_del_completion(void * const *wait);
+extern MAILBOX_EXTERN void mailbox_del_completion(void **wait);
 extern void mailbox_ifc_test_init(void);
 
 #if defined (BSP_CORE_CM3)

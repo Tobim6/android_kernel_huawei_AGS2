@@ -16,15 +16,10 @@
  */
 
 #include "tpm.h"
-#include <crypto/hash_info.h>
 #include <keys/trusted-type.h>
 
 enum tpm2_object_attributes {
-	TPM2_OA_USER_WITH_AUTH		= BIT(6),
-};
-
-enum tpm2_session_attributes {
-	TPM2_SA_CONTINUE_SESSION	= BIT(0),
+	TPM2_ATTR_USER_WITH_AUTH	= BIT(6),
 };
 
 struct tpm2_startup_in {
@@ -108,19 +103,6 @@ struct tpm2_cmd {
 	tpm_cmd_header		header;
 	union tpm2_cmd_params	params;
 } __packed;
-
-struct tpm2_hash {
-	unsigned int crypto_id;
-	unsigned int tpm_id;
-};
-
-static struct tpm2_hash tpm2_hash_map[] = {
-	{HASH_ALGO_SHA1, TPM2_ALG_SHA1},
-	{HASH_ALGO_SHA256, TPM2_ALG_SHA256},
-	{HASH_ALGO_SHA384, TPM2_ALG_SHA384},
-	{HASH_ALGO_SHA512, TPM2_ALG_SHA512},
-	{HASH_ALGO_SM3_256, TPM2_ALG_SM3_256},
-};
 
 /*
  * Array with one entry per ordinal defining the maximum amount
@@ -282,7 +264,7 @@ int tpm2_pcr_read(struct tpm_chip *chip, int pcr_idx, u8 *res_buf)
 	       sizeof(cmd.params.pcrread_in.pcr_select));
 	cmd.params.pcrread_in.pcr_select[pcr_idx >> 3] = 1 << (pcr_idx & 0x7);
 
-	rc = tpm_transmit_cmd(chip, &cmd, sizeof(cmd), 0,
+	rc = tpm_transmit_cmd(chip, &cmd, sizeof(cmd),
 			      "attempting to read a pcr value");
 	if (rc == 0) {
 		buf = cmd.params.pcrread_out.digest;
@@ -327,10 +309,10 @@ int tpm2_pcr_extend(struct tpm_chip *chip, int pcr_idx, const u8 *hash)
 	cmd.params.pcrextend_in.auth_area.attributes = 0;
 	cmd.params.pcrextend_in.auth_area.auth_size = 0;
 	cmd.params.pcrextend_in.digest_cnt = cpu_to_be32(1);
-	cmd.params.pcrextend_in.hash_alg = cpu_to_be16(TPM2_ALG_SHA256);
+	cmd.params.pcrextend_in.hash_alg = cpu_to_be16(TPM2_ALG_SHA1);
 	memcpy(cmd.params.pcrextend_in.digest, hash, TPM_DIGEST_SIZE);
 
-	rc = tpm_transmit_cmd(chip, &cmd, sizeof(cmd), 0,
+	rc = tpm_transmit_cmd(chip, &cmd, sizeof(cmd),
 			      "attempting extend a PCR value");
 
 	return rc;
@@ -376,7 +358,7 @@ int tpm2_get_random(struct tpm_chip *chip, u8 *out, size_t max)
 		cmd.header.in = tpm2_getrandom_header;
 		cmd.params.getrandom_in.size = cpu_to_be16(num_bytes);
 
-		err = tpm_transmit_cmd(chip, &cmd, sizeof(cmd), 0,
+		err = tpm_transmit_cmd(chip, &cmd, sizeof(cmd),
 				       "attempting get random");
 		if (err)
 			break;
@@ -434,12 +416,12 @@ static void tpm2_buf_append_auth(struct tpm_buf *buf, u32 session_handle,
 }
 
 /**
- * tpm2_seal_trusted() - seal the payload of a trusted key
- * @chip_num: TPM chip to use
- * @payload: the key data in clear and encrypted form
+ * tpm2_seal_trusted() - seal a trusted key
+ * @chip_num: A specific chip number for the request or TPM_ANY_NUM
  * @options: authentication values and other options
+ * @payload: the key data in clear and encrypted form
  *
- * Return: < 0 on error and 0 on success.
+ * Returns < 0 on error and 0 on success.
  */
 int tpm2_seal_trusted(struct tpm_chip *chip,
 		      struct trusted_key_payload *payload,
@@ -447,19 +429,7 @@ int tpm2_seal_trusted(struct tpm_chip *chip,
 {
 	unsigned int blob_len;
 	struct tpm_buf buf;
-	u32 hash;
-	int i;
 	int rc;
-
-	for (i = 0; i < ARRAY_SIZE(tpm2_hash_map); i++) {
-		if (options->hash == tpm2_hash_map[i].crypto_id) {
-			hash = tpm2_hash_map[i].tpm_id;
-			break;
-		}
-	}
-
-	if (i == ARRAY_SIZE(tpm2_hash_map))
-		return -EINVAL;
 
 	rc = tpm_buf_init(&buf, TPM2_ST_SESSIONS, TPM2_CC_CREATE);
 	if (rc)
@@ -482,22 +452,12 @@ int tpm2_seal_trusted(struct tpm_chip *chip,
 	tpm_buf_append_u8(&buf, payload->migratable);
 
 	/* public */
-	tpm_buf_append_u16(&buf, 14 + options->policydigest_len);
+	tpm_buf_append_u16(&buf, 14);
+
 	tpm_buf_append_u16(&buf, TPM2_ALG_KEYEDHASH);
-	tpm_buf_append_u16(&buf, hash);
-
-	/* policy */
-	if (options->policydigest_len) {
-		tpm_buf_append_u32(&buf, 0);
-		tpm_buf_append_u16(&buf, options->policydigest_len);
-		tpm_buf_append(&buf, options->policydigest,
-			       options->policydigest_len);
-	} else {
-		tpm_buf_append_u32(&buf, TPM2_OA_USER_WITH_AUTH);
-		tpm_buf_append_u16(&buf, 0);
-	}
-
-	/* public parameters */
+	tpm_buf_append_u16(&buf, TPM2_ALG_SHA256);
+	tpm_buf_append_u32(&buf, TPM2_ATTR_USER_WITH_AUTH);
+	tpm_buf_append_u16(&buf, 0); /* policy digest size */
 	tpm_buf_append_u16(&buf, TPM2_ALG_NULL);
 	tpm_buf_append_u16(&buf, 0);
 
@@ -512,7 +472,7 @@ int tpm2_seal_trusted(struct tpm_chip *chip,
 		goto out;
 	}
 
-	rc = tpm_transmit_cmd(chip, buf.data, PAGE_SIZE, 0, "sealing data");
+	rc = tpm_transmit_cmd(chip, buf.data, PAGE_SIZE, "sealing data");
 	if (rc)
 		goto out;
 
@@ -528,28 +488,16 @@ int tpm2_seal_trusted(struct tpm_chip *chip,
 out:
 	tpm_buf_destroy(&buf);
 
-	if (rc > 0) {
-		if (tpm2_rc_value(rc) == TPM2_RC_HASH)
-			rc = -EINVAL;
-		else
-			rc = -EPERM;
-	}
+	if (rc > 0)
+		rc = -EPERM;
 
 	return rc;
 }
 
-/**
- * tpm2_load_cmd() - execute a TPM2_Load command
- * @chip_num: TPM chip to use
- * @payload: the key data in clear and encrypted form
- * @options: authentication values and other options
- *
- * Return: same as with tpm_transmit_cmd
- */
-static int tpm2_load_cmd(struct tpm_chip *chip,
-			 struct trusted_key_payload *payload,
-			 struct trusted_key_options *options,
-			 u32 *blob_handle, unsigned int flags)
+static int tpm2_load(struct tpm_chip *chip,
+		     struct trusted_key_payload *payload,
+		     struct trusted_key_options *options,
+		     u32 *blob_handle)
 {
 	struct tpm_buf buf;
 	unsigned int private_len;
@@ -584,7 +532,7 @@ static int tpm2_load_cmd(struct tpm_chip *chip,
 		goto out;
 	}
 
-	rc = tpm_transmit_cmd(chip, buf.data, PAGE_SIZE, flags, "loading blob");
+	rc = tpm_transmit_cmd(chip, buf.data, PAGE_SIZE, "loading blob");
 	if (!rc)
 		*blob_handle = be32_to_cpup(
 			(__be32 *) &buf.data[TPM_HEADER_SIZE]);
@@ -598,50 +546,32 @@ out:
 	return rc;
 }
 
-/**
- * tpm2_flush_context_cmd() - execute a TPM2_FlushContext command
- * @chip_num: TPM chip to use
- * @payload: the key data in clear and encrypted form
- * @options: authentication values and other options
- *
- * Return: same as with tpm_transmit_cmd
- */
-static void tpm2_flush_context_cmd(struct tpm_chip *chip, u32 handle,
-				   unsigned int flags)
+static void tpm2_flush_context(struct tpm_chip *chip, u32 handle)
 {
 	struct tpm_buf buf;
 	int rc;
 
 	rc = tpm_buf_init(&buf, TPM2_ST_NO_SESSIONS, TPM2_CC_FLUSH_CONTEXT);
 	if (rc) {
-		dev_warn(&chip->dev, "0x%08x was not flushed, out of memory\n",
+		dev_warn(chip->pdev, "0x%08x was not flushed, out of memory\n",
 			 handle);
 		return;
 	}
 
 	tpm_buf_append_u32(&buf, handle);
 
-	rc = tpm_transmit_cmd(chip, buf.data, PAGE_SIZE, flags,
-			      "flushing context");
+	rc = tpm_transmit_cmd(chip, buf.data, PAGE_SIZE, "flushing context");
 	if (rc)
-		dev_warn(&chip->dev, "0x%08x was not flushed, rc=%d\n", handle,
+		dev_warn(chip->pdev, "0x%08x was not flushed, rc=%d\n", handle,
 			 rc);
 
 	tpm_buf_destroy(&buf);
 }
 
-/**
- * tpm2_unseal_cmd() - execute a TPM2_Unload command
- * @chip_num: TPM chip to use
- * @payload: the key data in clear and encrypted form
- * @options: authentication values and other options
- *
- * Return: same as with tpm_transmit_cmd
- */
-static int tpm2_unseal_cmd(struct tpm_chip *chip,
-			   struct trusted_key_payload *payload,
-			   struct trusted_key_options *options,
-			   u32 blob_handle, unsigned int flags)
+static int tpm2_unseal(struct tpm_chip *chip,
+		       struct trusted_key_payload *payload,
+		       struct trusted_key_options *options,
+		       u32 blob_handle)
 {
 	struct tpm_buf buf;
 	u16 data_len;
@@ -653,15 +583,13 @@ static int tpm2_unseal_cmd(struct tpm_chip *chip,
 		return rc;
 
 	tpm_buf_append_u32(&buf, blob_handle);
-	tpm2_buf_append_auth(&buf,
-			     options->policyhandle ?
-			     options->policyhandle : TPM2_RS_PW,
+	tpm2_buf_append_auth(&buf, TPM2_RS_PW,
 			     NULL /* nonce */, 0,
-			     TPM2_SA_CONTINUE_SESSION,
+			     0 /* session_attributes */,
 			     options->blobauth /* hmac */,
 			     TPM_DIGEST_SIZE);
 
-	rc = tpm_transmit_cmd(chip, buf.data, PAGE_SIZE, flags, "unsealing");
+	rc = tpm_transmit_cmd(chip, buf.data, PAGE_SIZE, "unsealing");
 	if (rc > 0)
 		rc = -EPERM;
 
@@ -680,12 +608,12 @@ static int tpm2_unseal_cmd(struct tpm_chip *chip,
 }
 
 /**
- * tpm_unseal_trusted() - unseal the payload of a trusted key
- * @chip_num: TPM chip to use
- * @payload: the key data in clear and encrypted form
+ * tpm_unseal_trusted() - unseal a trusted key
+ * @chip_num: A specific chip number for the request or TPM_ANY_NUM
  * @options: authentication values and other options
+ * @payload: the key data in clear and encrypted form
  *
- * Return: < 0 on error and 0 on success.
+ * Returns < 0 on error and 0 on success.
  */
 int tpm2_unseal_trusted(struct tpm_chip *chip,
 			struct trusted_key_payload *payload,
@@ -694,17 +622,14 @@ int tpm2_unseal_trusted(struct tpm_chip *chip,
 	u32 blob_handle;
 	int rc;
 
-	mutex_lock(&chip->tpm_mutex);
-	rc = tpm2_load_cmd(chip, payload, options, &blob_handle,
-			   TPM_TRANSMIT_UNLOCKED);
+	rc = tpm2_load(chip, payload, options, &blob_handle);
 	if (rc)
-		goto out;
+		return rc;
 
-	rc = tpm2_unseal_cmd(chip, payload, options, blob_handle,
-			     TPM_TRANSMIT_UNLOCKED);
-	tpm2_flush_context_cmd(chip, blob_handle, TPM_TRANSMIT_UNLOCKED);
-out:
-	mutex_unlock(&chip->tpm_mutex);
+	rc = tpm2_unseal(chip, payload, options, blob_handle);
+
+	tpm2_flush_context(chip, blob_handle);
+
 	return rc;
 }
 
@@ -730,13 +655,12 @@ ssize_t tpm2_get_tpm_pt(struct tpm_chip *chip, u32 property_id,  u32 *value,
 	cmd.params.get_tpm_pt_in.property_id = cpu_to_be32(property_id);
 	cmd.params.get_tpm_pt_in.property_cnt = cpu_to_be32(1);
 
-	rc = tpm_transmit_cmd(chip, &cmd, sizeof(cmd), 0, desc);
+	rc = tpm_transmit_cmd(chip, &cmd, sizeof(cmd), desc);
 	if (!rc)
-		*value = be32_to_cpu(cmd.params.get_tpm_pt_out.value);
+		*value = cmd.params.get_tpm_pt_out.value;
 
 	return rc;
 }
-EXPORT_SYMBOL_GPL(tpm2_get_tpm_pt);
 
 #define TPM2_STARTUP_IN_SIZE \
 	(sizeof(struct tpm_input_header) + \
@@ -758,16 +682,17 @@ static const struct tpm_input_header tpm2_startup_header = {
  * returned it remarks a POSIX error code. If a positive number is returned
  * it remarks a TPM error.
  */
-static int tpm2_startup(struct tpm_chip *chip, u16 startup_type)
+int tpm2_startup(struct tpm_chip *chip, u16 startup_type)
 {
 	struct tpm2_cmd cmd;
 
 	cmd.header.in = tpm2_startup_header;
 
 	cmd.params.startup_in.startup_type = cpu_to_be16(startup_type);
-	return tpm_transmit_cmd(chip, &cmd, sizeof(cmd), 0,
+	return tpm_transmit_cmd(chip, &cmd, sizeof(cmd),
 				"attempting to start the TPM");
 }
+EXPORT_SYMBOL_GPL(tpm2_startup);
 
 #define TPM2_SHUTDOWN_IN_SIZE \
 	(sizeof(struct tpm_input_header) + \
@@ -793,15 +718,16 @@ void tpm2_shutdown(struct tpm_chip *chip, u16 shutdown_type)
 	cmd.header.in = tpm2_shutdown_header;
 	cmd.params.startup_in.startup_type = cpu_to_be16(shutdown_type);
 
-	rc = tpm_transmit_cmd(chip, &cmd, sizeof(cmd), 0, "stopping the TPM");
+	rc = tpm_transmit_cmd(chip, &cmd, sizeof(cmd), "stopping the TPM");
 
 	/* In places where shutdown command is sent there's no much we can do
 	 * except print the error code on a system failure.
 	 */
 	if (rc < 0)
-		dev_warn(&chip->dev, "transmit returned %d while stopping the TPM",
+		dev_warn(chip->pdev, "transmit returned %d while stopping the TPM",
 			 rc);
 }
+EXPORT_SYMBOL_GPL(tpm2_shutdown);
 
 /*
  * tpm2_calc_ordinal_duration() - maximum duration for a command
@@ -821,7 +747,7 @@ unsigned long tpm2_calc_ordinal_duration(struct tpm_chip *chip, u32 ordinal)
 		index = tpm2_ordinal_duration[ordinal - TPM2_CC_FIRST];
 
 	if (index != TPM_UNDEFINED)
-		duration = chip->duration[index];
+		duration = chip->vendor.duration[index];
 
 	if (duration <= 0)
 		duration = 2 * 60 * HZ;
@@ -858,14 +784,14 @@ static int tpm2_start_selftest(struct tpm_chip *chip, bool full)
 	cmd.header.in = tpm2_selftest_header;
 	cmd.params.selftest_in.full_test = full;
 
-	rc = tpm_transmit_cmd(chip, &cmd, TPM2_SELF_TEST_IN_SIZE, 0,
+	rc = tpm_transmit_cmd(chip, &cmd, TPM2_SELF_TEST_IN_SIZE,
 			      "continue selftest");
 
 	/* At least some prototype chips seem to give RC_TESTING error
 	 * immediately. This is a workaround for that.
 	 */
 	if (rc == TPM2_RC_TESTING) {
-		dev_warn(&chip->dev, "Got RC_TESTING, ignoring\n");
+		dev_warn(chip->pdev, "Got RC_TESTING, ignoring\n");
 		rc = 0;
 	}
 
@@ -883,7 +809,7 @@ static int tpm2_start_selftest(struct tpm_chip *chip, bool full)
  * returned it remarks a POSIX error code. If a positive number is returned
  * it remarks a TPM error.
  */
-static int tpm2_do_selftest(struct tpm_chip *chip)
+int tpm2_do_selftest(struct tpm_chip *chip)
 {
 	int rc;
 	unsigned int loops;
@@ -910,7 +836,7 @@ static int tpm2_do_selftest(struct tpm_chip *chip)
 		cmd.params.pcrread_in.pcr_select[1] = 0x00;
 		cmd.params.pcrread_in.pcr_select[2] = 0x00;
 
-		rc = tpm_transmit_cmd(chip, &cmd, sizeof(cmd), 0, NULL);
+		rc = tpm_transmit_cmd(chip, (u8 *) &cmd, sizeof(cmd), NULL);
 		if (rc < 0)
 			break;
 
@@ -923,6 +849,24 @@ static int tpm2_do_selftest(struct tpm_chip *chip)
 
 	return rc;
 }
+EXPORT_SYMBOL_GPL(tpm2_do_selftest);
+
+/**
+ * tpm2_gen_interrupt() - generate an interrupt
+ * @chip: TPM chip to use
+ *
+ * 0 is returned when the operation is successful. If a negative number is
+ * returned it remarks a POSIX error code. If a positive number is returned
+ * it remarks a TPM error.
+ */
+int tpm2_gen_interrupt(struct tpm_chip *chip)
+{
+	u32 dummy;
+
+	return tpm2_get_tpm_pt(chip, 0x100, &dummy,
+			       "attempting to generate an interrupt");
+}
+EXPORT_SYMBOL_GPL(tpm2_gen_interrupt);
 
 /**
  * tpm2_probe() - probe TPM 2.0
@@ -941,9 +885,11 @@ int tpm2_probe(struct tpm_chip *chip)
 	cmd.params.get_tpm_pt_in.property_id = cpu_to_be32(0x100);
 	cmd.params.get_tpm_pt_in.property_cnt = cpu_to_be32(1);
 
-	rc = tpm_transmit_cmd(chip, &cmd, sizeof(cmd),  0, NULL);
+	rc = tpm_transmit(chip, (const char *) &cmd, sizeof(cmd));
 	if (rc <  0)
 		return rc;
+	else if (rc < TPM_HEADER_SIZE)
+		return -EFAULT;
 
 	if (be16_to_cpu(cmd.header.out.tag) == TPM2_ST_NO_SESSIONS)
 		chip->flags |= TPM_CHIP_FLAG_TPM2;
@@ -951,42 +897,3 @@ int tpm2_probe(struct tpm_chip *chip)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(tpm2_probe);
-
-/**
- * tpm2_auto_startup - Perform the standard automatic TPM initialization
- *                     sequence
- * @chip: TPM chip to use
- *
- * Returns 0 on success, < 0 in case of fatal error.
- */
-int tpm2_auto_startup(struct tpm_chip *chip)
-{
-	int rc;
-
-	rc = tpm_get_timeouts(chip);
-	if (rc)
-		goto out;
-
-	rc = tpm2_do_selftest(chip);
-	if (rc != 0 && rc != TPM2_RC_INITIALIZE) {
-		dev_err(&chip->dev, "TPM self test failed\n");
-		goto out;
-	}
-
-	if (rc == TPM2_RC_INITIALIZE) {
-		rc = tpm2_startup(chip, TPM2_SU_CLEAR);
-		if (rc)
-			goto out;
-
-		rc = tpm2_do_selftest(chip);
-		if (rc) {
-			dev_err(&chip->dev, "TPM self test failed\n");
-			goto out;
-		}
-	}
-
-out:
-	if (rc > 0)
-		rc = -ENODEV;
-	return rc;
-}

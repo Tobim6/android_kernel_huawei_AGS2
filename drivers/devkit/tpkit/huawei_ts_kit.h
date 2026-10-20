@@ -10,8 +10,6 @@
 
 #include <linux/version.h>
 #include <linux/i2c.h>
-#include <linux/spi/spi.h>
-#include <linux/amba/pl022.h>
 #include <linux/input.h>
 #include <linux/completion.h>
 #include <linux/kernel.h>
@@ -24,10 +22,11 @@
 #include <huawei_platform/log/hw_log.h>
 #include <linux/wakelock.h>
 #include <linux/semaphore.h>
-
-
-#include "../lcdkit/lcdkit1.0/include/lcdkit_ext.h"
+#include "../lcdkit/include/lcdkit_ext.h"
 #define HUAWEI_CHARGER_FB	/*define HUAWEI_CHARGER_FB here to enable charger notify callback*/
+#if defined(HUAWEI_CHARGER_FB)
+//#include <linux/hisi/usb/hisi_usb.h>
+#endif
 /* marco define*/
 #ifndef strict_strtoul
 #define strict_strtoul kstrtoul
@@ -46,7 +45,7 @@
 #define TS_DEV_NAME "huawei,ts_kit"
 #define TS_PEN_DEV_NAME "huawei,ts_pen"
 
-#define RAW_DATA_SIZE 8192 * 4
+#define RAW_DATA_SIZE 8192 * 2
 #define TS_WATCHDOG_TIMEOUT		1000
 
 #define AFT_WAITQ_IDLE	 (0)
@@ -56,10 +55,7 @@
 
 #define ANTI_FALSE_TOUCH_USE_PARAM_MAJOR_MINOR 1
 
-#define FP_TP_REPORT_MINOR_FLAG "fp_tp_report_touch_minor_event"
-#define SYNA_3718_FW_UPDATA_FLAG "synaptics3718_fw_updata_flag"
-#define SYNA_3718_TP_PRESSURE_FLAG "synaptics3718_Tp_Pressure_flag"
-#define LDO29_980_DEFAULT_ON_FLAG "LDO29_980_default_on_flag"
+//#define ANTI_FALSE_TOUCH_STRING_NUM 27
 #define ANTI_FALSE_TOUCH_FEATURE_ALL "feature_all"
 #define ANTI_FALSE_TOUCH_FEATURE_RESEND_POINT "feature_resend_point"
 #define ANTI_FALSE_TOUCH_FEATURE_ORIT_SUPPORT "feature_orit_support"
@@ -115,14 +111,7 @@
 #define WACOM_RUBBER_TO_PEN   250
 
 #define TS_ERR_NEST_LEVEL  5
-#define TS_RAWDATA_BUFF_MAX 11000
-
-#define TS_RAWDATA_FAILED_REASON_LEN	20
-#define TS_RAWDATA_STATISTICS_DATA_LEN  32
-#define TS_RAWDATA_TEST_NAME_LEN		50
-#define TS_RAWDATA_RESULT_CODE_LEN		4
-
-#define TS_RAWDATA_DEVINFO_MAX	80
+#define TS_RAWDATA_BUFF_MAX 6000
 #define TS_RAWDATA_RESULT_MAX	200
 #define TS_FB_LOOP_COUNTS 100
 #define TS_FB_WAIT_TIME 5
@@ -203,7 +192,6 @@
 #define TS_SWITCH_TYPE_DOZE		(1<<0)
 #define TS_SWITCH_TYPE_GAME		(1<<1)
 #define TS_SWITCH_TYPE_SCENE	(1<<2)
-#define TS_SWITCH_TYPE_FM		(1<<3)
 
 #define TS_SWITCH_DOZE_ENABLE	1
 #define TS_SWITCH_DOZE_DISABLE	2
@@ -211,32 +199,11 @@
 #define TS_SWITCH_GAME_DISABLE	4
 #define TS_SWITCH_SCENE_ENTER	3
 #define TS_SWITCH_SCENE_EXIT	4
-#define TS_SWITCH_FM_ENABLE		1
-#define TS_SWITCH_FM_DISABLE	2
-
-#define TS_SWITCH_ROI_DELAY_ENABLE	1
 
 enum ts_scene_code {
-	TS_SWITCH_SCENE_3 = 3,
-	TS_SWITCH_SCENE_4,
-	TS_SWITCH_SCENE_5,
-	TS_SWITCH_SCENE_6,
-	TS_SWITCH_SCENE_7,
-	TS_SWITCH_SCENE_8,
-	TS_SWITCH_SCENE_9,
-	TS_SWITCH_SCENE_10,
-	TS_SWITCH_SCENE_11,
-	TS_SWITCH_SCENE_12,
-	TS_SWITCH_SCENE_13,
-	TS_SWITCH_SCENE_14,
-	TS_SWITCH_SCENE_15,
-	TS_SWITCH_SCENE_16,
-	TS_SWITCH_SCENE_17,
-	TS_SWITCH_SCENE_18,
-	TS_SWITCH_SCENE_19,
-	TS_SWITCH_SCENE_20
+	TS_SWITCH_SCENE_GAME = 3,
+	TS_SWITCH_SCENE_IM,
 };
-#define TS_SWITCH_FM_MODE	21
 /* ts switch func end */
 
 #define MAX_STR_LEN 32
@@ -275,8 +242,6 @@ enum ts_scene_code {
 #define VIRTUAL_KEY_ELEMENT_SIZE	5
 #define MAX_PRBUF_SIZE	PIPE_BUF
 #define CALIBRATION_DATA_SIZE 6144
-#define TP_I2C_HWSPIN_LOCK_CODE   28
-#define GET_HARDWARE_TIMEOUT 100000
 extern u8 g_ts_kit_log_cfg;
 
 #define HWLOG_TAG	TS_KIT
@@ -285,13 +250,9 @@ HWLOG_REGIST();
 #define TS_LOG_ERR(x...)		_hwlog_err(HWLOG_TAG, ##x)
 #define TS_LOG_DEBUG(x...)	\
     do { \
-        if (TS_DBG_MODE == g_ts_kit_log_cfg)	\
+        if (g_ts_kit_log_cfg)	\
             _hwlog_info(HWLOG_TAG, ##x);	\
     }while(0)
-#define TS_INF_MODE 0
-#define TS_DBG_MODE 1
-#define TS_MT_MODE  2
-#define TS_MT_MODE_ON (TS_MT_MODE == g_ts_kit_log_cfg)
 
 #define TP_FINGER 				1
 #define TP_STYLUS				2
@@ -302,7 +263,6 @@ HWLOG_REGIST();
 #define FINGER_REL_TIME     300  //the time pen checked after finger released shouldn't less than this value(ms)
 
 #define TP_3320_SHORT_ARRAY_NUM	4
-#define GPIO_HIGH        1
 
 #define TS_CMD_CHECK_KEY 0X8080
 
@@ -393,8 +353,6 @@ enum ts_cmd
     TS_TOUCH_SWITCH,
     TS_CHIP_DETECT,
     TS_REPORT_PEN,
-    TS_FREEBUFF,
-    TS_PALM_KEY,
     TS_INVAILD_CMD = 255,
 };
 
@@ -458,24 +416,22 @@ enum ts_rawdata_arange_type{
 	TS_RAWDATA_TRANS_ABCD2ADCB,
 };
 
-#define KEY_F26 196
 enum ts_gesture_num
 {
-    TS_DOUBLE_CLICK = KEY_F1,    /*0.Double tap:KEY_F1*/
-    TS_SLIDE_L2R = KEY_F2,    /*1.Single finger slide from left to right:KEY_F2*/
-    TS_SLIDE_R2L = KEY_F3,    /*2.Single finger slide from right to left:KEY_F3*/
-    TS_SLIDE_T2B = KEY_F4,    /*3.Single finger slide from top to bottom:KEY_F4*/
-    TS_SLIDE_B2T = KEY_F5,    /*4.Single finger slide from bottom to top:KEY_F5*/
-    TS_CIRCLE_SLIDE = KEY_F7,    /*5.Single finger slide circle:KEY_F7*/
-    TS_LETTER_c = KEY_F8,    /*6.Single finger write letter c*:KEY_F8*/
-    TS_LETTER_e = KEY_F9,    /*7.Single finger write letter e:KEY_F9*/
-    TS_LETTER_m = KEY_F10,    /*8.Single finger write letter m:KEY_F10*/
-    TS_LETTER_w = KEY_F11,    /*9.Single finger write letter w:KEY_F11*/
-    TS_PALM_COVERED = KEY_F12,    /*10.Palm off screen:KEY_F12*/
-    TS_KEY_IRON = KEY_F26,
+    //	TS_NUM_TOTAL = 12, /* total gesture numbers  */
+    TS_DOUBLE_CLICK = KEY_F1, /*0.Double tap:KEY_F1*/
+    TS_SLIDE_L2R = KEY_F2, /*1.Single finger slide from left to right:KEY_F2*/
+    TS_SLIDE_R2L = KEY_F3, /*2.Single finger slide from right to left:KEY_F3*/
+    TS_SLIDE_T2B = KEY_F4, /*3.Single finger slide from top to bottom:KEY_F4*/
+    TS_SLIDE_B2T = KEY_F5, /*4.Single finger slide from bottom to top:KEY_F5*/
+    TS_CIRCLE_SLIDE = KEY_F7, /*5.Single finger slide circle:KEY_F7*/
+    TS_LETTER_c = KEY_F8, /*6.Single finger write letter c*:KEY_F8*/
+    TS_LETTER_e = KEY_F9, /*7.Single finger write letter e:KEY_F9*/
+    TS_LETTER_m = KEY_F10, /*8.Single finger write letter m:KEY_F10*/
+    TS_LETTER_w = KEY_F11, /*9.Single finger write letter w:KEY_F11*/
+    TS_PALM_COVERED = KEY_F12, /*10.Palm off screen:KEY_F12*/
     TS_GESTURE_INVALID = 0xFF,/*FF.No gesture*/
 };
-
 enum ts_gesture_enable_bit
 {
     GESTURE_DOUBLE_CLICK = 0,
@@ -507,7 +463,6 @@ enum ts_rawdata_debug_type
     READ_DIFF_DATA = 0,
     READ_RAW_DATA,
     READ_CB_DATA,
-    READ_FORCE_DATA,
 };
 #if defined (CONFIG_TEE_TUI)
 struct ts_tui_data {
@@ -571,11 +526,6 @@ struct ts_fingers
     unsigned int add_release_flag;
 };
 
-struct ts_palm_key
-{
-	unsigned int palm_button_key;
-};
-
 struct ts_tool
 {
     int pen_inrange_status;
@@ -620,56 +570,6 @@ struct fw_param
     char fw_name[MAX_STR_LEN * 4]; //firmware name contain 4 parts
 };
 
-/*
- New data format for rawdata
-*/
-#define RAWDATA_TEST_FAIL_CHAR 'F'
-#define RAWDATA_TEST_PASS_CHAR 'P'
-
-enum ts_rawdata_formattype
-{
-    TS_RAWDATA_OLDFORMAT = 0,
-    TS_RAWDATA_NEWFORMAT,
-};
-enum ts_raw_data_type
-{
-    RAW_DATA_TYPE_IC = 0,
-    RAW_DATA_TYPE_CAPRAWDATA,
-    RAW_DATA_TYPE_TrxDelta,
-    RAW_DATA_TYPE_Noise,
-	RAW_DATA_TYPE_FreShift,
-	RAW_DATA_TYPE_OpenShort,
-	RAW_DATA_TYPE_SelfCap,
-	RAW_DATA_TYPE_CbCctest,
-	RAW_DATA_TYPE_highResistance,
-	RAW_DATA_TYPE_SelfNoisetest,
-	RAW_DATA_END,
-};
-struct ts_rawdata_newnodeinfo
-{    
-    struct list_head node;
-	u8 typeindex;       /* enum ts_raw_data_type */
-	char testresult;    /* 'P' o 'F' */
-	int *values;
-	size_t size;
-	char test_name[TS_RAWDATA_TEST_NAME_LEN];	
-	char statistics_data[TS_RAWDATA_STATISTICS_DATA_LEN];   /* [%d,%d,%d] */
-	char tptestfailedreason[TS_RAWDATA_FAILED_REASON_LEN];  /* "-panel_reason" o "-software reason" */
-};
-
-struct ts_rawdata_info_new
-{
-    int status;
-	int rx;
-	int tx;
-    ktime_t time_stamp;
-    char deviceinfo[TS_RAWDATA_DEVINFO_MAX];       /* ic info */
-	char i2cinfo[TS_RAWDATA_RESULT_CODE_LEN];      /* i2c test result:0P or 0F */
-	char i2cerrinfo[TS_RAWDATA_FAILED_REASON_LEN]; /* i2c test fail reason*/
-	int listnodenum;
-	struct list_head rawdata_head;//ts_rawdata_newnodeinfo  list
-};
-
 struct ts_rawdata_info
 {
     int status;
@@ -682,7 +582,6 @@ struct ts_rawdata_info
     ktime_t time_stamp;
     int buff[TS_RAWDATA_BUFF_MAX];
     int hybrid_buff[TS_RAWDATA_BUFF_MAX];
-    int hybrid_buff_used_size;
     int buff_3d[TS_RAWDATA_BUFF_MAX];
     char result[TS_RAWDATA_RESULT_MAX];
 	int *tx_delta_buf;
@@ -778,7 +677,7 @@ struct ts_glove_info
     u8 glove_switch;
     int op_action;
     int status;
-    u32 glove_switch_addr;
+    u16 glove_switch_addr;
     u16 glove_switch_bit;
 };
 
@@ -788,7 +687,7 @@ struct ts_holster_info
     u8 holster_switch;
     int op_action;
     int status;
-    u32 holster_switch_addr;
+    u16 holster_switch_addr;
     u16 holster_switch_bit;
 };
 
@@ -798,15 +697,9 @@ struct ts_roi_info
     u8 roi_switch;
     int op_action;
     int status;
-    u32 roi_control_addr;
+    u16 roi_control_addr;
     u8 roi_control_bit;
     u16 roi_data_addr;
-};
-
-struct ts_scene_switch_info
-{
-	u8 scene;
-	u8 operator;
 };
 
 enum ts_sleep_mode
@@ -819,7 +712,7 @@ struct ts_easy_wakeup_info
 {
     enum ts_sleep_mode sleep_mode;
     int off_motion_on;
-    unsigned int easy_wakeup_gesture;
+    int easy_wakeup_gesture;
     int easy_wakeup_flag;
     int palm_cover_flag;
     int palm_cover_control;
@@ -907,10 +800,8 @@ struct ts_cmd_param
         struct fw_param firmware_info; //firmware update
         enum ts_pm_type pm_type;
         struct ts_kit_device_data *chip_data;
-        unsigned int ts_key;
     } pub_params;
     void* prv_params;
-	void (*ts_cmd_freehook)(void*);
 };
 
 enum ts_timeout_flag
@@ -1089,6 +980,7 @@ struct ts_kit_device_data
 	bool is_direct_proc_cmd;
 	bool support_s3320_short_test;
 	unsigned int support_ext_trex_short_test;
+	unsigned int blanc501100_tianma_flag;
     bool is_i2c_one_byte;
     bool is_new_oem_structure;
     bool disable_reset;
@@ -1119,9 +1011,6 @@ struct ts_kit_device_data
     int vddio_gpio_type;
     int vddio_regulator_type;
     int vddio_gpio_ctrl;
-    int synaptics3718_fw_updata_flag;
-    int synaptics3718_Tp_Pressure_flag;
-    int LDO29_980_default_on_flag;
     int algo_size;
     int algo_id;
     int slave_addr;
@@ -1169,7 +1058,6 @@ struct ts_kit_device_data
 	int test_capacitance_via_csvfile;
 	int csvfile_use_product_system;
 	int trx_delta_test_support;
-	int forcekey_test_support;
 	int td43xx_ee_short_test_support;
 	int tddi_ee_short_test_partone_limit;
 	int tddi_ee_short_test_parttwo_limit;
@@ -1202,11 +1090,7 @@ struct ts_kit_device_data
 	unsigned int get_brightness_info_flag;
 	int check_fw_right_flag;
 	int use_lcdkit_power_notify;
-	int fp_tp_report_touch_minor_event;
 	int support_crc_err_do_reset;
-	u8 rawdata_newformatflag;   // 0 - old format   1 - new format
-	unsigned int roi_delay_flag;
-	u8 download_fw_incharger; // 0 - not support    1 - support
 };
 
 struct ts_bus_info
@@ -1223,11 +1107,6 @@ struct ts_aft_algo_param
     int lcd_width;
     int lcd_height;
 };
-struct tp_i2c_hwlock
-{
-    int  tp_i2c_hwlock_flag;
-    struct hwspinlock * hwspin_lock;
-};
 
 struct ts_kit_platform_data
 {
@@ -1240,29 +1119,16 @@ struct ts_kit_platform_data
     int irq_id;
     int edge_wideth;
     int irq_gpio;
-    int cs_gpio;
     int reset_gpio;
     int fpga_flag;
     u32 fp_tp_enable;
     u32 register_charger_notifier;
     u32 hide_plain_id;
-	u32 glove_mode_rw_disable;
-    u32 touch_switch_need_process;
+    u32 glove_mode_rw_disable;
     u8 panel_id;
-    unsigned int udfp_enable_flag;
-    unsigned int spi_max_frequency;
-    unsigned int spi_mode;
-    unsigned int cs_reset_low_delay;
-    unsigned int cs_reset_high_delay;
-#if defined(HUAWEI_CHARGER_FB)
-    struct notifier_block charger_detect_notify;
-#endif
     struct device_node* node;
     struct i2c_client* client;
-    struct spi_device *spi;
-    struct pl022_config_chip spidev0_chip_info;
     struct ts_bus_info* bops;
-    struct tp_i2c_hwlock  i2c_hwlock;
     struct task_struct* ts_task;
     struct task_struct* ts_init_task;
     struct platform_device* ts_dev;
@@ -1291,9 +1157,11 @@ struct ts_kit_platform_data
 #if defined (CONFIG_HUAWEI_DSM)
     struct ts_dsm_info dsm_info;
 #endif
+#if defined(HUAWEI_CHARGER_FB)
+    struct notifier_block charger_detect_notify;
+#endif
 };
 
-bool tp_get_prox_status(void);
 int ts_kit_power_control_notify(enum ts_pm_type pm_type,  int timeout);
 void ts_kit_thread_stop_notify(void);
 int  ts_kit_put_one_cmd(struct ts_cmd_node * cmd, int timeout);
@@ -1328,6 +1196,5 @@ int ts_kit_parse_csvfile(char *file_path, char *target_name, int32_t  *data, int
 extern void ts_dmd_report(int dmd_num, const char* pszFormat, ...);
 #endif
 int ts_event_notify(ts_notify_event_type event);
-int ts_change_spi_mode(struct spi_device *spi, u16 mode);
 #endif
 

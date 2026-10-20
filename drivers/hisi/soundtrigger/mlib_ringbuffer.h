@@ -1,4 +1,19 @@
+/******************************************************************************
 
+				  版权所有 (C), 2001-2014, 华为技术有限公司
+
+ ******************************************************************************
+  文 件 名	 : mlib_ringbuffer.h
+  版 本 号	 : 初稿
+  作	者	 : l00279082
+  生成日期	 : 2014年9月2日
+  最近修改	 :
+  功能描述	 : 环状Buffer实现
+  修改历史	 :
+  1.日	  期   : 2014年9月1日
+	作	  者   : l00279082
+	修改内容   : 创建文件
+******************************************************************************/
 #ifndef __MLIB_RINGBUFFER_H__
 #define __MLIB_RINGBUFFER_H__
 
@@ -31,7 +46,7 @@ typedef struct _RingBuffer RingBuffer;
  输入参数  : element_count: Ring Buffer总元素个数
  返 回 值  : RING_BUFFER_NORMAL：Success, RING_BUFFER_ALLOCATE_FAIL: Fail
 *****************************************************************************/
-extern RingBuffer *RingBuffer_Init(void * ringbufferAddr, int element_size, int element_cnt);
+extern RingBuffer *RingBuffer_Init(void * ringbufferAddr);
 
 /*****************************************************************************
  函 数 名  : RingBuffer_GetCount
@@ -78,7 +93,7 @@ extern int RingBuffer_Get(RingBuffer *rb, void *element);
  输入参数  : element: 要写入的元素的指针
  返 回 值  : 无
 *****************************************************************************/
-extern int RingBuffer_Put(RingBuffer *rb, const void *element);
+extern int RingBuffer_Put(RingBuffer *rb, void *element);
 
 /*****************************************************************************
  函 数 名  : RingBuffer_Get_FastData
@@ -89,7 +104,7 @@ extern int RingBuffer_Put(RingBuffer *rb, const void *element);
  输入参数  :
  返 回 值  : 无
 *****************************************************************************/
-extern int RingBuffer_Compare(RingBuffer *rb, const void *element,int compareCount);
+extern int RingBuffer_Compare(RingBuffer *rb,void *element,int compareCount);
 extern int RingBuffer_Backspace(RingBuffer *rb, unsigned int skip_cnt);
 
 

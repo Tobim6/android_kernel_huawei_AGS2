@@ -55,7 +55,6 @@ struct hw_vcm_info {
 typedef struct _tag_hw_vcm_intf
 {
 	hw_vcm_vtbl_t *vtbl;
-    struct v4l2_subdev *subdev;
 } hw_vcm_intf_t;
 
 
@@ -85,7 +84,7 @@ struct _tag_hw_vcm_vtbl {
 /* extern function declare */
 extern int hw_vcm_register(struct platform_device *pdev,
 		hw_vcm_intf_t *intf, struct hw_vcm_info *hw_vcm_info);
-extern void hw_vcm_unregister(struct v4l2_subdev* subdev);
+extern void hw_vcm_unregister(hw_vcm_intf_t *intf);
 int hw_vcm_config(hw_vcm_t *hw_vcm, void *arg);
 int hw_vcm_get_dt_data(struct platform_device *pdev, vcm_t *vcm);
 

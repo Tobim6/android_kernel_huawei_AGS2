@@ -15,7 +15,6 @@ struct sec_ts_data *tsp_info;
 #if defined (CONFIG_TEE_TUI)
 #include "tui.h"
 #endif
-#include "../../tpkit_platform_adapter.h"
 
 static struct mutex wrong_touch_lock;
 static struct completion roi_data_done;
@@ -280,7 +279,6 @@ static int sec_ts_i2c_write_burst(struct sec_ts_data *ts, u8 *data, int len)
 		if (!ts->chip_data->ts_platform_data->bops->bus_write) {
 			TS_LOG_ERR("bus_write not exits\n");
 			ret = -EIO;
-			mutex_unlock(&ts->i2c_mutex);
 			goto err;
 		}
 		ret = ts->chip_data->ts_platform_data->bops->bus_write(data, len);
@@ -305,10 +303,10 @@ err:
 
 static int sec_ts_i2c_read_bulk(struct sec_ts_data *ts, u8 *data, int len)
 {
-	int ret = 0;
-	unsigned char retry = 0;
+	int ret;
+	unsigned char retry;
 	int remain = len;
-	struct i2c_msg msg = {0};
+	struct i2c_msg msg;
 	u8 reg = 0;
 
 	mutex_lock(&ts->i2c_mutex);
@@ -703,10 +701,10 @@ reinit_err:
 static int sec_ts_process_status(struct sec_ts_data *ts,
 					struct ts_fingers *info, u8 *event_buff)
 {
-	int ret = 0;
-	struct sec_ts_event_status *p_event_status = NULL;
-	struct sec_ts_selfcheck *p_selfcheck = NULL;
-	u8 rBuff[SEC_TS_SELFCHECK_BUFF_SIZE] = {0};
+	int ret;
+	struct sec_ts_event_status *p_event_status;
+	struct sec_ts_selfcheck *p_selfcheck;
+	u8 rBuff[SEC_TS_SELFCHECK_BUFF_SIZE];
 
 	p_event_status = (struct sec_ts_event_status *)event_buff;
 
@@ -749,30 +747,6 @@ static int sec_ts_process_status(struct sec_ts_data *ts,
 		if (ts->wet_mode)
 			ts->wet_count++;
 
-	}
-
-	/*add some abnormal status debug log for S6Y761X,*/
-	if(ts->ic_name == S6SY761X) {
-		if ((p_event_status->stype == TYPE_STATUS_EVENT_VENDOR_INFO) &&
-			(p_event_status->status_id == SEC_TS_VENDOR_ERROR_WDT_RESET)) {
-			TS_LOG_ERR("%s:WDT Reset.\n", __func__);
-		}
-
-		if ((p_event_status->stype == TYPE_STATUS_EVENT_VENDOR_INFO) &&
-			(p_event_status->status_id == SEC_TS_VENDOR_INFO_FREQ_HOPPING)) {
-			TS_LOG_ERR("%s:Frequency hopping, the new frequency is %d kHz.\n", __func__,
-				(p_event_status->status_data_2)<<8 | (p_event_status->status_data_1));
-		}
-
-		if ((p_event_status->stype == TYPE_STATUS_EVENT_VENDOR_INFO) &&
-			(p_event_status->status_id == SEC_TS_VENDOR_INFO_NOISE_LEVEL_CHANGED)) {
-			TS_LOG_ERR("%s:Noise Level changed, the new noise level is %d .\n", __func__, (p_event_status->status_data_1));
-		}
-
-		if ((p_event_status->stype == TYPE_STATUS_EVENT_VENDOR_INFO) &&
-			(p_event_status->status_id == SEC_TS_VENDOR_INFO_ENTER_PALM)) {
-			TS_LOG_ERR("%s:Plam reject enter.\n", __func__);
-		}
 	}
 
 	if ((p_event_status->stype == TYPE_STATUS_EVENT_VENDOR_INFO) &&
@@ -824,26 +798,20 @@ static void sec_ts_process_coord(struct sec_ts_data *ts,
 		ts->coord[t_id].ewy = p_event_coord->ewy;
 		ts->coord[t_id].xer = p_event_coord->sgx;
 		ts->coord[t_id].yer = p_event_coord->sgy;
-		if(t_id < MAX_SUPPORT_TOUCH_COUNT) {
-			info->fingers[t_id].status = TP_FINGER;
-			if (ts->plat_data->in_recovery_mode == USE_IN_RECOVERY_MODE && ts->plat_data->use_ic_res == USE_IC_RESOLUTION && ts->plat_data->max_x != 0 && ts->plat_data->max_y != 0) {
-				info->fingers[t_id].x = ts->coord[t_id].x * ts->plat_data->x_max_rc / ts->plat_data->max_x;
-				info->fingers[t_id].y = ts->coord[t_id].y * ts->plat_data->y_max_rc / ts->plat_data->max_y;
-			} else {
-				info->fingers[t_id].x = ts->coord[t_id].x;
-				info->fingers[t_id].y = ts->coord[t_id].y;
-			}
-			info->fingers[t_id].major = ts->coord[t_id].major;
-			info->fingers[t_id].minor = ts->coord[t_id].minor;
-			info->fingers[t_id].pressure = ts->coord[t_id].z;
-			info->fingers[t_id].orientation = p_event_coord->orient;
-			info->fingers[t_id].wx = ts->coord[t_id].wx;
-			info->fingers[t_id].wy = ts->coord[t_id].wy;
-			info->fingers[t_id].ewx = ts->coord[t_id].ewx;
-			info->fingers[t_id].ewy = ts->coord[t_id].ewy;
-			info->fingers[t_id].xer = ts->coord[t_id].xer;
-			info->fingers[t_id].yer = ts->coord[t_id].yer;
-		}
+
+		info->fingers[t_id].status = TP_FINGER;
+		info->fingers[t_id].x = ts->coord[t_id].x;
+		info->fingers[t_id].y = ts->coord[t_id].y;
+		info->fingers[t_id].major = ts->coord[t_id].major;
+		info->fingers[t_id].minor = ts->coord[t_id].minor;
+		info->fingers[t_id].pressure = ts->coord[t_id].z;
+		info->fingers[t_id].orientation = p_event_coord->orient;
+		info->fingers[t_id].wx = ts->coord[t_id].wx;
+		info->fingers[t_id].wy = ts->coord[t_id].wy;
+		info->fingers[t_id].ewx = ts->coord[t_id].ewx;
+		info->fingers[t_id].ewy = ts->coord[t_id].ewy;
+		info->fingers[t_id].xer = ts->coord[t_id].xer;
+		info->fingers[t_id].yer = ts->coord[t_id].yer;
 
 		if (!ts->coord[t_id].palm && (ts->coord[t_id].ttype == SEC_TS_TOUCHTYPE_PALM))
 			ts->coord[t_id].palm_count++;
@@ -856,14 +824,11 @@ static void sec_ts_process_coord(struct sec_ts_data *ts,
 
 		if ((ts->coord[t_id].ttype == SEC_TS_TOUCHTYPE_NORMAL)
 			|| (ts->coord[t_id].ttype == SEC_TS_TOUCHTYPE_PALM)
-			|| (ts->coord[t_id].ttype == SEC_TS_TOUCHTYPE_GLOVE)
-			|| ((ts->ic_name == S6SY761X)&&(ts->coord[t_id].ttype == SEC_TS_TOUCHTYPE_WET) ) ) {
+			|| (ts->coord[t_id].ttype == SEC_TS_TOUCHTYPE_GLOVE)) {
 
 			if (ts->coord[t_id].action == SEC_TS_COORDINATE_ACTION_RELEASE) {
 				do_gettimeofday(&ts->time_released[t_id]);
-				if(t_id < MAX_SUPPORT_TOUCH_COUNT) {
-					memset(&info->fingers[t_id], 0, sizeof(struct ts_finger));
-				}
+				memset(&info->fingers[t_id], 0, sizeof(struct ts_finger));
 				if (ts->time_longest < (ts->time_released[t_id].tv_sec - ts->time_pressed[t_id].tv_sec))
 					ts->time_longest = (ts->time_released[t_id].tv_sec - ts->time_pressed[t_id].tv_sec);
 
@@ -1066,71 +1031,6 @@ static void sec_ts_regulator_put(struct sec_ts_data *ts)
 		regulator_put(ts->regulator_avdd);
 }
 
-static int sec_pinctrl_select_normal(void)
-{
-	int retval = -1;
-	struct sec_ts_data *ts = tsp_info;
-
-	if (ts->pctrl == NULL || ts->pins_default == NULL) {
-		TS_LOG_ERR("%s: pctrl or pins_default is NULL.\n", __func__);
-		return retval;
-	}
-	retval = pinctrl_select_state(ts->pctrl, ts->pins_default);
-	if (retval < 0) {
-		TS_LOG_ERR("%s: set pinctrl normal error.\n", __func__);
-	}
-	return retval;
-}
-static int sec_pinctrl_select_lowpower(void)
-{
-	int retval = -1;
-	struct sec_ts_data *ts = tsp_info;
-
-	if (ts->pctrl == NULL || ts->pins_idle== NULL) {
-		TS_LOG_ERR("%s: pctrl or pins_idle is NULL.\n", __func__);
-		return retval;
-	}
-	retval = pinctrl_select_state(ts->pctrl, ts->pins_idle);
-	if (retval < 0) {
-		TS_LOG_ERR("%s: set pinctrl pins_idle error.\n", __func__);
-	}
-	return retval;
-}
-
-static int sec_pinctrl_get_init(void)
-{
-	int ret = 0;
-	struct sec_ts_data *ts = tsp_info;
-
-	TS_LOG_INFO("%s enter\n", __func__);
-
-	ts->pctrl = devm_pinctrl_get(&ts->sec_ts_pdev->dev);
-	if (IS_ERR(ts->pctrl)) {
-		TS_LOG_ERR("%s failed to devm pinctrl get\n", __func__);
-		ret = -EINVAL;
-		return ret;
-	}
-
-	ts->pins_default = pinctrl_lookup_state(ts->pctrl, "default");
-	if (IS_ERR(ts->pins_default)) {
-		TS_LOG_ERR("%s fail to pinctrl lookup state default\n", __func__);
-		ret = -EINVAL;
-		goto err_pinctrl_put;
-	}
-
-	ts->pins_idle = pinctrl_lookup_state(ts->pctrl, "idle");
-	if (IS_ERR(ts->pins_idle)) {
-		TS_LOG_ERR("%s failed to pinctrl lookup state idle\n", __func__);
-		ret = -EINVAL;
-		goto err_pinctrl_put;
-	}
-	return 0;
-
-err_pinctrl_put:
-	devm_pinctrl_put(ts->pctrl);
-	return ret;
-}
-
 static int sec_ts_power(struct sec_ts_data *data, bool on)
 {
 	struct sec_ts_data *ts = data;
@@ -1170,62 +1070,29 @@ static int sec_ts_power(struct sec_ts_data *data, bool on)
 			gpio_direction_output(ts->chip_data->vci_gpio_ctrl, 1);
 		}
 
-		if(ts->is_need_set_pinctrl){
-			sec_pinctrl_select_normal();
-		}
-
 		sec_ts_delay(1);
 		gpio_direction_output(ts->chip_data->ts_platform_data->reset_gpio, 1);
 		TS_LOG_INFO("%s: reset gpio on\n", __func__);
 	} else {
 		gpio_direction_output(ts->chip_data->ts_platform_data->reset_gpio, 0);
 		TS_LOG_INFO("%s: reset gpio off\n", __func__);
-		if(ts->ic_name == S6SY761X) {
-			if (ts->chip_data->vci_regulator_type) {
-				TS_LOG_DEBUG("%s: regulator disable avdd\n", __func__);
-				if (regulator_disable(ts->regulator_avdd)) {
-					TS_LOG_ERR("%s: disable avdd regulator failed\n",__func__);
-				}
-			} else if (ts->chip_data->vci_gpio_type) {
-				TS_LOG_DEBUG("%s vci switch gpio off\n", __func__);
-				gpio_direction_output(tsp_info->chip_data->vci_gpio_ctrl, 0);
-			}
-			/*the new specification requires avdd to be powered off for more than 4ms than iovcc,
-			 so delay 5ms here.						*/
-			sec_ts_delay(5); //ic need
 
-			if (ts->chip_data->vddio_regulator_type) {
-				TS_LOG_DEBUG("%s: regulator disable dvdd\n",__func__);
-				if (regulator_disable(ts->regulator_dvdd)) {
-					TS_LOG_ERR("%s: disable dvdd regulator failed\n",__func__);
-				}
-			} else if (ts->chip_data->vddio_gpio_type) {
-				TS_LOG_DEBUG("%s vddio switch gpio off\n", __func__);
-				gpio_direction_output(tsp_info->chip_data->vddio_gpio_ctrl, 0);
-			}
-		} else {
-			if (ts->chip_data->vddio_regulator_type) {
-				TS_LOG_DEBUG("%s: regulator disable dvdd\n",__func__);
-				if (regulator_disable(ts->regulator_dvdd)) {
-					TS_LOG_ERR("%s: disable dvdd regulator failed\n",__func__);
-				}
-			} else if (ts->chip_data->vddio_gpio_type) {
-				TS_LOG_DEBUG("%s vddio switch gpio off\n", __func__);
-				gpio_direction_output(tsp_info->chip_data->vddio_gpio_ctrl, 0);
-			}
-			sec_ts_delay(1);
-			if (ts->chip_data->vci_regulator_type) {
-				TS_LOG_DEBUG("%s: regulator disable avdd\n", __func__);
-				if (regulator_disable(ts->regulator_avdd)) {
-					TS_LOG_ERR("%s: disable avdd regulator failed\n",__func__);
-				}
-			} else if (ts->chip_data->vci_gpio_type) {
-				TS_LOG_DEBUG("%s vci switch gpio off\n", __func__);
-				gpio_direction_output(tsp_info->chip_data->vci_gpio_ctrl, 0);
-			}
+		if (ts->chip_data->vddio_regulator_type) {
+			if (regulator_disable(ts->regulator_dvdd))
+				TS_LOG_ERR("%s: disable dvdd regulator failed\n",__func__);
+			TS_LOG_DEBUG("%s: regulator disable dvdd\n",__func__);
+		} else if (ts->chip_data->vddio_gpio_type) {
+			TS_LOG_DEBUG("%s vddio switch gpio off\n", __func__);
+			gpio_direction_output(tsp_info->chip_data->vddio_gpio_ctrl, 0);
 		}
-		if(ts->is_need_set_pinctrl){
-			sec_pinctrl_select_lowpower();
+		sec_ts_delay(1);
+		if (ts->chip_data->vci_regulator_type) {
+			if (regulator_disable(ts->regulator_avdd))
+				TS_LOG_ERR("%s: disable avdd regulator failed\n",__func__);;
+			TS_LOG_DEBUG("%s: regulator disable avdd\n", __func__);
+		} else if (ts->chip_data->vci_gpio_type) {
+			TS_LOG_DEBUG("%s vci switch gpio off\n", __func__);
+			gpio_direction_output(tsp_info->chip_data->vci_gpio_ctrl, 0);
 		}
 	}
 
@@ -1251,191 +1118,6 @@ static void sec_ts_set_firmware_name(struct sec_ts_data *ts)
 	strncat(fw_name, ts->project_id, sizeof(ts->project_id));
 	strncat(fw_name, SEC_TS_STR_FWTYPE, sizeof(SEC_TS_STR_FWTYPE));
 }
-
-static void sec_ts_parse_ic_name(struct device_node *device,
-					struct ts_kit_device_data *chip_data)
-{
-	int ret = NO_ERR;
-	int read_val= 0;
-	if(!device || !chip_data) {
-		TS_LOG_ERR("%s, param invalid\n", __func__);
-		return;
-	}
-	ret = of_property_read_u32(device, "ic_name", &read_val);
-	if (!ret) {
-		tsp_info->ic_name =  read_val;
-	}
-
-	TS_LOG_INFO("tsp_info->ic_name = %d\n", tsp_info->ic_name);
-}
-
-static void sec_ts_default_trx_num(struct device_node *device,
-					struct ts_kit_device_data *chip_data)
-{
-	int ret = NO_ERR;
-	int read_val= 0;
-	if(!device || !chip_data) {
-		TS_LOG_ERR("%s, param invalid\n", __func__);
-		return;
-	}
-	ret = of_property_read_u32(device, "tx_default_num", &read_val);
-	if (!ret) {
-		tsp_info->tx_default_num = read_val;
-	}
-
-	ret = of_property_read_u32(device, "rx_default_num", &read_val);
-	if (!ret) {
-		tsp_info->rx_default_num = read_val;
-	}
-
-	TS_LOG_INFO("tsp_info->tx_default_num = %d, tsp_info->rx_default_num = %d\n",
-		tsp_info->tx_default_num, tsp_info->tx_default_num);
-}
-
-/*parse is need calibrate after update fw flag, default need not calibrate*/
-static void sec_ts_is_need_calibrate_after_update(struct device_node *device,
-					struct ts_kit_device_data *chip_data)
-{
-	int ret = NO_ERR;
-	int read_val= 0;
-	if(!device || !chip_data) {
-		TS_LOG_ERR("%s, param invalid\n", __func__);
-		return;
-	}
-	ret = of_property_read_u32(device, "is_need_calibrate_after_update_fw", &read_val);
-	if (!ret) {
-		tsp_info->is_need_calibrate_after_update_fw = read_val;
-	} else {
-		tsp_info->is_need_calibrate_after_update_fw = 0;
-	}
-
-	TS_LOG_INFO("tsp_info->is_need_calibrate_after_update_fw = %d\n",
-		tsp_info->is_need_calibrate_after_update_fw);
-}
-
-static void sec_ts_parse_holster_supported(struct device_node *device,
-					struct ts_kit_device_data *chip_data)
-{
-	int ret = NO_ERR;
-	int read_val= 0;
-	if(!device || !chip_data) {
-		TS_LOG_ERR("%s, param invalid\n", __func__);
-		return;
-	}
-	ret = of_property_read_u32(device, "holster_supported", &read_val);
-	if (!ret) {
-		tsp_info->chip_data->ts_platform_data->feature_info.holster_info.holster_supported = read_val;
-	} else {
-		tsp_info->chip_data->ts_platform_data->feature_info.holster_info.holster_supported = 0;
-	}
-
-	TS_LOG_INFO("tsp_info->holster_support = %d\n",
-		tsp_info->chip_data->ts_platform_data->feature_info.holster_info.holster_supported);
-}
-
-static void sec_ts_parse_is_need_set_pinctrl(struct device_node *device,
-					struct ts_kit_device_data *chip_data)
-{
-	int ret = NO_ERR;
-	int read_val = 0;
-	if(!device || !chip_data) {
-		TS_LOG_ERR("%s, param invalid\n", __func__);
-		return;
-	}
-	ret = of_property_read_u32(device, "is_need_set_pinctrl", &read_val);
-	if (!ret) {
-		tsp_info->is_need_set_pinctrl =  read_val;
-	}
-
-	TS_LOG_INFO("tsp_info->is_need_set_pinctrl = %d\n", tsp_info->is_need_set_pinctrl);
-}
-
-static void sec_ts_parse_default_projectid(struct device_node *device,
-					struct ts_kit_device_data *chip_data)
-{
-	int ret = NO_ERR;
-	int read_val = 0;
-	if(!device || !chip_data) {
-		TS_LOG_ERR("%s, param invalid\n", __func__);
-		return;
-	}
-
-	ret = of_property_read_string(device, "default_projectid", &tsp_info->default_projectid);
-	if(ret) {
-		TS_LOG_ERR("%s, can't parse default_projectid from dts, use default\n", __func__);
-		tsp_info->default_projectid = SEC_TS_HW_PROJECTID;
-	}
-	TS_LOG_INFO("%s,default_projectid:%s\n", __func__, tsp_info->default_projectid);
-}
-
-static void sec_ts_parse_is_need_set_reseved_bit(struct device_node *device,
-					struct ts_kit_device_data *chip_data)
-{
-	int ret = NO_ERR;
-	int read_val = 0;
-	if(!device || !chip_data) {
-		TS_LOG_ERR("%s, param invalid\n", __func__);
-		return;
-	}
-
-	ret = of_property_read_u32(device, "is_need_set_reseved_bit", &read_val);
-	if (!ret) {
-		tsp_info->is_need_set_reseved_bit =  read_val;
-	}
-	TS_LOG_INFO("tsp_info->is_need_set_reseved_bit = %d\n", tsp_info->is_need_set_reseved_bit);
-}
-
-static void sec_ts_parse_recovery_res(struct device_node *device,
-					struct ts_kit_device_data *chip_data)
-{
-	struct sec_ts_plat_data *pdata = tsp_info->plat_data;
-	int ret = 0;
-	struct device_node *np = device;
-
-	if(!device || !chip_data) {
-		TS_LOG_ERR("%s, param invalid\n", __func__);
-		return;
-	}
-
-	/* convert ic resolution x[0,4095] y[0,4095] to real resolution, fix inaccurate touch in recovery mode,
-	 * there is no coordinate conversion in recovery mode.
-	 */
-	if (get_into_recovery_flag_adapter()) {
-		pdata->in_recovery_mode = USE_IN_RECOVERY_MODE;
-		TS_LOG_INFO("Now driver in recovery mode\n");
-	} else {
-		pdata->in_recovery_mode = USE_NOT_IN_RECOVERY_MODE;
-	}
-
-	ret = of_property_read_u32(np, "use_ic_res", &pdata->use_ic_res);
-	if (ret) {
-		TS_LOG_INFO("%s:get device use_ic_res fail, use default, ret=%d\n",
-			__func__, ret);
-		pdata->use_ic_res = USE_LCD_RESOLUTION;
-	}
-
-	ret = of_property_read_u32(np, "x_max_rc", &pdata->x_max_rc);
-	if (ret) {
-		TS_LOG_INFO("%s:get device x_max_rc fail,use default, ret=%d\n",
-			__func__, ret);
-		pdata->x_max_rc = 0;
-	}
-
-	ret = of_property_read_u32(np, "y_max_rc", &pdata->y_max_rc);
-	if (ret) {
-		TS_LOG_INFO("%s:get device y_max_rc fail,use default, ret=%d\n",
-			__func__, ret);
-		pdata->y_max_rc = 0;
-	}
-
-	TS_LOG_INFO("%s:%s=%d, %s=%d, %s=%d, %s=%d\n", __func__,
-		"use_ic_res", pdata->use_ic_res,
-		"x_max_rc", pdata->x_max_rc,
-		"y_max_rc", pdata->y_max_rc,
-		"in_recovery_mode", pdata->in_recovery_mode);
-}
-
-
 
 static int sec_ts_parse_dt(struct device_node *device,
 					struct ts_kit_device_data *chip_data)
@@ -1503,12 +1185,13 @@ static int sec_ts_parse_dt(struct device_node *device,
 		return -ENODATA;
 	}
 
-	TS_LOG_INFO("%s:%s=%d, %s=%d, %s=%d, %s=%d, %s=%d\n", __func__,
+	TS_LOG_ERR("%s:%s=%d, %s=%d, %s=%d, %s=%d, %s=%d\n", __func__,
 		"algo_id", chip_data->algo_id,
 		"x_max", chip_data->x_max,
 		"y_max", chip_data->y_max,
 		"x_mt", chip_data->x_max_mt,
 		"y_mt", chip_data->y_max_mt);
+
 
 	array_len = of_property_count_strings(np, "raw_data_limit");
 	if (array_len <= 0 || array_len > RAWDATA_NUM) {
@@ -1517,7 +1200,7 @@ static int sec_ts_parse_dt(struct device_node *device,
 				array_len);
 	}
 
-	for (index = 0; index < array_len && index < RAWDATA_NUM; index++) {
+	for (index = 0; index < array_len; index++) {
 		ret =
 			of_property_read_string_index(np,
 						"raw_data_limit",
@@ -1543,7 +1226,7 @@ static int sec_ts_parse_dt(struct device_node *device,
 				array_len);
 	}
 
-	for (index = 0; index < array_len && index < SEC_TS_CAL_LIMITDATA_MAX; index++) {
+	for (index = 0; index < array_len; index++) {
 		ret = of_property_read_string_index(np, "cal_data_limit",
 							index, &raw_data_dts);
 		if (ret) {
@@ -1556,7 +1239,7 @@ static int sec_ts_parse_dt(struct device_node *device,
 			tsp_info->cal_limit[index] =
 				simple_strtol(raw_data_dts, NULL, 10);
 			TS_LOG_INFO("cal_limit[%d] = %d\n", index,
-					tsp_info->cal_limit[index]);
+					chip_data->raw_limit_buf[index]);
 		}
 	}
 
@@ -1567,7 +1250,7 @@ static int sec_ts_parse_dt(struct device_node *device,
 				array_len);
 	}
 
-	for (index = 0; index < array_len && index < SEC_TS_NOLH_LIMITDATA_MAX; index++) {
+	for (index = 0; index < array_len; index++) {
 		ret = of_property_read_string_index(np, "nolh_data_limit",
 							index, &raw_data_dts);
 		if (ret) {
@@ -1580,7 +1263,7 @@ static int sec_ts_parse_dt(struct device_node *device,
 			tsp_info->nolh_limit[index] =
 				simple_strtol(raw_data_dts, NULL, 10);
 			TS_LOG_INFO("nolh_limit[%d] = %d\n", index,
-					tsp_info->nolh_limit[index]);
+					chip_data->raw_limit_buf[index]);
 		}
 	}
 
@@ -1682,30 +1365,19 @@ static int sec_ts_parse_dt(struct device_node *device,
 
 	ret = of_property_read_u32(np, "charger_supported", &read_val);
 	if (!ret) {
-		TS_LOG_INFO("charger_supported = %d\n", read_val);
+		TS_LOG_ERR("charger_supported = %d\n", read_val);
 		tsp_info->chip_data->ts_platform_data->feature_info.charger_info.charger_supported
 				= (u8) read_val;
 	} else {
 		TS_LOG_ERR("can not get charger_supported value\n");
 		tsp_info->chip_data->ts_platform_data->feature_info.charger_info.charger_supported = 0;
 	}
-	sec_ts_parse_ic_name(device, chip_data);
-	sec_ts_parse_holster_supported(device, chip_data);
-	sec_ts_parse_is_need_set_pinctrl(device, chip_data);
-
-	if(tsp_info->is_need_set_pinctrl){
-		sec_pinctrl_get_init();
-	}
-	sec_ts_parse_default_projectid(device, chip_data);
-	sec_ts_parse_is_need_set_reseved_bit(device, chip_data);
-	sec_ts_default_trx_num(device, chip_data);
-	sec_ts_is_need_calibrate_after_update(device, chip_data);
-	sec_ts_parse_recovery_res(device, chip_data);
 
 	tsp_info->module_name = NULL;
 
 	memcpy(id_buf, SEC_TS_VENDOR_NAME, strlen(SEC_TS_VENDOR_NAME));
-	strncat(id_buf, tsp_info->default_projectid, strlen(SEC_TS_HW_PROJECTID));
+
+	strncat(id_buf, SEC_TS_HW_PROJECTID, strlen(SEC_TS_HW_PROJECTID));
 
 	device = of_find_compatible_node(NULL, NULL, id_buf);
 	if (!device) {
@@ -1715,7 +1387,7 @@ static int sec_ts_parse_dt(struct device_node *device,
 	}
 	ret = of_property_read_u32(device, "roi_supported", &read_val);
 	if (!ret) {
-		TS_LOG_INFO("get chip specific roi_supported = %d\n", read_val);
+		TS_LOG_ERR("get chip specific roi_supported = %d\n", read_val);
 		tsp_info->chip_data->ts_platform_data->feature_info.roi_info.roi_supported = (u8) read_val;
 	} else {
 		TS_LOG_ERR("can not get roi_supported value\n");
@@ -1724,7 +1396,7 @@ static int sec_ts_parse_dt(struct device_node *device,
 
 	ret = of_property_read_u32(device, "roi_control_addr", &read_val);
 	if (!ret) {
-		TS_LOG_INFO("get chip specific roi_control_addr = 0x%04x\n",
+		TS_LOG_ERR("get chip specific roi_control_addr = 0x%04x\n",
 				read_val);
 		tsp_info->chip_data->ts_platform_data->
 					feature_info.roi_info.roi_control_addr =
@@ -1733,7 +1405,7 @@ static int sec_ts_parse_dt(struct device_node *device,
 
 	ret = of_property_read_u32(device, "roi_control_bit", &read_val);
 	if (!ret) {
-		TS_LOG_INFO("get chip specific roi_control_bit = %d\n",
+		TS_LOG_ERR("get chip specific roi_control_bit = %d\n",
 				read_val);
 		tsp_info->chip_data->ts_platform_data->
 					feature_info.roi_info.roi_control_bit = (u8) read_val;
@@ -1741,7 +1413,7 @@ static int sec_ts_parse_dt(struct device_node *device,
 
 	ret = of_property_read_u32(device, "roi_data_addr", &read_val);
 	if (!ret) {
-		TS_LOG_INFO("get chip specific roi_data_addr = 0x%04x\n",
+		TS_LOG_ERR("get chip specific roi_data_addr = 0x%04x\n",
 					read_val);
 		tsp_info->chip_data->ts_platform_data->
 					feature_info.roi_info.roi_data_addr = (u16) read_val;
@@ -1749,7 +1421,7 @@ static int sec_ts_parse_dt(struct device_node *device,
 
 	ret = of_property_read_string(device, "producer", &producer);
 	if (NULL != producer) {
-		TS_LOG_INFO("producer = %s\n", producer);
+		TS_LOG_ERR("producer = %s\n", producer);
 		tsp_info->module_name = producer;
 	} else {
 		TS_LOG_ERR("fail parse TP producer \n");
@@ -1889,43 +1561,20 @@ int sec_ts_read_information(struct sec_ts_data *ts)
 	if (((data[2] << 8) | data[3]) > 0)
 		ts->plat_data->max_y = ((data[2] << 8) | data[3]) - 1;
 
-	if(S6SY761X == tsp_info->ic_name) {
-		if (ts->chip_data->x_max - 1 != ts->plat_data->max_x) {
-			TS_LOG_INFO("%s: read x information isn't match : %d\n",
-					__func__, ts->chip_data->x_max);
-			ts->plat_data->max_x = ts->chip_data->x_max - 1;
-		}
+	if (ts->chip_data->x_max != ts->plat_data->max_x) {
+		TS_LOG_INFO("%s: read x information isn't match : %d\n",
+				__func__, ts->chip_data->x_max);
+		ts->plat_data->max_x = ts->chip_data->x_max;
+	}
 
-		if (ts->chip_data->y_max - 1 != ts->plat_data->max_y) {
-			TS_LOG_INFO("%s: read y information isn't match : %d\n",
-					__func__, ts->chip_data->y_max);
-			ts->plat_data->max_y = ts->chip_data->y_max - 1;
-		}
-	} else {
-		if (ts->chip_data->x_max != ts->plat_data->max_x) {
-			TS_LOG_INFO("%s: read x information isn't match : %d\n",
-					__func__, ts->chip_data->x_max);
-			ts->plat_data->max_x = ts->chip_data->x_max;
-		}
-
-		if (ts->chip_data->y_max != ts->plat_data->max_y) {
-			TS_LOG_INFO("%s: read y information isn't match : %d\n",
-					__func__, ts->chip_data->y_max);
-			ts->plat_data->max_y = ts->chip_data->y_max;
-		}
+	if (ts->chip_data->y_max != ts->plat_data->max_y) {
+		TS_LOG_INFO("%s: read y information isn't match : %d\n",
+				__func__, ts->chip_data->y_max);
+		ts->plat_data->max_y = ts->chip_data->y_max;
 	}
 
 	ts->tx_count = data[8];
 	ts->rx_count = data[9];
-	if(ts->ic_name == S6SY761X) {
-		if(ts->tx_count != ts->tx_default_num
-			|| ts->rx_count != ts->rx_default_num) {
-			TS_LOG_ERR("%s, tx or tx invalid, [%d, %d], use default trx num\n",
-				__func__, ts->tx_count, ts->rx_count);
-			ts->rx_count = ts->rx_default_num;
-			ts->tx_count = ts->tx_default_num;
-		}
-	}
 	ts->chip_data->tx_num = ts->tx_count;
 	ts->chip_data->rx_num = ts->rx_count;
 
@@ -2048,9 +1697,11 @@ static int i2c_communicate_check(void)
 
 	ret = sec_ts_i2c_read(ts, SEC_TS_READ_DEVICE_ID, deviceID, 5);
 	if (ret < 0)
-		TS_LOG_ERR("%s: failed to read device, ret = %d  \n", __func__, ret);
+		TS_LOG_ERR("%s: failed to read device ID(%d)\n", __func__, ret);
 	else
-		TS_LOG_INFO("%s: read device_id SUCC \n", __func__);
+		TS_LOG_ERR("%s: TOUCH DEVICE ID : %02X, %02X, %02X, %02X, %02X\n",
+					__func__, deviceID[0], deviceID[1],
+					deviceID[2], deviceID[3], deviceID[4]);
 
 	ret = sec_ts_i2c_read(ts, SEC_TS_READ_FIRMWARE_INTEGRITY, &result, 1);
 	if (ret < 0) {
@@ -2078,7 +1729,7 @@ static int i2c_communicate_check(void)
 						__func__, ret);
 		}
 	}
-	TS_LOG_INFO("%s: TOUCH STATUS : %02X || %02X, %02X, %02X, %02X\n",
+	TS_LOG_ERR("%s: TOUCH STATUS : %02X || %02X, %02X, %02X, %02X\n",
 				__func__, data[0], data[1], data[2], data[3], data[4]);
 
 	if (data[0] == SEC_TS_STATUS_BOOT_MODE)
@@ -2114,12 +1765,8 @@ static int sec_ts_chip_detect(struct ts_kit_platform_data *data)
 	int retval = NO_ERR;
 
 	TS_LOG_INFO("sec_ts chip detect called\n");
-	if (!data) {
-		TS_LOG_ERR("%s: *data or data->ts_dev is NULL \n", __func__);
-		retval =  -EINVAL;
-		goto out;
-	} else if (data->ts_dev == NULL) {
-		TS_LOG_ERR("%s: *data or data->ts_dev is NULL \n", __func__);
+	if ((!data) && (!data->ts_dev)) {
+		TS_LOG_ERR("device, ts_kit_platform_data *data or data->ts_dev is NULL \n");
 		retval =  -EINVAL;
 		goto out;
 	}
@@ -2182,23 +1829,20 @@ static int sec_ts_chip_detect(struct ts_kit_platform_data *data)
 		TS_LOG_ERR("not find sec_ts device\n");
 		goto check_err;
 	} else {
-		TS_LOG_INFO("find sec_ts device\n");
+		TS_LOG_ERR("find sec_ts device\n");
 		strncpy(ts->chip_data->chip_name, SEC_TS_I2C_NAME,
-			((MAX_STR_LEN - 1) > (strlen(SEC_TS_I2C_NAME) + 1)) ?
-			(strlen(SEC_TS_I2C_NAME) + 1) : (MAX_STR_LEN - 1));
+			(MAX_STR_LEN > strlen(SEC_TS_I2C_NAME)) ?
+				strlen(SEC_TS_I2C_NAME):(MAX_STR_LEN - 1));
 	}
 
-	if(S6SY761X == tsp_info->ic_name) {
-		strncpy(tsp_info->chip_data->module_name, tsp_info->module_name, MAX_STR_LEN - 1);
-	}
 	sec_ts_raw_device_init(ts);
 #ifdef ROI
 	init_completion(&roi_data_done);
 #endif
 	tsp_info = ts;
 	ts->probe_done = true;
-	TS_LOG_INFO("%s: done\n", __func__);
-	TS_LOG_INFO("sec_ts chip detect successful\n");
+	TS_LOG_ERR("%s: done\n", __func__);
+	TS_LOG_ERR("sec_ts chip detect successful\n");
 	return NO_ERR;
 
 
@@ -2228,7 +1872,7 @@ static int sec_ts_init_chip(void)
 	struct sec_ts_plat_data *pdata = tsp_info->plat_data;
 	int ret = 0;
 
-	TS_LOG_INFO("%s\n", __func__);
+	TS_LOG_ERR("%s\n", __func__);
 
 	ts->flash_page_size = SEC_TS_FW_BLK_SIZE_DEFAULT;
 	ts->i2c_burstmax = pdata->i2c_burstmax;
@@ -2243,17 +1887,10 @@ static int sec_ts_init_chip(void)
 	init_completion(&ts->resume_done);
 
 #if defined (CONFIG_TEE_TUI)
-	/* i2c slave address is 0x48, distinguish from device name with i2c address 0x17 */
-	if(ts->chip_data->slave_addr == SEC_TS_DEFAULT_I2C_ADDR) {
-		strncpy(tee_tui_data.device_name, IC_SEC_Y761, strlen(IC_SEC_Y761));
-		tee_tui_data.device_name[strlen(IC_SEC_Y761)] = '\0';
-	} else { /* i2c slave address is 0x17, use the default device name */
-		strncpy(tee_tui_data.device_name, "sec", strlen("sec"));
-		tee_tui_data.device_name[strlen("sec")] = '\0';
-	}
-	TS_LOG_INFO("device_name:%s\n", tee_tui_data.device_name);
+	strncpy(tee_tui_data.device_name, "sec", strlen("sec"));
+	tee_tui_data.device_name[strlen("sec")] = '\0';
 #endif
-	TS_LOG_INFO("%s: init resource\n", __func__);
+	TS_LOG_ERR("%s: init resource\n", __func__);
 
 	return ret;
 }
@@ -2288,31 +1925,17 @@ static int sec_ts_input_config(struct input_dev *input_dev)
 	set_bit(INPUT_PROP_DIRECT, input_dev->propbit);
 #endif
 
-	if (tsp_info->plat_data->in_recovery_mode == USE_IN_RECOVERY_MODE && tsp_info->plat_data->use_ic_res == USE_IC_RESOLUTION) {
-		input_set_abs_params(input_dev, ABS_X,
-				0, tsp_info->plat_data->x_max_rc, 0, 0);
-		input_set_abs_params(input_dev, ABS_Y,
-				0, tsp_info->plat_data->y_max_rc, 0, 0);
-	} else {
-		input_set_abs_params(input_dev, ABS_X,
+	input_set_abs_params(input_dev, ABS_X,
 				0, tsp_info->plat_data->max_x, 0, 0);
-		input_set_abs_params(input_dev, ABS_Y,
+	input_set_abs_params(input_dev, ABS_Y,
 				0, tsp_info->plat_data->max_y, 0, 0);
-	}
 	input_set_abs_params(input_dev, ABS_PRESSURE, 0, 255, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_TRACKING_ID, 0, 15, 0, 0);
 
-	if (tsp_info->plat_data->in_recovery_mode == USE_IN_RECOVERY_MODE && tsp_info->plat_data->use_ic_res == USE_IC_RESOLUTION) {
-		input_set_abs_params(input_dev, ABS_MT_POSITION_X, 0,
-				tsp_info->plat_data->x_max_rc, 0, 0);
-		input_set_abs_params(input_dev, ABS_MT_POSITION_Y, 0,
-				tsp_info->plat_data->y_max_rc, 0, 0);
-	} else {
-		input_set_abs_params(input_dev, ABS_MT_POSITION_X, 0,
+	input_set_abs_params(input_dev, ABS_MT_POSITION_X, 0,
 				tsp_info->plat_data->max_x, 0, 0);
-		input_set_abs_params(input_dev, ABS_MT_POSITION_Y, 0,
+	input_set_abs_params(input_dev, ABS_MT_POSITION_Y, 0,
 				tsp_info->plat_data->max_y, 0, 0);
-	}
 	input_set_abs_params(input_dev, ABS_MT_PRESSURE, 0, 255, 0, 0);
 #if ANTI_FALSE_TOUCH_USE_PARAM_MAJOR_MINOR
 	input_set_abs_params(input_dev, ABS_MT_WIDTH_MAJOR, 0, 100, 0, 0);
@@ -2640,7 +2263,7 @@ static int sec_ts_glove_switch(struct ts_glove_info *info)
 	}
 	switch (info->op_action) {
 	case TS_ACTION_READ:
-		info->glove_switch = (tsp_info->touch_functions & SEC_TS_BIT_SETFUNC_GLOVE)?1:0;
+		info->glove_switch = (tsp_info->touch_functions | SEC_TS_BIT_SETFUNC_GLOVE)?1:0;
 		TS_LOG_INFO("read_glove_switch=%d, 1:on 0:off\n",
 					info->glove_switch);
 		break;
@@ -2700,10 +2323,6 @@ static int sec_ts_holster_switch(struct ts_holster_info *info)
 		return retval;
 	}
 
-	if(S6SY761X == tsp_info->ic_name && info->holster_supported == 0) {
-		TS_LOG_INFO("%s, not support holster\n", __func__);
-		return NO_ERR;
-	}
 	switch (info->op_action) {
 	case TS_ACTION_WRITE:
 		tsp_info->flip_enable = info->holster_switch;
@@ -2734,8 +2353,7 @@ static int sec_ts_set_roi_switch(u8 roi_switch)
 	int retval = NO_ERR;
 	int i;
 	unsigned short roi_ctrl_addr = 0;
-	u8 roi_control_bit = 0;
-	u8 temp_roi_switch = 0;
+	u8 roi_control_bit, temp_roi_switch;
 
 #ifdef ROI
 	roi_ctrl_addr = tsp_info->chip_data->ts_platform_data->feature_info.roi_info.roi_control_addr;
@@ -3036,16 +2654,6 @@ out_force_cal:
 	return rc;
 }
 
-int sec_ts_do_once_calibrate(void)
-{
-	int ret = NO_ERR;
-	ret = run_force_calibration();
-	if (ret) {
-		TS_LOG_ERR("%s error\n", __func__);
-	}
-
-	return ret;
-}
 
 static int sec_ts_calibrate(void)
 {
@@ -3408,7 +3016,7 @@ static int __init sec_ts_module_init(void)
 	struct device_node *root = NULL;
 	int error = NO_ERR;
 
-	TS_LOG_INFO(" sec_ts_module_init called here\n");
+	TS_LOG_ERR(" sec_ts_module_init called here\n");
 	tsp_info = kzalloc(sizeof(*tsp_info) * 2, GFP_KERNEL);
 	if (!tsp_info) {
 		TS_LOG_ERR("Failed to alloc mem for struct sec_ts_data\n");
@@ -3448,13 +3056,11 @@ static int __init sec_ts_module_init(void)
 		TS_LOG_ERR(" sec_ts chip register fail !\n");
 		goto out;
 	}
-	TS_LOG_INFO("sec_ts chip_register! err=%d\n", error);
+	TS_LOG_ERR("sec_ts chip_register! err=%d\n", error);
 	return error;
 out:
-	if (tsp_info && tsp_info->chip_data){
+	if (tsp_info->chip_data)
 		kfree(tsp_info->chip_data);
-		tsp_info->chip_data = NULL;
-	}
 	if (tsp_info)
 		kfree(tsp_info);
 	tsp_info = NULL;

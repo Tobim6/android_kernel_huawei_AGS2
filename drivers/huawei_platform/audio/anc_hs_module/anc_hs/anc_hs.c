@@ -1044,7 +1044,6 @@ static long anc_hs_ioctl(struct file *file, unsigned int cmd,
 	return (long)ret;
 }
 
-#ifdef ANC_HS_DEBUG
 /*----------------------------------*/
 /*sysfs definition for debug */
 static ssize_t anc_hs_info_show(struct device *dev,
@@ -1169,7 +1168,6 @@ static const struct attribute_group anc_hs_attr_group = {
 	.attrs = anc_hs_attributes,
 };
 /*lint -restore*/
-#endif
 
 static const struct file_operations anc_hs_fops = {
 	.owner               = THIS_MODULE,
@@ -1202,7 +1200,7 @@ MODULE_DEVICE_TABLE(of, anc_hs_of_match);
 /*lint -save -e* */
 static void load_anc_hs_config(struct device_node *node)
 {
-	int temp = 0;
+	int temp;
 
 	/* read adc channel number */
 	if (!of_property_read_u32(node, "adc_channel_h", &temp)) {
@@ -1404,12 +1402,12 @@ static int anc_hs_probe(struct platform_device *pdev)
 		hwlog_err("%s: anc hs misc device register failed", __func__);
 		goto anc_hs_irq_err;
 	}
-#ifdef ANC_HS_DEBUG
+
 	/* create sysfs for debug function */
 	if ((ret = sysfs_create_group(&dev->kobj, &anc_hs_attr_group)) < 0) {
 		hwlog_err("failed to register sysfs\n");
 	}
-#endif
+
 	ret = anc_hs_ops_register(&anc_hs_ops);
 	if (ret) {
 		pr_err("register anc_hs_interface ops failed!\n");

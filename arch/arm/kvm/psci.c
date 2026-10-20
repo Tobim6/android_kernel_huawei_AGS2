@@ -15,17 +15,16 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <linux/arm-smccc.h>
 #include <linux/preempt.h>
 #include <linux/kvm_host.h>
-#include <linux/uaccess.h>
 #include <linux/wait.h>
 
 #include <asm/cputype.h>
 #include <asm/kvm_emulate.h>
+#include <asm/kvm_psci.h>
 #include <asm/kvm_host.h>
 
-#include <kvm/arm_psci.h>
+#include <uapi/linux/psci.h>
 
 /*
  * This is an implementation of the Power State Coordination Interface
@@ -71,7 +70,7 @@ static unsigned long kvm_psci_vcpu_on(struct kvm_vcpu *source_vcpu)
 {
 	struct kvm *kvm = source_vcpu->kvm;
 	struct kvm_vcpu *vcpu = NULL;
-	struct swait_queue_head *wq;
+	wait_queue_head_t *wq;
 	unsigned long cpu_id;
 	unsigned long context_id;
 	phys_addr_t target_pc;
@@ -89,7 +88,7 @@ static unsigned long kvm_psci_vcpu_on(struct kvm_vcpu *source_vcpu)
 	if (!vcpu)
 		return PSCI_RET_INVALID_PARAMS;
 	if (!vcpu->arch.power_off) {
-		if (kvm_psci_version(source_vcpu, kvm) != KVM_ARM_PSCI_0_1)
+		if (kvm_psci_version(source_vcpu) != KVM_ARM_PSCI_0_1)
 			return PSCI_RET_ALREADY_ON;
 		else
 			return PSCI_RET_INVALID_PARAMS;
@@ -120,7 +119,7 @@ static unsigned long kvm_psci_vcpu_on(struct kvm_vcpu *source_vcpu)
 	smp_mb();		/* Make sure the above is visible */
 
 	wq = kvm_arch_vcpu_wq(vcpu);
-	swake_up(wq);
+	wake_up_interruptible(wq);
 
 	return PSCI_RET_SUCCESS;
 }
@@ -199,12 +198,19 @@ static void kvm_psci_system_reset(struct kvm_vcpu *vcpu)
 	kvm_prepare_system_event(vcpu, KVM_SYSTEM_EVENT_RESET);
 }
 
+int kvm_psci_version(struct kvm_vcpu *vcpu)
+{
+	if (test_bit(KVM_ARM_VCPU_PSCI_0_2, vcpu->arch.features))
+		return KVM_ARM_PSCI_0_2;
+
+	return KVM_ARM_PSCI_0_1;
+}
+
 static int kvm_psci_0_2_call(struct kvm_vcpu *vcpu)
 {
-	struct kvm *kvm = vcpu->kvm;
+	int ret = 1;
 	unsigned long psci_fn = vcpu_get_reg(vcpu, 0) & ~((u32) 0);
 	unsigned long val;
-	int ret = 1;
 
 	switch (psci_fn) {
 	case PSCI_0_2_FN_PSCI_VERSION:
@@ -212,7 +218,7 @@ static int kvm_psci_0_2_call(struct kvm_vcpu *vcpu)
 		 * Bits[31:16] = Major Version = 0
 		 * Bits[15:0] = Minor Version = 2
 		 */
-		val = KVM_ARM_PSCI_0_2;
+		val = 2;
 		break;
 	case PSCI_0_2_FN_CPU_SUSPEND:
 	case PSCI_0_2_FN64_CPU_SUSPEND:
@@ -224,9 +230,7 @@ static int kvm_psci_0_2_call(struct kvm_vcpu *vcpu)
 		break;
 	case PSCI_0_2_FN_CPU_ON:
 	case PSCI_0_2_FN64_CPU_ON:
-		mutex_lock(&kvm->lock);
 		val = kvm_psci_vcpu_on(vcpu);
-		mutex_unlock(&kvm->lock);
 		break;
 	case PSCI_0_2_FN_AFFINITY_INFO:
 	case PSCI_0_2_FN64_AFFINITY_INFO:
@@ -269,100 +273,12 @@ static int kvm_psci_0_2_call(struct kvm_vcpu *vcpu)
 		break;
 	}
 
-<<<<<<< HEAD
 	vcpu_set_reg(vcpu, 0, val);
-=======
-	smccc_set_retval(vcpu, val, 0, 0, 0);
-	return ret;
-}
-
-static int kvm_psci_1_0_call(struct kvm_vcpu *vcpu)
-{
-	u32 psci_fn = smccc_get_function(vcpu);
-	u32 feature;
-	unsigned long val;
-	int ret = 1;
-
-	switch(psci_fn) {
-	case PSCI_0_2_FN_PSCI_VERSION:
-		val = KVM_ARM_PSCI_1_0;
-		break;
-	case PSCI_1_0_FN_PSCI_FEATURES:
-		feature = smccc_get_arg1(vcpu);
-		switch(feature) {
-		case PSCI_0_2_FN_PSCI_VERSION:
-		case PSCI_0_2_FN_CPU_SUSPEND:
-		case PSCI_0_2_FN64_CPU_SUSPEND:
-		case PSCI_0_2_FN_CPU_OFF:
-		case PSCI_0_2_FN_CPU_ON:
-		case PSCI_0_2_FN64_CPU_ON:
-		case PSCI_0_2_FN_AFFINITY_INFO:
-		case PSCI_0_2_FN64_AFFINITY_INFO:
-		case PSCI_0_2_FN_MIGRATE_INFO_TYPE:
-		case PSCI_0_2_FN_SYSTEM_OFF:
-		case PSCI_0_2_FN_SYSTEM_RESET:
-		case PSCI_1_0_FN_PSCI_FEATURES:
-		case ARM_SMCCC_VERSION_FUNC_ID:
-			val = 0;
-			break;
-		default:
-			val = PSCI_RET_NOT_SUPPORTED;
-			break;
-		}
-		break;
-	default:
-		return kvm_psci_0_2_call(vcpu);
-	}
-
-	smccc_set_retval(vcpu, val, 0, 0, 0);
->>>>>>> 6681f3c... arm/arm64: KVM: Advertise SMCCC v1.1
-	return ret;
-}
-
-static int kvm_psci_1_0_call(struct kvm_vcpu *vcpu)
-{
-	u32 psci_fn = smccc_get_function(vcpu);
-	u32 feature;
-	unsigned long val;
-	int ret = 1;
-
-	switch(psci_fn) {
-	case PSCI_0_2_FN_PSCI_VERSION:
-		val = KVM_ARM_PSCI_1_0;
-		break;
-	case PSCI_1_0_FN_PSCI_FEATURES:
-		feature = smccc_get_arg1(vcpu);
-		switch(feature) {
-		case PSCI_0_2_FN_PSCI_VERSION:
-		case PSCI_0_2_FN_CPU_SUSPEND:
-		case PSCI_0_2_FN64_CPU_SUSPEND:
-		case PSCI_0_2_FN_CPU_OFF:
-		case PSCI_0_2_FN_CPU_ON:
-		case PSCI_0_2_FN64_CPU_ON:
-		case PSCI_0_2_FN_AFFINITY_INFO:
-		case PSCI_0_2_FN64_AFFINITY_INFO:
-		case PSCI_0_2_FN_MIGRATE_INFO_TYPE:
-		case PSCI_0_2_FN_SYSTEM_OFF:
-		case PSCI_0_2_FN_SYSTEM_RESET:
-		case PSCI_1_0_FN_PSCI_FEATURES:
-			val = 0;
-			break;
-		default:
-			val = PSCI_RET_NOT_SUPPORTED;
-			break;
-		}
-		break;
-	default:
-		return kvm_psci_0_2_call(vcpu);
-	}
-
-	smccc_set_retval(vcpu, val, 0, 0, 0);
 	return ret;
 }
 
 static int kvm_psci_0_1_call(struct kvm_vcpu *vcpu)
 {
-	struct kvm *kvm = vcpu->kvm;
 	unsigned long psci_fn = vcpu_get_reg(vcpu, 0) & ~((u32) 0);
 	unsigned long val;
 
@@ -372,9 +288,7 @@ static int kvm_psci_0_1_call(struct kvm_vcpu *vcpu)
 		val = PSCI_RET_SUCCESS;
 		break;
 	case KVM_PSCI_FN_CPU_ON:
-		mutex_lock(&kvm->lock);
 		val = kvm_psci_vcpu_on(vcpu);
-		mutex_unlock(&kvm->lock);
 		break;
 	default:
 		val = PSCI_RET_NOT_SUPPORTED;
@@ -399,11 +313,9 @@ static int kvm_psci_0_1_call(struct kvm_vcpu *vcpu)
  * Errors:
  * -EINVAL: Unrecognized PSCI function
  */
-static int kvm_psci_call(struct kvm_vcpu *vcpu)
+int kvm_psci_call(struct kvm_vcpu *vcpu)
 {
-	switch (kvm_psci_version(vcpu, vcpu->kvm)) {
-	case KVM_ARM_PSCI_1_0:
-		return kvm_psci_1_0_call(vcpu);
+	switch (kvm_psci_version(vcpu)) {
 	case KVM_ARM_PSCI_0_2:
 		return kvm_psci_0_2_call(vcpu);
 	case KVM_ARM_PSCI_0_1:
@@ -411,104 +323,4 @@ static int kvm_psci_call(struct kvm_vcpu *vcpu)
 	default:
 		return -EINVAL;
 	};
-}
-
-int kvm_hvc_call_handler(struct kvm_vcpu *vcpu)
-{
-	u32 func_id = smccc_get_function(vcpu);
-	u32 val = SMCCC_RET_NOT_SUPPORTED;
-	u32 feature;
-
-	switch (func_id) {
-	case ARM_SMCCC_VERSION_FUNC_ID:
-		val = ARM_SMCCC_VERSION_1_1;
-		break;
-	case ARM_SMCCC_ARCH_FEATURES_FUNC_ID:
-		feature = smccc_get_arg1(vcpu);
-		switch(feature) {
-		case ARM_SMCCC_ARCH_WORKAROUND_1:
-			if (kvm_arm_harden_branch_predictor())
-				val = SMCCC_RET_SUCCESS;
-			break;
-		case ARM_SMCCC_ARCH_WORKAROUND_2:
-			switch (kvm_arm_have_ssbd()) {
-			case KVM_SSBD_FORCE_DISABLE:
-			case KVM_SSBD_UNKNOWN:
-				break;
-			case KVM_SSBD_KERNEL:
-				val = SMCCC_RET_SUCCESS;
-				break;
-			case KVM_SSBD_FORCE_ENABLE:
-			case KVM_SSBD_MITIGATED:
-				val = SMCCC_RET_NOT_REQUIRED;
-				break;
-			}
-			break;
-		}
-		break;
-	default:
-		return kvm_psci_call(vcpu);
-	}
-
-	smccc_set_retval(vcpu, val, 0, 0, 0);
-	return 1;
-}
-
-int kvm_arm_get_fw_num_regs(struct kvm_vcpu *vcpu)
-{
-	return 1;		/* PSCI version */
-}
-
-int kvm_arm_copy_fw_reg_indices(struct kvm_vcpu *vcpu, u64 __user *uindices)
-{
-	if (put_user(KVM_REG_ARM_PSCI_VERSION, uindices))
-		return -EFAULT;
-
-	return 0;
-}
-
-int kvm_arm_get_fw_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
-{
-	if (reg->id == KVM_REG_ARM_PSCI_VERSION) {
-		void __user *uaddr = (void __user *)(long)reg->addr;
-		u64 val;
-
-		val = kvm_psci_version(vcpu, vcpu->kvm);
-		if (copy_to_user(uaddr, &val, KVM_REG_SIZE(reg->id)))
-			return -EFAULT;
-
-		return 0;
-	}
-
-	return -EINVAL;
-}
-
-int kvm_arm_set_fw_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg)
-{
-	if (reg->id == KVM_REG_ARM_PSCI_VERSION) {
-		void __user *uaddr = (void __user *)(long)reg->addr;
-		bool wants_02;
-		u64 val;
-
-		if (copy_from_user(&val, uaddr, KVM_REG_SIZE(reg->id)))
-			return -EFAULT;
-
-		wants_02 = test_bit(KVM_ARM_VCPU_PSCI_0_2, vcpu->arch.features);
-
-		switch (val) {
-		case KVM_ARM_PSCI_0_1:
-			if (wants_02)
-				return -EINVAL;
-			vcpu->kvm->arch.psci_version = val;
-			return 0;
-		case KVM_ARM_PSCI_0_2:
-		case KVM_ARM_PSCI_1_0:
-			if (!wants_02)
-				return -EINVAL;
-			vcpu->kvm->arch.psci_version = val;
-			return 0;
-		}
-	}
-
-	return -EINVAL;
 }

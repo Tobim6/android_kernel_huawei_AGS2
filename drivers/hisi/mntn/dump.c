@@ -42,9 +42,6 @@
 #include <linux/uaccess.h>
 #include <linux/hisi/util.h>
 #include <linux/hisi/reset.h>
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_DUMP_TAG
-#include "blackbox/rdr_print.h"
 
 #define TRANSFER_BASE       (16)
 #define STRINGLEN 9
@@ -52,7 +49,7 @@
 #define MAX_MEMDUMP_NAME 16
 
 #define memdump_remap(phys_addr, size) memdump_remap_type(phys_addr, size, PAGE_KERNEL)
-#define memdump_unmap(vaddr) vunmap((void *)(uintptr_t)(((uintptr_t)vaddr) & (~(PAGE_SIZE - 1))))
+#define memdump_unmap(vaddr) vunmap((void *)(((unsigned long)vaddr) & (~(PAGE_SIZE - 1))))
 
 unsigned int g_dump_flag;
 unsigned int g_ddr_size = 0x80000000;
@@ -78,27 +75,27 @@ extern void etb_nve_read(unsigned char *config);
 extern unsigned long hisi_get_reserve_mem_size(void);
 extern int memblock_free(phys_addr_t base, phys_addr_t size);
 
-static inline void *memdump_remap_type(uintptr_t phys_addr, size_t size,
+static inline void *memdump_remap_type(unsigned long phys_addr, size_t size,
 				       pgprot_t pgprot)
 {
 	int i;
 	u8 *vaddr;
 	int npages =
 	    PAGE_ALIGN((phys_addr & (PAGE_SIZE - 1)) + size) >> PAGE_SHIFT;
-	uintptr_t offset = phys_addr & (PAGE_SIZE - 1);
+	unsigned long offset = phys_addr & (PAGE_SIZE - 1);
 	struct page **pages;
 	pages = vmalloc(sizeof(struct page *) * npages);
 	if (!pages) {
-		BB_PRINT_ERR("%s: vmalloc return NULL!\n", __func__);
+		printk(KERN_ERR "%s: vmalloc return NULL!\n", __func__);
 		return NULL;
 	}
 	pages[0] = phys_to_page(phys_addr);
 	for (i = 0; i < npages - 1; i++) {
-		pages[i + 1] = pages[i] + (uintptr_t)1;/*lint !e679*/
+		pages[i + 1] = pages[i] + (unsigned long)1;/*lint !e679*/
 	}
 	vaddr = (u8 *) vmap(pages, npages, VM_MAP, pgprot);
 	if (vaddr == 0) {
-		BB_PRINT_ERR("%s: vmap return NULL!\n", __func__);
+		printk(KERN_ERR "%s: vmap return NULL!\n", __func__);
 	} else {
 		vaddr += offset;
 	}
@@ -116,12 +113,12 @@ static ssize_t dump_phy_mem_proc_file_read(struct file *file,
 	ssize_t copy;
 
 	if (!info) {
-		BB_PRINT_ERR("the proc file don't be created in advance.\n");
+		printk(KERN_ERR "the proc file don't be created in advance.\n");
 		return 0;
 	}
 
 	if ((*off < 0) || (*off > info->size)) {
-		BB_PRINT_ERR("read offset error.\n");
+		printk(KERN_ERR "read offset error.\n");
 		return 0;
 	}
 
@@ -132,14 +129,14 @@ static ssize_t dump_phy_mem_proc_file_read(struct file *file,
 
 	copy = (ssize_t) min(bytes, (size_t) (info->size - *off));
 
-	p = memdump_remap((phys_addr_t)(uintptr_t)((char *)info->p + *off), copy);
+	p = memdump_remap((phys_addr_t) ((char *)info->p + *off), copy);
 	if (NULL == p) {
-		BB_PRINT_ERR("%s ioremap fail\n", __func__);
+		printk(KERN_ERR "%s ioremap fail\n", __func__);
 		return -ENOMEM;
 	}
 	mutex_lock(&g_memdump_mutex);
 	if (copy_to_user(userbuf, p, copy)) {
-		BB_PRINT_ERR("%s copy to user error\n", __func__);
+		printk(KERN_ERR "%s copy to user error\n", __func__);
 		copy = -EFAULT;
 		goto copy_err;
 	}
@@ -157,7 +154,7 @@ static int dump_phy_mem_proc_file_open(struct inode *inode, struct file *file)
 	file->private_data = PDE_DATA(inode);
 
 	if (!g_memdump_addr) {
-		BB_PRINT_ERR("%s: linux dump is already free\r\n", __func__);
+		printk(KERN_ERR "%s: linux dump is already free\r\n", __func__);
 		return -EFAULT;
 	}
 	return 0;
@@ -186,7 +183,7 @@ static void create_dump_phy_mem_proc_file(char *name, unsigned long phy_addr,
 
 	/*as a public interface, we should check the parameter */
 	if ((NULL == name) || (0 == phy_addr) || (0 == size)) {
-		BB_PRINT_ERR(
+		printk(KERN_ERR
 		       "%s %d parameter error : name 0x%pK phy_addr 0x%lx ize %lu\r\n",
 		       __func__, __LINE__, name, phy_addr, size);
 		return;
@@ -194,11 +191,11 @@ static void create_dump_phy_mem_proc_file(char *name, unsigned long phy_addr,
 
 	info = kzalloc(sizeof(struct dump_info), GFP_KERNEL);
 	if (NULL == info) {
-		BB_PRINT_ERR("%s kzalloc fail !\r\n", __func__);
+		printk(KERN_ERR "%s kzalloc fail !\r\n", __func__);
 		return;
 	}
 
-	info->p = (void *)(uintptr_t)(phy_addr);
+	info->p = (void *)(phy_addr);
 	info->size = size;
 
 	balong_create_memory_proc_entry(name, S_IRUSR | S_IRGRP,
@@ -292,7 +289,7 @@ static int __init memdump_init(void)
 	}
 	memdump_head = memdump_remap(g_memdump_addr, PAGE_SIZE);
 	if (NULL == memdump_head) {
-		BB_PRINT_ERR("memdump_remap fail,g_memdump_addr is 0x%llx",
+		pr_err("memdump_remap fail,g_memdump_addr is 0x%llx",
 		       g_memdump_addr);
 		return 0;
 	}

@@ -47,31 +47,17 @@
 #include <linux/usb/class-dual-role.h>
 #include <huawei_platform/usb/pd/richtek/tcpm.h>
 #include <huawei_platform/power/direct_charger.h>
-#include <huawei_platform/power/huawei_charger.h>
-#ifdef CONFIG_BOOST_5V
-#include <huawei_platform/power/boost_5v.h>
-#endif
 #ifdef CONFIG_CONTEXTHUB_PD
 #include <linux/hisi/contexthub/tca.h>
 #endif
-#ifdef CONFIG_WIRELESS_CHARGER
-#include <huawei_platform/power/wireless_charger.h>
-#endif
-
-#include <huawei_platform/power/vbus_channel/vbus_channel.h>
-
 #include "huawei_platform/audio/usb_analog_hs_interface.h"
 #include "huawei_platform/audio/usb_audio_power.h"
 #include "huawei_platform/dp_aux_switch/dp_aux_switch.h"
 
 #include <linux/fb.h>
-#include <huawei_platform/usb/hw_usb.h>
-#ifdef CONFIG_HUAWEI_HISHOW
-#include <huawei_platform/usb/hw_hishow.h>
+#ifdef CONFIG_TYPEC_CAP_CUSTOM_SRC2
+#include <huawei_platform/usb/huawei_hishow.h>
 #endif
-
-#include <linux/power/hisi/hisi_bci_battery.h>
-
 #ifdef CONFIG_CONTEXTHUB_PD
 #define PD_DPM_WAIT_COMBPHY_CONFIGDONE() \
 		wait_for_completion_timeout(&pd_dpm_combphy_configdone_completion, msecs_to_jiffies(11500)); \
@@ -81,13 +67,11 @@ struct pd_dpm_info *g_pd_di = NULL;
 static bool g_pd_cc_orientation = false;
 #ifdef CONFIG_TYPEC_CAP_CUSTOM_SRC2
 static bool g_pd_smart_holder = false;
-int support_smart_holder = 0;
-static unsigned int smart_holder_without_emark;
 #endif
 static struct class *typec_class = NULL;
 static struct device *typec_dev = NULL;
+static struct mutex dpm_sink_vbus_lock;
 static int pd_dpm_typec_state = PD_DPM_USB_TYPEC_DETACHED;
-static int pd_dpm_analog_hs_state = 0;
 static struct pd_dpm_vbus_state g_vbus_state;
 static unsigned long g_charger_type_event;
 struct completion pd_get_typec_state_completion;
@@ -96,10 +80,12 @@ static int g_ack = 0;
 struct completion pd_dpm_combphy_configdone_completion;
 #endif
 static bool g_pd_high_power_charging_status = false;
-static bool g_pd_high_voltage_charging_status = false;
-static bool g_pd_optional_max_power_status = false;
-static bool g_pd_optional_wireless_cover_status;
 struct cc_check_ops* g_cc_check_ops;
+static struct mutex vboost_ctrl_lock;
+static bool pd_ref = false;/*used to static pd vboost ctrl*/
+static bool dc_ref = false;/*used to static directcharge vboost ctrl*/
+static unsigned int g_pd_usb_speed = 0;
+static unsigned int g_pd_usb_abnormal_event = USB_HOST_EVENT_NORMAL;
 static bool ignore_vbus_on_event = false;
 static bool ignore_vbus_off_event = false;
 static bool ignore_bc12_event_when_vbuson = false;
@@ -116,18 +102,20 @@ static TCPC_MUX_CTRL_TYPE g_combphy_mode = TCPC_NC;
 #endif
 static int switch_manual_enable = 1;
 static unsigned int abnormal_cc_detection = 0;
-static unsigned int abnormal_cc_interval = PD_DPM_CC_CHANGE_INTERVAL;
 int support_dp = 1;
-int otg_channel = 0;
-int moisture_detection_by_cc_enable = 0;
+#ifdef CONFIG_TYPEC_CAP_CUSTOM_SRC2
+int support_smart_holder = 0;
+#endif
 int support_analog_audio = 1;
+static struct console g_con;
 struct mutex typec_state_lock;
 struct mutex typec_wait_lock;
-static int g_pd_product_type = -1;
-static bool g_pd_cc_moisture_status;
-static bool g_pd_cc_moisture_happened;
-static int cc_moisture_status_report;
-static int emark_detect_enable;
+
+#ifdef CONFIG_CC_ANTI_CORROSION
+#include <huawei_platform/usb/hw_cc_anti_corrosion.h>
+extern struct cc_anti_corrosion_dev *cc_corrosion_dev_p;
+#define CORROSION_DELAY 10
+#endif
 
 void reinit_typec_completion(void);
 void typec_complete(enum pd_wait_typec_complete typec_completion);
@@ -137,33 +125,12 @@ void pd_dpm_set_cc_mode(int mode);
 #define HWLOG_TAG huawei_pd
 HWLOG_REGIST();
 #endif
-
+extern void chg_set_adaptor_test_result(enum adaptor_name charger_type, enum test_state result);
 #ifdef CONFIG_CONTEXTHUB_PD
 extern void dp_aux_uart_switch_disable(void);
 #endif
-static bool g_ignore_vbus_only_event = false;
 int g_cur_usb_event = PD_DPM_USB_TYPEC_NONE;
-static enum charger_event_type sink_source_type = STOP_SINK;
 
-static int pd_reset_adapter = PD_ADAPTER_9V;
-static struct abnomal_change_info abnomal_change[] = {
-	{PD_DPM_ABNORMAL_CC_CHANGE, true, 0, 0, {0}, {0}, {0}, {0}},
-	{PD_DPM_UNATTACHED_VBUS_ONLY, true, 0, 0, {0}, {0}, {0}, {0}},
-};
-
-int pd_dpm_get_emark_detect_enable(void)
-{
-	return emark_detect_enable;
-}
-
-static void pd_dpm_cc_moisture_flag_restore(struct work_struct *work)
-{
-	hwlog_err("%s %d,%d\n", __func__,
-		  g_pd_cc_moisture_happened,
-		  g_pd_cc_moisture_status);
-	if (!g_pd_cc_moisture_happened)
-		g_pd_cc_moisture_status = false;
-}
 
 static int pd_dpm_handle_fb_event(struct notifier_block *self,
                 unsigned long event, void *data)
@@ -175,17 +142,7 @@ static int pd_dpm_handle_fb_event(struct notifier_block *self,
         case FB_EVENT_BLANK:
                 switch (*blank) {
                 case FB_BLANK_UNBLANK:
-                        hwlog_err("%s set pd to drp\n",__func__);
-			pd_dpm_set_cc_mode(PD_DPM_CC_MODE_DRP);
-
-			if (cc_moisture_status_report == 0)
-				break;
-
-			g_pd_cc_moisture_happened = false;
-			/* delay 2 minute to restore the flag */
-			queue_delayed_work(g_pd_di->usb_wq,
-				&g_pd_di->cc_moisture_flag_restore_work,
-				msecs_to_jiffies(120000));
+                        pd_dpm_set_cc_mode(PD_DPM_CC_MODE_DRP);
                         break;
                 case FB_BLANK_POWERDOWN:
                         break;
@@ -209,31 +166,14 @@ static void init_fb_notification(void)
         fb_register_client(&pd_dpm_handle_fb_notifier);
 }
 
-#if 0
 static void deinit_fb_notification(void)
 {
         fb_unregister_client(&pd_dpm_handle_fb_notifier);
 }
-#endif
 
-void pd_dpm_set_source_sink_state(enum charger_event_type type)
-{
-	sink_source_type = type;
-	charger_source_sink_event(type);
-}
-
-enum charger_event_type pd_dpm_get_source_sink_state(void)
-{
-	return sink_source_type;
-}
 int pd_dpm_ops_register(struct pd_dpm_ops *ops, void *client)
 {
 	int ret = 0;
-
-	if (g_ops) {
-		hwlog_err("pd_dpm ops register fail! g_ops busy\n");
-		return -EBUSY;
-	}
 
 	if (ops != NULL) {
 		g_ops = ops;
@@ -261,25 +201,7 @@ int pd_dpm_cable_vdo_ops_register(struct cable_vdo_ops *ops)
 	return ret;
 
 }
-int pd_dpm_get_is_support_smart_holder(void)
-{
-	return support_smart_holder;
-}
-
-int pd_dpm_smart_holder_without_emark(void)
-{
-	return smart_holder_without_emark;
-}
-
 #endif
-
-void pd_dpm_detect_emark_cable(void)
-{
-	hwlog_err("%s\n", __func__);
-
-	if (g_ops && g_ops->pd_dpm_detect_emark_cable)
-		g_ops->pd_dpm_detect_emark_cable(g_client);
-}
 
 void pd_dpm_hard_reset(void)
 {
@@ -296,27 +218,9 @@ void pd_dpm_hard_reset(void)
 	hwlog_err("%s--!\n", __func__);
 }
 
-int pd_dpm_disable_pd(bool disable)
-{
-	hwlog_info("%s\n", __func__);
-
-	if (NULL == g_ops) {
-		hwlog_err("%s g_ops is NULL\n",__func__);
-		return -EPERM;
-	}
-
-	if (NULL == g_ops->pd_dpm_disable_pd) {
-		hwlog_err("%s pd_dpm_disable_pd is NULL\n",__func__);
-		return -EPERM;
-	}
-
-	return g_ops->pd_dpm_disable_pd(g_client, disable);
-}
-
 void pd_dpm_set_cc_mode(int mode)
 {
 	static int cur_mode = PD_DPM_CC_MODE_DRP;
-	hwlog_info("%s cur_mode = %d, new mode = %d\n",__func__, cur_mode, mode);
 	if (g_ops && g_ops->pd_dpm_set_cc_mode) {
 		if (cur_mode != mode) {
 			g_ops->pd_dpm_set_cc_mode(mode);
@@ -342,28 +246,6 @@ int pd_dpm_notify_direct_charge_status(bool dc)
         }
 
         return false;
-}
-
-bool pd_dpm_set_voltage(int vol)
-{
-	hwlog_err("%s,%d\n", __func__, __LINE__);
-	if (g_ops && g_ops->pd_dpm_set_voltage) {
-		hwlog_err("%s,%d\n", __func__, __LINE__);
-		pd_dpm_set_pd_reset_adapter(vol);
-		g_ops->pd_dpm_set_voltage(g_client, vol);
-		return true;
-	}
-	return false;
-}
-
-int pd_dpm_get_pd_reset_adapter(void)
-{
-	return pd_reset_adapter;
-}
-
-void pd_dpm_set_pd_reset_adapter(int ra)
-{
-	pd_reset_adapter = ra;
 }
 
 void pd_dpm_set_cc_voltage(int type)
@@ -441,11 +323,6 @@ void pd_dpm_send_event(enum pd_dpm_cable_event_type event)
 	char *envp[] = {event_buf, NULL};
 	int ret = 0;
 
-	if (!typec_dev) {
-		hwlog_info("%s do not support pd just return\n", __func__);
-		return;
-	}
-
 	switch(event) {
 		case USB31_CABLE_IN_EVENT:
 			snprintf(event_buf, sizeof(event_buf), "USB3_STATE=ON");
@@ -463,14 +340,6 @@ void pd_dpm_send_event(enum pd_dpm_cable_event_type event)
 			snprintf(event_buf, sizeof(event_buf), "DP_STATE=OFF");
 		break;
 
-		case ANA_AUDIO_IN_EVENT:
-			snprintf(event_buf, sizeof(event_buf), "ANA_AUDIO_STATE=ON");
-		break;
-
-		case ANA_AUDIO_OUT_EVENT:
-			snprintf(event_buf, sizeof(event_buf), "ANA_AUDIO_STATE=OFF");
-		break;
-
 		default :
 			return;
 		break;
@@ -486,6 +355,113 @@ void pd_dpm_send_event(enum pd_dpm_cable_event_type event)
 	}
 }
 
+static unsigned int pd_dpm_get_usb_speed(void)
+{
+	hwlog_info("%s,%d usb_speed=%d\n", __func__, __LINE__, g_pd_usb_speed);
+	return g_pd_usb_speed;
+}
+
+void pd_dpm_set_usb_speed(unsigned int usb_speed)
+{
+	hwlog_info("%s,%d usb_speed=%d\n", __func__, __LINE__, usb_speed);
+	g_pd_usb_speed = usb_speed;
+
+	if (usb_speed == USB_SPEED_UNKNOWN) {
+		pd_dpm_send_event(USB31_CABLE_OUT_EVENT);
+	}
+
+	if ((usb_speed == USB_SPEED_SUPER) || \
+		(usb_speed == USB_SPEED_SUPER_PLUS)
+	) {
+		pd_dpm_send_event(USB31_CABLE_IN_EVENT);
+	}
+}
+
+static ssize_t pd_dpm_usb_speed_show(struct device *dev, struct device_attribute *attr,
+                char *buf)
+{
+	switch(pd_dpm_get_usb_speed()) {
+		case USB_SPEED_UNKNOWN:
+			return scnprintf(buf, PAGE_SIZE, "%s", "unknown");
+		break;
+
+		case USB_SPEED_LOW:
+		case USB_SPEED_FULL:
+			return scnprintf(buf, PAGE_SIZE, "%s", "full-speed");
+		break;
+
+		case USB_SPEED_HIGH:
+			return scnprintf(buf, PAGE_SIZE, "%s", "high-speed");
+		break;
+
+		case USB_SPEED_WIRELESS:
+			return scnprintf(buf, PAGE_SIZE, "%s", "wireless-speed");
+		break;
+
+		case USB_SPEED_SUPER:
+			return scnprintf(buf, PAGE_SIZE, "%s", "super-speed");
+		break;
+
+		case USB_SPEED_SUPER_PLUS:
+			return scnprintf(buf, PAGE_SIZE, "%s", "super-speed-plus");
+		break;
+
+		default :
+			return scnprintf(buf, PAGE_SIZE, "%s", "unknown");
+		break;
+	}
+}
+
+static DEVICE_ATTR(usb_speed, S_IRUGO, pd_dpm_usb_speed_show, NULL);
+
+
+void usb_host_abnormal_event_notify(unsigned int event)
+{
+	hwlog_info("%s,%d event=%d\n", __func__, __LINE__, event);
+
+	if ((USB_HOST_EVENT_HUB_TOO_DEEP == g_pd_usb_abnormal_event) && (USB_HOST_EVENT_UNKNOW_DEVICE == event)) {
+		g_pd_usb_abnormal_event = USB_HOST_EVENT_HUB_TOO_DEEP;
+	}
+	else {
+		g_pd_usb_abnormal_event = event;
+	}
+}
+
+static unsigned int usb_host_get_abnormal_event(void)
+{
+	hwlog_info("%s,%d event=%d\n", __func__, __LINE__, g_pd_usb_abnormal_event);
+	return g_pd_usb_abnormal_event;
+}
+
+static ssize_t usb_host_abnormal_event_show(struct device *dev, struct device_attribute *attr,
+                char *buf)
+{
+	switch(usb_host_get_abnormal_event()) {
+		case USB_HOST_EVENT_NORMAL:
+			return scnprintf(buf, PAGE_SIZE, "%s", "normal");
+		break;
+
+		case USB_HOST_EVENT_POWER_INSUFFICIENT:
+			return scnprintf(buf, PAGE_SIZE, "%s", "power_insufficient");
+		break;
+
+		case USB_HOST_EVENT_HUB_TOO_DEEP:
+			return scnprintf(buf, PAGE_SIZE, "%s", "hub_too_deep");
+		break;
+
+		case USB_HOST_EVENT_UNKNOW_DEVICE:
+			return scnprintf(buf, PAGE_SIZE, "%s", "unknown_device");
+		break;
+
+		default :
+			return scnprintf(buf, PAGE_SIZE, "%s", "invalid");
+		break;
+	}
+}
+
+static DEVICE_ATTR(usb_event, S_IRUGO, usb_host_abnormal_event_show, NULL);
+
+
 bool pd_dpm_get_high_power_charging_status()
 {
 	hwlog_info("%s status =%d\n", __func__, g_pd_high_power_charging_status);
@@ -497,54 +473,16 @@ void pd_dpm_set_high_power_charging_status(bool status)
 	g_pd_high_power_charging_status = status;
 }
 
-bool pd_dpm_get_high_voltage_charging_status()
-{
-	hwlog_info("%s status =%d\n", __func__, g_pd_high_voltage_charging_status);
-	return g_pd_high_voltage_charging_status;
-}
-void pd_dpm_set_high_voltage_charging_status(bool status)
-{
-	hwlog_info("%s status =%d\n", __func__, status);
-	g_pd_high_voltage_charging_status = status;
-}
-
-bool pd_dpm_get_optional_max_power_status()
-{
-	hwlog_info("%s status =%d\n", __func__, g_pd_optional_max_power_status);
-	return g_pd_optional_max_power_status;
-}
-
-void pd_dpm_set_optional_max_power_status(bool status)
-{
-	hwlog_info("%s status =%d\n", __func__, status);
-	g_pd_optional_max_power_status = status;
-}
-
-bool pd_dpm_get_wireless_cover_power_status(void)
-{
-	hwlog_info("%s status =%d\n", __func__,
-		g_pd_optional_max_power_status);
-	return g_pd_optional_wireless_cover_status;
-}
-
-void pd_dpm_set_wireless_cover_power_status(bool status)
-{
-	hwlog_info("%s status =%d\n", __func__, status);
-	g_pd_optional_wireless_cover_status = status;
-}
-
 void pd_dpm_get_charge_event(unsigned long *event, struct pd_dpm_vbus_state *state)
 {
-	hwlog_info("%s event =%ld\n", __func__, g_charger_type_event);
-
+        hwlog_info("%s event =%d\n", __func__, g_charger_type_event);
 	*event = g_charger_type_event;
 	memcpy(state, &g_vbus_state, sizeof(struct pd_dpm_vbus_state));
 }
 
 static void pd_dpm_set_charge_event(unsigned long event, struct pd_dpm_vbus_state *state)
 {
-	hwlog_info("%s event =%ld\n", __func__, event);
-
+        hwlog_info("%s event =%d\n", __func__, event);
 	if(NULL != state)
 		memcpy(&g_vbus_state, state, sizeof(struct pd_dpm_vbus_state));
 	g_charger_type_event = event;
@@ -553,12 +491,6 @@ static void pd_dpm_set_charge_event(unsigned long event, struct pd_dpm_vbus_stat
 int cc_check_ops_register(struct cc_check_ops* ops)
 {
 	int ret = 0;
-
-	if (g_cc_check_ops) {
-		hwlog_err("cc_check ops register fail! g_cc_check_ops busy\n");
-		return -EBUSY;
-	}
-
 	if (ops != NULL)
 	{
 		g_cc_check_ops = ops;
@@ -615,55 +547,16 @@ void pd_dpm_get_typec_state(int *typec_state)
 
 	return ;
 }
-/*for analog audio driver polling*/
-int pd_dpm_get_analog_hs_state(void)
-{
-	hwlog_info("%s analog_hs_state  = %d\n", __func__, pd_dpm_analog_hs_state);
 
-	return pd_dpm_analog_hs_state;
-}
 static void pd_dpm_set_typec_state(int typec_state)
 {
-	hwlog_info("%s pd_dpm_set_typec_state  = %d\n", __func__, typec_state);
-	blocking_notifier_call_chain(&g_pd_di->pd_port_status_nh,typec_state, NULL);
+        hwlog_info("%s pd_dpm_set_typec_state  = %d\n", __func__, typec_state);
+
 	pd_dpm_typec_state = typec_state;
 
 	return ;
 }
 
-int pd_get_product_type(void)
-{
-	hwlog_info("%s product type %d\n", __func__, g_pd_product_type);
-	return g_pd_product_type;
-}
-
-void pd_set_product_type(int type)
-{
-	g_pd_product_type = type;
-}
-
-void pd_set_product_id_info(unsigned int vid,
-			    unsigned int pid,
-			    unsigned int bcd)
-{
-	int pd_product_type = 0;
-
-	pd_product_type = (bcd >> PD_DPM_PDT_OFFSET) & PD_DPM_PDT_MASK;
-	pd_set_product_type(pd_product_type);
-	hwlog_info("%s vid = 0x%x, pid = 0x%x, type = 0x%x\n",
-		__func__, vid, pid, pd_product_type);
-
-	switch (pd_product_type) {
-	case PD_PDT_WIRELESS_COVER:
-		if (vid == PD_DPM_HW_VID &&
-			pid == PD_DPM_HW_CHARGER_PID)
-			hisi_coul_charger_event_rcv(WIRELESS_COVER_DETECTED);
-		break;
-	default:
-		hwlog_err("undefined type %d\n", pd_product_type);
-		break;
-	}
-}
 
 static ssize_t pd_dpm_cc_orientation_show(struct device *dev, struct device_attribute *attr,
                 char *buf)
@@ -686,42 +579,167 @@ static ssize_t pd_dpm_smart_holder_show(struct device *dev, struct device_attrib
 	return scnprintf(buf, PAGE_SIZE, "%s\n", pd_dpm_is_smart_holder()? "1" : "0");
 }
 #endif
-static ssize_t pd_dpm_cc_state_show(struct device *dev, struct device_attribute *attr,
-                char *buf)
-{
-	int ret;
-	unsigned int cc1 = 0;
-	unsigned int cc2 = 0;
-	unsigned int cc = 0;
-
-	ret = pd_dpm_get_cc_state_type(&cc1, &cc2);
-	if (ret == 0)
-		cc = ((cc1 & PD_DPM_CC_STATUS_MASK) |
-			(cc2 << PD_DPM_CC2_STATUS_OFFSET)) &
-			PD_DPM_BOTH_CC_STATUS_MASK;
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n", cc);
-}
 
 static DEVICE_ATTR(cc_orientation, S_IRUGO, pd_dpm_cc_orientation_show, NULL);
 static DEVICE_ATTR(pd_state, S_IRUGO, pd_dpm_pd_state_show, NULL);
 #ifdef CONFIG_TYPEC_CAP_CUSTOM_SRC2
 static DEVICE_ATTR(smart_holder, S_IRUGO, pd_dpm_smart_holder_show, NULL);
 #endif
-static DEVICE_ATTR(cc_state, S_IRUGO, pd_dpm_cc_state_show, NULL);
 static struct attribute *pd_dpm_ctrl_attributes[] = {
 	&dev_attr_cc_orientation.attr,
 	&dev_attr_pd_state.attr,
 #ifdef CONFIG_TYPEC_CAP_CUSTOM_SRC2
 	&dev_attr_smart_holder.attr,
 #endif
-	&dev_attr_cc_state.attr,
+	&dev_attr_usb_speed.attr,
+	&dev_attr_usb_event.attr,
 	NULL,
 };
 
 static const struct attribute_group pd_dpm_attr_group = {
 	.attrs = pd_dpm_ctrl_attributes,
 };
+
+static enum dual_role_property pd_dualrole_properties[] = {
+	DUAL_ROLE_PROP_MODE,
+	DUAL_ROLE_PROP_PR,
+	DUAL_ROLE_PROP_DR,
+};
+
+static int dual_role_get_local_prop(struct dual_role_phy_instance *dual_role,
+				    enum dual_role_property prop,
+				    unsigned int *val)
+{
+	struct pd_dpm_info *di = dual_role_get_drvdata(dual_role);
+	int port_mode = 0;
+
+	if (!di)
+		return -EINVAL;
+
+	if (prop == DUAL_ROLE_PROP_PR)
+	{
+		//port_mode = pd_detect_port_power_mode();
+		if (port_mode == PD_DEV_PORT_POWERMODE_SOURCE)
+			*val = DUAL_ROLE_PROP_PR_SRC;
+		else if (port_mode == PD_DEV_PORT_POWERMODE_SINK)
+			*val = DUAL_ROLE_PROP_PR_SNK;
+		else
+			*val = DUAL_ROLE_PROP_MODE_NONE;
+	}
+	else  if (prop == DUAL_ROLE_PROP_DR)
+	{
+		//port_mode = pd_detect_port_data_mode();
+		if (port_mode == PD_DEV_PORT_DATAMODE_HOST)
+			*val = DUAL_ROLE_PROP_DR_HOST;
+		else if (port_mode == PD_DEV_PORT_DATAMODE_DEVICE)
+			*val = DUAL_ROLE_PROP_DR_DEVICE;
+		else
+			*val = DUAL_ROLE_PROP_MODE_NONE;
+	}
+	else
+	{
+		//port_mode = pd_detect_port_power_mode();
+		if (port_mode == PD_DEV_PORT_POWERMODE_SOURCE)
+			*val = DUAL_ROLE_PROP_MODE_DFP;
+		else if (port_mode == PD_DEV_PORT_POWERMODE_SINK)
+			*val = DUAL_ROLE_PROP_MODE_UFP;
+		else
+			*val = DUAL_ROLE_PROP_MODE_NONE;
+	}
+
+	return 0;
+}
+
+/* Decides whether userspace can change a specific property */
+static int dual_role_is_writeable(struct dual_role_phy_instance *drp,
+				  enum dual_role_property prop)
+{
+	if (prop == DUAL_ROLE_PROP_PR || prop == DUAL_ROLE_PROP_DR)
+		return 1;
+	else
+		return 0;
+}
+
+static int dual_role_set_pr_prop(struct dual_role_phy_instance *dual_role,
+                                   enum dual_role_property prop,
+                                   const unsigned int *val)
+{
+	//TODO set current pr && send pr_swap
+	//should supply the register function to call pr_swap
+	return 0;
+}
+
+static int dual_role_set_dr_prop(struct dual_role_phy_instance *dual_role,
+                                   enum dual_role_property prop,
+                                   const unsigned int *val)
+{
+	//TODO set current dr  && send dr_swap
+	//should supply the register function to call pr_swap
+	return 0;
+}
+
+static int dual_role_set_mode_prop(struct dual_role_phy_instance *dual_role,
+				   enum dual_role_property prop,
+				   const unsigned int *val)
+{
+	struct pd_dpm_info *di = dual_role_get_drvdata(dual_role);
+	int port_mode = 0;
+	unsigned int power_mode = 0;
+	unsigned int data_mode = 0;
+	int timeout = 0;
+	int ret = 0;
+
+	if (!di)
+		return -EINVAL;
+
+	if (*val != DUAL_ROLE_PROP_MODE_DFP && *val != DUAL_ROLE_PROP_MODE_UFP)
+		return -EINVAL;
+
+	//TODO  detect current port mode
+
+	if (port_mode != PD_DEV_PORT_MODE_DFP
+		&& port_mode != PD_DEV_PORT_MODE_UFP)
+		return 0;
+
+	if (port_mode == PD_DEV_PORT_MODE_DFP
+		&& *val == DUAL_ROLE_PROP_MODE_DFP)
+		return 0;
+
+	if (port_mode == PD_DEV_PORT_MODE_UFP
+		&& *val == DUAL_ROLE_PROP_MODE_UFP)
+		return 0;
+
+	if (port_mode == PD_DEV_PORT_MODE_DFP) {
+		power_mode = PD_DEV_PORT_POWERMODE_SOURCE;
+		data_mode = PD_DEV_PORT_DATAMODE_HOST;
+	} else if (port_mode == PD_DEV_PORT_MODE_UFP) {
+		power_mode = PD_DEV_PORT_POWERMODE_SINK;
+		data_mode = PD_DEV_PORT_DATAMODE_DEVICE;
+	}
+
+	dual_role_set_pr_prop(dual_role,DUAL_ROLE_PROP_PR,&power_mode);
+	dual_role_set_dr_prop(dual_role,DUAL_ROLE_PROP_DR,&data_mode);
+
+	if (di->dual_role) {
+		dual_role_instance_changed(di->dual_role);
+	}
+
+	return ret;
+}
+
+static int dual_role_set_prop(struct dual_role_phy_instance *dual_role,
+			      enum dual_role_property prop,
+			      const unsigned int *val)
+{
+	if (prop == DUAL_ROLE_PROP_PR)
+		return dual_role_set_pr_prop(dual_role, prop, val);
+	else if (prop == DUAL_ROLE_PROP_DR)
+		return dual_role_set_dr_prop(dual_role, prop, val);
+	else if (prop == DUAL_ROLE_PROP_MODE)
+		return dual_role_set_mode_prop(dual_role, prop, val);
+	else
+		return -EINVAL;
+}
 
 int pd_dpm_wake_unlock_notifier_call(struct pd_dpm_info *di, unsigned long event, void *data)
 {
@@ -730,15 +748,9 @@ int pd_dpm_wake_unlock_notifier_call(struct pd_dpm_info *di, unsigned long event
 
 int pd_dpm_vbus_notifier_call(struct pd_dpm_info *di, unsigned long event, void *data)
 {
-	if(CHARGER_TYPE_NONE == event) {
+	if(CHARGER_TYPE_NONE == event)
 		pd_dpm_set_high_power_charging_status(false);
-		pd_dpm_set_optional_max_power_status(false);
-		pd_dpm_set_wireless_cover_power_status(false);
-		pd_dpm_set_high_voltage_charging_status(false);
-	}
-	if (PD_DPM_VBUS_TYPE_TYPEC != event) {
-		pd_dpm_set_charge_event(event, data);
-	}
+	pd_dpm_set_charge_event(event, data);
 	return blocking_notifier_call_chain(&di->pd_evt_nh,event, data);
 }
 static int charge_wake_unlock_notifier_call(struct notifier_block *chrg_wake_unlock_nb,
@@ -750,27 +762,12 @@ static int charge_wake_unlock_notifier_call(struct notifier_block *chrg_wake_unl
 	return NOTIFY_OK;
 }
 
-bool pd_dpm_get_ctc_cable_flag(void)
-{
-	if (g_pd_di)
-		return g_pd_di->ctc_cable_flag;
-
-	return false;
-}
-
 bool pd_dpm_get_pd_finish_flag(void)
 {
 	if (g_pd_di)
 		return g_pd_di->pd_finish_flag;
 	else
 		return false;
-}
-
-void pd_dpm_set_pd_finish_flag(bool flag)
-{
-	if (g_pd_di) {
-		g_pd_di->pd_finish_flag = flag;
-	}
 }
 
 bool pd_dpm_get_pd_source_vbus(void)
@@ -781,57 +778,83 @@ bool pd_dpm_get_pd_source_vbus(void)
 		return false;
 }
 
-bool pd_dpm_check_cc_vbus_short(void)
+static void pd_dpm_recovery_work(struct work_struct *work)
 {
-	int ret;
-	unsigned int cc1 = 0;
-	unsigned int cc2 = 0;
+	int typec_state = PD_DPM_USB_TYPEC_DETACHED;
 
-	ret = pd_dpm_get_cc_state_type(&cc1, &cc2);
-	if (ret)
-		return false;
+	hwlog_info("%s + \n", __func__);
 
-	hwlog_info("%s: cc1:%d, cc2:%d\n", __func__, cc1, cc2);
+	while (true == pd_dpm_get_pd_source_vbus())
+	{
+		msleep(1000);
+		pd_dpm_get_typec_state(&typec_state);
+		if (PD_DPM_USB_TYPEC_DEVICE_ATTACHED == typec_state)
+		{
+			hwlog_info("%s PD_DPM_USB_TYPEC_DEVICE_ATTACHED \n", __func__);
+			//hisi_usb_otg_event(CHARGER_DISCONNECT_EVENT);
+			//hisi_usb_otg_event(CHARGER_CONNECT_EVENT);
 
-	if (cc1 == PD_DPM_CC_3_0 && cc2 > PD_DPM_CC_OPEN)
-		return true;
+			if (g_pd_di)
+				g_pd_di->pd_source_vbus = false;
+			break;
+		}
+	};
 
-	if (cc2 == PD_DPM_CC_3_0 && cc1 > PD_DPM_CC_OPEN)
-		return true;
-
-	return false;
+	hwlog_info("%s - \n", __func__);
 }
 
-/*
- * Function:       pd_dpm_get_cc_state_type
- * Description:   get cc1 and cc2 state
- *                             open    56k    22k    10k
- *                     cc1    00       01     10     11
- *                     cc2    00       01     10     11
- * Input:           cc1: value of cc1  cc2: value of cc2
- * Output:         cc1: value of cc1  cc2: value of cc2
- * Return:         success: 0   fail: -1
-*/
-int pd_dpm_get_cc_state_type(unsigned int *cc1, unsigned int *cc2)
+int pd_dpm_vboost_enable(bool enable, enum PD_DPM_VBOOST_CONTROL_SOURCE_TYPE type)
 {
-	unsigned int cc;
-
-	if (!g_ops || !g_ops->pd_dpm_get_cc_state)
-		return -1;
-
-	cc = g_ops->pd_dpm_get_cc_state();
-	*cc1 = cc & PD_DPM_CC_STATUS_MASK;
-	*cc2 = (cc >> PD_DPM_CC2_STATUS_OFFSET) & PD_DPM_CC_STATUS_MASK;
-
+	mutex_lock(&vboost_ctrl_lock);
+	if (pd_ref == enable && type == PD_DPM_VBOOST_CONTROL_PD) {
+		mutex_unlock(&vboost_ctrl_lock);
+		return 0;
+	}
+	if (dc_ref == enable && type == PD_DPM_VBOOST_CONTROL_DC) {
+		mutex_unlock(&vboost_ctrl_lock);
+		return 0;
+	}
+	if (enable) {
+		if (type == PD_DPM_VBOOST_CONTROL_PD) {
+			pd_ref = true;
+			if (dc_ref == false) {
+				gpio_direction_output(g_pd_di->vconn_en, enable);
+			}
+		} else if (type == PD_DPM_VBOOST_CONTROL_DC) {
+			dc_ref = true;
+			if (pd_ref == false) {
+				gpio_direction_output(g_pd_di->vconn_en, enable);
+			}
+		}
+	} else {
+		if (type == PD_DPM_VBOOST_CONTROL_PD) {
+			pd_ref = false;
+			if (dc_ref == false) {
+				gpio_direction_output(g_pd_di->vconn_en, enable);
+			}
+		} else if (type == PD_DPM_VBOOST_CONTROL_DC) {
+			dc_ref = false;
+			if (pd_ref == false) {
+				gpio_direction_output(g_pd_di->vconn_en, enable);
+			}
+		}
+	}
+	mutex_unlock(&vboost_ctrl_lock);
 	return 0;
 }
-
-void pd_dpm_report_pd_source_vconn(void *data)
+void pd_dpm_report_pd_source_vconn(struct pd_dpm_info *di, void *data)
 {
-	if (data)
-#ifdef CONFIG_BOOST_5V
-		boost_5v_enable(*(int *)data, BOOST_CTRL_PD_VCONN);
-#endif
+	int  ret = 0;
+	if (data) {
+		if (gpio_is_valid(di->vconn_en)) {
+			hwlog_info("%s *enable = %d\n", __func__, *(int *)data);
+
+			pd_dpm_vboost_enable(*(int *)data, PD_DPM_VBOOST_CONTROL_PD);
+
+			if(ret)
+				hwlog_err("%s gpio_direction_output failed \n", __func__);
+		}
+	}
 	hwlog_info("%s - \n", __func__);
 }
 void pd_dpm_report_pd_source_vbus(struct pd_dpm_info *di, void *data)
@@ -841,49 +864,25 @@ void pd_dpm_report_pd_source_vbus(struct pd_dpm_info *di, void *data)
 	mutex_lock(&di->sink_vbus_lock);
 	ignore_bc12_event_when_vbuson= true;
 
-	if (vbus_state->vbus_type & TCP_VBUS_CTRL_PD_DETECT) {
+	if (vbus_state->vbus_type & TCP_VBUS_CTRL_PD_DETECT)
 		di->pd_finish_flag = true;
-		di->ctc_cable_flag = true;
-	}
 
 	if (vbus_state->mv == 0) {
 		hwlog_info("%s : Disable\n", __func__);
-#ifdef CONFIG_WIRELESS_CHARGER
-		if (otg_channel)
-			vbus_ch_close(VBUS_CH_USER_PD,
-				VBUS_CH_TYPE_BOOST_GPIO, true, false);
-		else {
-			pd_dpm_vbus_notifier_call(g_pd_di, CHARGER_TYPE_NONE, data);
-			pd_dpm_set_source_sink_state(STOP_SOURCE);
-		}
-#else
 		pd_dpm_vbus_notifier_call(g_pd_di, CHARGER_TYPE_NONE, data);
-		pd_dpm_set_source_sink_state(STOP_SOURCE);
-#endif
 	} else {
 		di->pd_source_vbus = true;
 		hwlog_info("%s : Source %d mV, %d mA\n", __func__, vbus_state->mv, vbus_state->ma);
-#ifdef CONFIG_WIRELESS_CHARGER
-		if (!otg_channel) {
-			pd_dpm_vbus_notifier_call(g_pd_di, PLEASE_PROVIDE_POWER, data);
-			pd_dpm_set_source_sink_state(START_SOURCE);
-		}
-		else
-			vbus_ch_open(VBUS_CH_USER_PD,
-				VBUS_CH_TYPE_BOOST_GPIO, true);
-#else
 		pd_dpm_vbus_notifier_call(g_pd_di, PLEASE_PROVIDE_POWER, data);
-		pd_dpm_set_source_sink_state(START_SOURCE);
-#endif
+		schedule_work(&di->recovery_work);
 	}
 	mutex_unlock(&di->sink_vbus_lock);
 }
 
-#define VBUS_VOL_9000MV 9000
 void pd_dpm_report_pd_sink_vbus(struct pd_dpm_info *di, void *data)
 {
+	bool skip = false;
 	bool high_power_charging = false;
-	bool high_voltage_charging = false;
 	unsigned long event;
 	struct pd_dpm_vbus_state *vbus_state = data;
 
@@ -892,11 +891,8 @@ void pd_dpm_report_pd_sink_vbus(struct pd_dpm_info *di, void *data)
 
 	if (vbus_state->vbus_type & TCP_VBUS_CTRL_PD_DETECT){
 		chg_set_adaptor_test_result(TYPE_PD,PROTOCOL_FINISH_SUCC);
-		if (pmic_vbus_irq_is_enabled()) {
-			ignore_bc12_event_when_vbuson = true;
-		}
+		ignore_bc12_event_when_vbuson = true;
 		di->pd_finish_flag = true;
-		di->ctc_cable_flag = true;
 	}
 
 	if (di->pd_finish_flag) {
@@ -912,7 +908,6 @@ void pd_dpm_report_pd_sink_vbus(struct pd_dpm_info *di, void *data)
 		{
 			hwlog_info("%s : Disable\n", __func__);
 			pd_dpm_vbus_notifier_call(g_pd_di, CHARGER_TYPE_NONE, data);
-			pd_dpm_set_source_sink_state(STOP_SINK);
 		}
 	}
 	else {
@@ -923,18 +918,8 @@ void pd_dpm_report_pd_sink_vbus(struct pd_dpm_info *di, void *data)
 			hwlog_info("%s : over 18w\n", __func__);
 			high_power_charging = true;
 		}
-		if(vbus_state->mv >=VBUS_VOL_9000MV)
-		{
-			hwlog_info("%s : over 9V\n", __func__);
-			high_voltage_charging = true;
-		}
 		hwlog_info("%s : %d\n", __func__, vbus_state->mv * vbus_state->ma);
 		pd_dpm_set_high_power_charging_status(high_power_charging);
-		pd_dpm_set_high_voltage_charging_status(high_voltage_charging);
-
-		if (pd_dpm_typec_state != PD_DPM_USB_TYPEC_DETACHED) {
-			pd_dpm_set_source_sink_state(START_SINK);
-		}
 		pd_dpm_vbus_notifier_call(g_pd_di, event, data);
 	}
 
@@ -953,51 +938,21 @@ void pd_dpm_vbus_ctrl(unsigned long event)//CHARGER_TYPE_NONE,PLEASE_PROVIDE_POW
 {
 	if (g_pd_di)
 	{
-#ifdef CONFIG_WIRELESS_CHARGER
-		if (!otg_channel) {
-			if (event == PLEASE_PROVIDE_POWER) {
-				pd_dpm_set_ignore_vbuson_event(true);
-				pd_dpm_set_source_sink_state(START_SOURCE);
-			} else {
-				pd_dpm_set_ignore_vbusoff_event(true);
-				pd_dpm_set_source_sink_state(STOP_SOURCE);
-			}
-			pd_dpm_vbus_notifier_call(g_pd_di, event, NULL);
-		} else {
-			if (event == PLEASE_PROVIDE_POWER) {
-				pd_dpm_set_ignore_vbuson_event(false);
-				vbus_ch_open(VBUS_CH_USER_PD,
-					VBUS_CH_TYPE_BOOST_GPIO, false);
-			} else {
-				pd_dpm_set_ignore_vbusoff_event(false);
-				vbus_ch_close(VBUS_CH_USER_PD,
-					VBUS_CH_TYPE_BOOST_GPIO, false, false);
-			}
-		}
-#else
-		if (event == PLEASE_PROVIDE_POWER) {
+		if (event == PLEASE_PROVIDE_POWER)
 			pd_dpm_set_ignore_vbuson_event(true);
-			pd_dpm_set_source_sink_state(START_SOURCE);
-		} else {
+		else
 			pd_dpm_set_ignore_vbusoff_event(true);
-			pd_dpm_set_source_sink_state(STOP_SOURCE);
-		}
 		pd_dpm_vbus_notifier_call(g_pd_di, event, NULL);
-#endif
-		hwlog_info("%s event = %ld\n", __func__, event);
+		hwlog_info("%s event = %d\n", __func__, event);
 	}
 }
 int pd_dpm_report_bc12(struct notifier_block *usb_nb,
                                     unsigned long event, void *data)
 {
+	struct pd_dpm_vbus_state *vbus_state = data;
 	struct pd_dpm_info *di = container_of(usb_nb, struct pd_dpm_info, usb_nb);
 
-	hwlog_info("%s : received event (%ld)\n", __func__, event);
-
-	if (pmic_vbus_is_connected()) {
-		pd_dpm_vbus_notifier_call(di, event, data);
-		return NOTIFY_OK;
-	}
+	hwlog_info("%s : event (%d)\n", __func__, event);
 
 	if(CHARGER_TYPE_NONE == event && !di->pd_finish_flag &&
 		!pd_dpm_get_pd_source_vbus())
@@ -1019,31 +974,18 @@ int pd_dpm_report_bc12(struct notifier_block *usb_nb,
 	if(pd_dpm_get_pd_source_vbus())
 	{
 		hwlog_info("%s : line (%d)\n", __func__, __LINE__);
-		goto End;
-	}
-	if(ignore_bc12_event_when_vbuson && CHARGER_TYPE_NONE == event)
-	{
-		hwlog_info("%s : bc1.2 event not match\n", __func__);
-		goto End;
-	}
-	if(!pmic_vbus_irq_is_enabled() &&
-		(STOP_SINK == sink_source_type && CHARGER_TYPE_NONE != event))
-	{
-		hwlog_info("%s : pd aready in STOP_SINK state,"
-			"but bc1.2 event not CHARGER_TYPE_NONE, ignore\n", __func__);
-		goto End;
-	}
-	if(!pmic_vbus_irq_is_enabled() && CHARGER_TYPE_NONE == event)
-	{
-		hwlog_info("%s : ignore CHARGER_TYPE_NONE\n", __func__);
-		goto End;
+		if (CHARGER_TYPE_NONE == event) {
+			ignore_bc12_event_when_vbusoff = false;
+			ignore_bc12_event_when_vbuson = false;
+		}
+		mutex_unlock(&g_pd_di->sink_vbus_lock);
+		return NOTIFY_OK;
 	}
 
 	if((!ignore_bc12_event_when_vbusoff && CHARGER_TYPE_NONE == event) || (!ignore_bc12_event_when_vbuson && CHARGER_TYPE_NONE != event))
 	{
-		if (!di->pd_finish_flag ||
-		    (di->pd_finish_flag && CHARGER_TYPE_DCP == event)) {
-			hwlog_info("%s : notify event (%ld)\n", __func__, event);
+		if (!di->pd_finish_flag) {
+			hwlog_info("%s : event (%d)\n", __func__, event);
 			if (g_cur_usb_event == PD_DPM_TYPEC_ATTACHED_AUDIO) {
 				event = CHARGER_TYPE_SDP;
 				data = NULL;
@@ -1053,7 +995,6 @@ int pd_dpm_report_bc12(struct notifier_block *usb_nb,
 			hwlog_info("%s : igrone\n", __func__);
 	}
 
-End:
 	if (CHARGER_TYPE_NONE == event) {
 		ignore_bc12_event_when_vbusoff = false;
 		ignore_bc12_event_when_vbuson = false;
@@ -1111,40 +1052,13 @@ int unregister_pd_dpm_notifier(struct notifier_block *nb)
 }
 EXPORT_SYMBOL(unregister_pd_dpm_notifier);
 
-int register_pd_dpm_portstatus_notifier(struct notifier_block *nb)
-{
-	int ret = -1;
-
-	if (!nb)
-		return -EINVAL;
-
-	if(g_pd_di == NULL)
-		return ret;
-
-	ret = blocking_notifier_chain_register(&g_pd_di->pd_port_status_nh, nb);
-	if (ret != 0)
-		return ret;
-
-	return ret;
-}
-EXPORT_SYMBOL(register_pd_dpm_portstatus_notifier);
-
-int unregister_pd_dpm_portstatus_notifier(struct notifier_block *nb)
-{
-	return blocking_notifier_chain_unregister(&g_pd_di->pd_port_status_nh, nb);
-}
-EXPORT_SYMBOL(unregister_pd_dpm_portstatus_notifier);
-
 
 static inline void pd_dpm_report_device_attach(void)
 {
-#ifdef CONFIG_CONTEXTHUB_PD
-	struct pd_dpm_combphy_event event;
-#endif
-
 	hwlog_info("%s \r\n",__func__);
 
 #ifdef CONFIG_CONTEXTHUB_PD
+	struct pd_dpm_combphy_event event;
 	event.dev_type = TCA_CHARGER_CONNECT_EVENT;
 	event.irq_type = TCA_IRQ_HPD_IN;
 	event.mode_type = TCPC_USB31_CONNECTED;
@@ -1153,24 +1067,28 @@ static inline void pd_dpm_report_device_attach(void)
 #else
 	hisi_usb_otg_event(CHARGER_CONNECT_EVENT);
 #endif
+
+#ifdef CONFIG_CC_ANTI_CORROSION
+	if (cc_corrosion_dev_p) {
+		pr_info("%s schedule delayed work\n",__func__);
+		schedule_delayed_work(&cc_corrosion_dev_p->update_nv_work, msecs_to_jiffies(CORROSION_DELAY));
+	}
+#endif
 }
 
 static inline void pd_dpm_report_host_attach(void)
 {
-#ifdef CONFIG_CONTEXTHUB_PD
-	struct pd_dpm_combphy_event event;
-#endif
-
+	struct console *con;
 	hwlog_info("%s \r\n",__func__);
-
 #ifdef CONFIG_SWITCH_FSA9685
 	if (switch_manual_enable) {
-		usbswitch_common_dcd_timeout_enable(true);
-		usbswitch_common_manual_sw(FSA9685_USB1_ID_TO_IDBYPASS);
+		fsa9685_dcd_timeout_enable(true);
+		fsa9685_manual_sw(FSA9685_USB1_ID_TO_IDBYPASS);
 	}
 #endif
 
 #ifdef CONFIG_CONTEXTHUB_PD
+	struct pd_dpm_combphy_event event;
 	event.dev_type = TCA_ID_FALL_EVENT;
 	event.irq_type = TCA_IRQ_HPD_IN;
 	event.mode_type = TCPC_USB31_CONNECTED;
@@ -1183,13 +1101,10 @@ static inline void pd_dpm_report_host_attach(void)
 
 static inline void pd_dpm_report_device_detach(void)
 {
-#ifdef CONFIG_CONTEXTHUB_PD
-	struct pd_dpm_combphy_event event;
-#endif
-
 	hwlog_info("%s \r\n",__func__);
 
 #ifdef CONFIG_CONTEXTHUB_PD
+	struct pd_dpm_combphy_event event;
 	event.dev_type = TCA_CHARGER_DISCONNECT_EVENT;
 	event.irq_type = TCA_IRQ_HPD_OUT;
 	event.mode_type = TCPC_NC;
@@ -1202,17 +1117,13 @@ static inline void pd_dpm_report_device_detach(void)
 
 static inline void pd_dpm_report_host_detach(void)
 {
+	hwlog_info("%s \r\n",__func__);
+#ifdef CONFIG_SWITCH_FSA9685
+	fsa9685_dcd_timeout_enable(false);
+#endif
+
 #ifdef CONFIG_CONTEXTHUB_PD
 	struct pd_dpm_combphy_event event;
-#endif
-
-	hwlog_info("%s \r\n",__func__);
-
-#ifdef CONFIG_SWITCH_FSA9685
-	usbswitch_common_dcd_timeout_enable(false);
-#endif
-
-#ifdef CONFIG_CONTEXTHUB_PD
 	event.typec_orien = pd_dpm_get_cc_orientation();
 	event.mode_type = pd_dpm_get_combphy_status();
 	if (true == pd_dpm_get_last_hpd_status())
@@ -1236,6 +1147,7 @@ static inline void pd_dpm_report_host_detach(void)
 #else
 	hisi_usb_otg_event(ID_RISE_EVENT);
 #endif
+	usb_audio_power_scharger();
 }
 
 static void pd_dpm_report_attach(int new_state)
@@ -1263,7 +1175,7 @@ static void pd_dpm_report_detach(int last_state)
 		break;
 	}
 
-	hw_usb_host_abnormal_event_notify(USB_HOST_EVENT_NORMAL);
+	usb_host_abnormal_event_notify(USB_HOST_EVENT_NORMAL);
 }
 
 static void pd_dpm_usb_update_state(
@@ -1305,122 +1217,42 @@ int pd_dpm_get_cur_usb_event(void)
 {
 	if (g_pd_di)
 		return g_pd_di->cur_usb_event;
-
-	return 0;
 }
 
-bool pd_dpm_get_cc_moisture_status(void)
+void pd_dpm_handle_abnomal_cc_change(void)
 {
-	return g_pd_cc_moisture_status;
-}
-
-void pd_dpm_handle_abnomal_change(int event)
-{
-	int i = 0;
-	char dsm_buf[PD_DPM_CC_DMD_BUF_SIZE] = {0};
-	int time_diff = 0;
-	unsigned int time_diff_index = 0;
-
+	static int change_counter = 0;
+	static bool first_enter = true;
+	static struct timespec64 ts64_last;
 	struct timespec64 ts64_interval;
 	struct timespec64 ts64_now;
 	struct timespec64 ts64_sum;
-
-	struct timespec64 ts64_dmd_interval;
-	struct timespec64 ts64_dmd_now;
-	struct timespec64 ts64_dmd_sum;
-
-	int* change_counter = &abnomal_change[event].change_counter;
 	int change_counter_threshold = PD_DPM_CC_CHANGE_COUNTER_THRESHOLD;
-	int* dmd_counter = &abnomal_change[event].dmd_counter;
-	int dmd_counter_threshold = PD_DPM_CC_DMD_COUNTER_THRESHOLD;
+
 	ts64_interval.tv_sec = 0;
-	ts64_interval.tv_nsec = abnormal_cc_interval * NSEC_PER_MSEC;
-	ts64_dmd_interval.tv_sec = PD_DPM_CC_DMD_INTERVAL;
-	ts64_dmd_interval.tv_nsec = 0;
-
+	ts64_interval.tv_nsec = PD_DPM_CC_CHANGE_INTERVAL * NSEC_PER_MSEC;
 	ts64_now = current_kernel_time64();
-	if (abnomal_change[event].first_enter) {
-		abnomal_change[event].first_enter = false;
+	if (first_enter) {
+		first_enter = false;
 	} else {
-		ts64_sum = timespec64_add_safe(abnomal_change[event].ts64_last, ts64_interval);
+		ts64_sum = timespec64_add_safe(ts64_last, ts64_interval);
 		if (ts64_sum.tv_sec == TIME_T_MAX) {
-			hwlog_err("%s time overflow happend\n",__func__);
-			*change_counter = 0;
+			pr_err("%s time overflow happend\n",__func__);
+			change_counter = 0;
 		} else if (timespec64_compare(&ts64_sum, &ts64_now) >= 0) {
-			++*change_counter;
-			hwlog_info("%s change_counter = %d,\n",__func__, *change_counter);
-
-			time_diff = (ts64_now.tv_sec - abnomal_change[event].ts64_last.tv_sec) * PD_DPM_CC_CHANGE_MSEC + (ts64_now.tv_nsec - abnomal_change[event].ts64_last.tv_nsec) / NSEC_PER_MSEC;
-			time_diff_index = time_diff/(PD_DPM_CC_CHANGE_INTERVAL / PD_DPM_CC_CHANGE_BUF_SIZE);
-			if (time_diff_index >= PD_DPM_CC_CHANGE_BUF_SIZE)
-				time_diff_index = PD_DPM_CC_CHANGE_BUF_SIZE - 1;
-			++abnomal_change[event].change_data[time_diff_index];
+			++change_counter;
+			change_counter = change_counter > change_counter_threshold ? change_counter_threshold: change_counter;
+			pr_info("%s change_counter = %d\n",__func__, change_counter);
 		} else {
-			*change_counter = 0;
-			memset(abnomal_change[event].change_data, 0, PD_DPM_CC_CHANGE_BUF_SIZE);
+			change_counter = 0;
 		}
 	}
-
-	if (*change_counter >= change_counter_threshold) {
-		hwlog_err("%s change_counter hit\n",__func__);
-
-		if (cc_moisture_status_report) {
-			g_pd_cc_moisture_happened = true;
-			g_pd_cc_moisture_status = true;
-		}
-
+	if (change_counter >= change_counter_threshold) {
+		pr_err("%s change_counter hit\n",__func__);
 		pd_dpm_set_cc_mode(PD_DPM_CC_MODE_UFP);
-
-		for (i = 0; i < PD_DPM_CC_CHANGE_BUF_SIZE; i++) {
-			abnomal_change[event].dmd_data[i] += abnomal_change[event].change_data[i];
-		}
-		*change_counter = 0;
-		memset(abnomal_change[event].change_data, 0, PD_DPM_CC_CHANGE_BUF_SIZE);
-		++*dmd_counter;
-
-		if (moisture_detection_by_cc_enable) {
-			hwlog_err("%s moisture_detected\n",__func__);
-			send_water_intrused_event(true);
-		}
 	}
 
-	if (*dmd_counter >= dmd_counter_threshold) {
-		*dmd_counter = 0;
-
-		ts64_dmd_now = current_kernel_time64();
-		ts64_dmd_sum = timespec64_add_safe(abnomal_change[event].ts64_dmd_last, ts64_dmd_interval);
-		if (ts64_dmd_sum.tv_sec == TIME_T_MAX) {
-			hwlog_err("%s time overflow happend when add 24 hours\n",__func__);
-		} else if (timespec64_compare(&ts64_dmd_sum, &ts64_dmd_now) < 0) {
-			snprintf(dsm_buf, PD_DPM_CC_DMD_BUF_SIZE - 1, "cc abnormal is triggered:");
-			for(i = 0; i < PD_DPM_CC_CHANGE_BUF_SIZE; i++) {
-				snprintf(dsm_buf + strlen(dsm_buf), PD_DPM_CC_DMD_BUF_SIZE - 1, " %d", abnomal_change[event].dmd_data[i]);
-			}
-			snprintf(dsm_buf + strlen(dsm_buf), PD_DPM_CC_DMD_BUF_SIZE - 1, "\n");
-
-			power_dsm_dmd_report(POWER_DSM_BATTERY, ERROR_NO_WATER_CHECK_IN_USB, dsm_buf);
-
-			abnomal_change[event].ts64_dmd_last = ts64_dmd_now;
-		} else {
-			hwlog_info("error: cc abnormal happend within 24 hour, do not report\n");
-		}
-	}
-
-	abnomal_change[event].ts64_last =  ts64_now;
-}
-void pd_dpm_ignore_vbus_only_event(bool flag)
-{
-	g_ignore_vbus_only_event = flag;
-}
-
-enum cur_cap pd_dpm_get_cvdo_cur_cap(void)
-{
-	enum cur_cap cap;
-
-	cap = (g_pd_di->cable_vdo & CABLE_CUR_CAP_MASK) >> CABLE_CUR_CAP_SHIFT;
-	hwlog_info("%s, cur_cap = %d\n", __func__, cap);
-
-	return cap;
+	ts64_last =  ts64_now;
 }
 
 int pd_dpm_handle_pe_event(unsigned long event, void *data)
@@ -1432,15 +1264,8 @@ int pd_dpm_handle_pe_event(unsigned long event, void *data)
 
 	switch (event) {
 	case PD_DPM_PE_ABNORMAL_CC_CHANGE_HANDLER:
-#ifdef CONFIG_DIRECT_CHARGER
-		if (abnormal_cc_detection && !direct_charge_check_sc_mode())
-#else
 		if (abnormal_cc_detection)
-#endif
-		{
-			pd_dpm_handle_abnomal_change(PD_DPM_ABNORMAL_CC_CHANGE);
-		}
-
+			pd_dpm_handle_abnomal_cc_change();
 		return 0;
 
 	case PD_DPM_PE_EVT_TYPEC_STATE:
@@ -1460,7 +1285,6 @@ int pd_dpm_handle_pe_event(unsigned long event, void *data)
 			case PD_DPM_TYPEC_ATTACHED_SNK:
 				usb_event = PD_DPM_USB_TYPEC_DEVICE_ATTACHED;
 				hwlog_info("%s ATTACHED_SINK\r\n", __func__);
-				pd_dpm_set_source_sink_state(START_SINK);
 				typec_complete(COMPLETE_FROM_TYPEC_CHANGE);
 				break;
 
@@ -1471,39 +1295,24 @@ int pd_dpm_handle_pe_event(unsigned long event, void *data)
 				break;
 
 			case PD_DPM_TYPEC_UNATTACHED:
-				g_pd_di->ctc_cable_flag = false;
-				/*the sequence can not change, would affect sink_vbus command */
-				if (pd_dpm_analog_hs_state == 1) {
-					usb_event = PD_DPM_USB_TYPEC_AUDIO_DETACHED;
-					notify_audio = true;
-					pd_dpm_analog_hs_state = 0;
-					event_id = USB_ANA_HS_PLUG_OUT;
-					hwlog_info("%s AUDIO UNATTACHED\r\n", __func__);
-				} else {
-					usb_event = PD_DPM_USB_TYPEC_DETACHED;
-
-					if (START_SINK == sink_source_type) {
-						pd_dpm_set_source_sink_state(STOP_SINK);
-					}
-					hwlog_info("%s UNATTACHED\r\n", __func__);
-				}
+				notify_audio = true;
 #ifdef CONFIG_TYPEC_CAP_CUSTOM_SRC2
 				if(support_smart_holder){
 					if(g_pd_smart_holder)
 					{
-						hishow_notify_android_uevent(HISHOW_DEVICE_OFFLINE,HISHOW_USB_DEVICE);
+						hishow_notify_android_uevent(HIVIEW_DEVICE_OFFLINE,HIVIEW_USB_DEVICE);
 					}
 					g_pd_smart_holder = false;
 				}
 #endif
+				event_id = USB_ANA_HS_PLUG_OUT;
+				usb_event = PD_DPM_USB_TYPEC_DETACHED;
+				hwlog_info("%s UNATTACHED\r\n", __func__);
 				reinit_typec_completion();
-				pd_set_product_type(PD_DPM_INVALID_VAL);
-				g_pd_di->cable_vdo = 0;
 				break;
 
 			case PD_DPM_TYPEC_ATTACHED_AUDIO:
 				notify_audio = true;
-				pd_dpm_analog_hs_state = 1;
 				event_id = USB_ANA_HS_PLUG_IN;
 				usb_event = PD_DPM_USB_TYPEC_AUDIO_ATTACHED;
 				hwlog_info("%s ATTACHED_AUDIO\r\n", __func__);
@@ -1512,7 +1321,6 @@ int pd_dpm_handle_pe_event(unsigned long event, void *data)
 			case PD_DPM_TYPEC_ATTACHED_DBGACC_SNK:
 			case PD_DPM_TYPEC_ATTACHED_CUSTOM_SRC:
 				usb_event = PD_DPM_USB_TYPEC_DEVICE_ATTACHED;
-				pd_dpm_set_source_sink_state(START_SINK);
 				pd_dpm_set_cc_voltage(PD_DPM_CC_VOLT_SNK_DFT);
 				hwlog_info("%s ATTACHED_CUSTOM_SRC\r\n", __func__);
 				typec_complete(COMPLETE_FROM_TYPEC_CHANGE);
@@ -1526,7 +1334,7 @@ int pd_dpm_handle_pe_event(unsigned long event, void *data)
 					{
 						if(!g_pd_smart_holder)
 						{
-							hishow_notify_android_uevent(HISHOW_DEVICE_ONLINE,HISHOW_USB_DEVICE);
+							hishow_notify_android_uevent(HIVIEW_DEVICE_ONLINE,HIVIEW_USB_DEVICE);
 						}
 						g_pd_smart_holder = true;
 					}
@@ -1536,21 +1344,6 @@ int pd_dpm_handle_pe_event(unsigned long event, void *data)
 #endif
 			case PD_DPM_TYPEC_ATTACHED_DEBUG:
 				pd_dpm_set_cc_voltage(PD_DPM_CC_VOLT_SNK_DFT);
-				break;
-			case PD_DPM_TYPEC_ATTACHED_VBUS_ONLY:
-				if (g_ignore_vbus_only_event) {
-					hwlog_err("%s: ignore ATTACHED_VBUS_ONLY\n", __func__);
-					return 0;
-				}
-				pd_dpm_set_source_sink_state(START_SINK);
-				usb_event = PD_DPM_USB_TYPEC_DEVICE_ATTACHED;
-				hwlog_info("%s ATTACHED_VBUS_ONLY\r\n", __func__);
-				break;
-			case PD_DPM_TYPEC_UNATTACHED_VBUS_ONLY:
-				hwlog_info("%s UNATTACHED_VBUS_ONLY\r\n", __func__);
-				pd_dpm_handle_abnomal_change(PD_DPM_UNATTACHED_VBUS_ONLY);
-				usb_event = PD_DPM_USB_TYPEC_DETACHED;
-				pd_dpm_set_source_sink_state(STOP_SINK);
 				break;
 
 			default:
@@ -1592,35 +1385,13 @@ int pd_dpm_handle_pe_event(unsigned long event, void *data)
 				hwlog_info("%s : Disable VBUS Control\n", __func__);
 				vbus_state.mv = 0;
 				vbus_state.ma = 0;
-#ifdef CONFIG_WIRELESS_CHARGER
-				if (otg_channel && g_pd_di->pd_source_vbus)
-					vbus_ch_close(VBUS_CH_USER_PD,
-						VBUS_CH_TYPE_BOOST_GPIO,
-						true, false);
-				else {
-					pd_dpm_vbus_notifier_call(g_pd_di, CHARGER_TYPE_NONE, &vbus_state);
-					if (g_pd_di->pd_source_vbus) {
-						pd_dpm_set_source_sink_state(STOP_SOURCE);
-					} else {
-						pd_dpm_set_source_sink_state(STOP_SINK);
-					}
-				}
-#else
-				if (g_pd_di->pd_source_vbus) {
-					pd_dpm_set_source_sink_state(STOP_SOURCE);
-				} else {
-					pd_dpm_set_source_sink_state(STOP_SINK);
-				}
+
 				pd_dpm_vbus_notifier_call(g_pd_di, CHARGER_TYPE_NONE, &vbus_state);
-#endif
 				mutex_lock(&g_pd_di->sink_vbus_lock);
 				if (g_pd_di->bc12_event != CHARGER_TYPE_NONE)
 					ignore_bc12_event_when_vbusoff = true;
 				g_pd_di->pd_source_vbus = false;
 				g_pd_di->pd_finish_flag = false;
-				usb_audio_power_scharger();
-				usb_headset_plug_out();
-				ignore_bc12_event_when_vbuson = false;
 				mutex_unlock(&g_pd_di->sink_vbus_lock);
 			}
 		}
@@ -1640,7 +1411,7 @@ int pd_dpm_handle_pe_event(unsigned long event, void *data)
 
 	case PD_DPM_PE_EVT_SOURCE_VCONN:
 		{
-			pd_dpm_report_pd_source_vconn(data);
+			pd_dpm_report_pd_source_vconn(g_pd_di, data);
 			break;
 		}
 	case PD_DPM_PE_EVT_DR_SWAP:
@@ -1656,14 +1427,6 @@ int pd_dpm_handle_pe_event(unsigned long event, void *data)
 	case PD_DPM_PE_EVT_PR_SWAP:
 		break;
 
-	case PD_DPM_PE_CABLE_VDO:
-		if (!data)
-			return 0;
-
-		memcpy(&g_pd_di->cable_vdo, data, sizeof(g_pd_di->cable_vdo));
-		emark_detect_complete();
-		hwlog_info("%s cable_vdo=%u\n", __func__, g_pd_di->cable_vdo);
-		break;
 	default:
 		hwlog_info("%s  unkonw event \r\n", __func__);
 		break;
@@ -1704,51 +1467,21 @@ static int pd_dpm_parse_dt(struct pd_dpm_info *info,
 	hwlog_info("switch_manual_enable = %d!\n", switch_manual_enable);
 
 	if (of_property_read_u32(np,"support_dp", &support_dp)) {
-		hwlog_err("get support_dp fail!\n");
+			hwlog_err("get support_dp fail!\n");
 	}
 	hwlog_info("support_dp = %d!\n", support_dp);
-	if (of_property_read_u32(np,"otg_channel", &otg_channel)) {
-		hwlog_err("get otg_channel fail!\n");
-		otg_channel = 0;
-	}
-	hwlog_info("otg_channel = %d!\n", otg_channel);
-	if (of_property_read_u32(np,"moisture_detection_by_cc_enable", &moisture_detection_by_cc_enable)) {
-		hwlog_err("get moisture_detection_by_cc_enable fail!\n");
-		moisture_detection_by_cc_enable = 0;
-	}
-	hwlog_info("moisture_detection_by_cc_enable = %d!\n", moisture_detection_by_cc_enable);
 
 #ifdef CONFIG_TYPEC_CAP_CUSTOM_SRC2
 	if (of_property_read_u32(np,"support_smart_holder", &support_smart_holder)) {
 			hwlog_err("get support_smart_holder fail!\n");
 	}
 	hwlog_info("support_smart_holder = %d!\n", support_smart_holder);
-	if (of_property_read_u32(np, "smart_holder_without_emark",
-		&smart_holder_without_emark))
-		hwlog_err("get smart_holder_without_emark fail\n");
-	hwlog_info("smart_holder_without_emark = %d\n",
-		smart_holder_without_emark);
 #endif
 	if (of_property_read_u32(np, "support_analog_audio", &support_analog_audio)) {
 		hwlog_err("get support_analog_audio fail!\n");
 		support_analog_audio = 1;
 	}
 	hwlog_info("support_analog_audio = %d!\n", support_analog_audio);
-
-	if (of_property_read_u32(np, "cc_moisture_status_report",
-		&cc_moisture_status_report)) {
-		hwlog_err("get cc_moisture_status_report fail\n");
-		cc_moisture_status_report = 0;
-	}
-	hwlog_info("cc_moisture_status_report = %d\n",
-		cc_moisture_status_report);
-	if (of_property_read_u32(np, "emark_detect_enable",
-		&emark_detect_enable)) {
-		hwlog_err("get emark_detect_enable fail!\n");
-		emark_detect_enable = 1;
-	}
-	hwlog_info("emark_detect_enable = %d!\n", emark_detect_enable);
-
 	return 0;
 }
 
@@ -1832,10 +1565,10 @@ void dp_dfp_u_notify_dp_configuration_done(TCPC_MUX_CTRL_TYPE mode_type, int ack
 static void pd_dpm_handle_ldo_supply_ctrl(struct pd_dpm_combphy_event event, bool enable)
 {
 	if ((event.mode_type != TCPC_NC) && (enable == true))
-		hw_usb_ldo_supply_enable(HW_USB_LDO_CTRL_COMBOPHY);
+		dp_aux_ldo_supply_enable(DP_AUX_LDO_CTRL_COMBOPHY);
 
 	if ((0 == g_ack) && (event.mode_type == TCPC_NC) && (enable == false))
-		hw_usb_ldo_supply_disable(HW_USB_LDO_CTRL_COMBOPHY);
+		dp_aux_ldo_supply_disable(DP_AUX_LDO_CTRL_COMBOPHY);
 }
 
 
@@ -1896,9 +1629,8 @@ static bool pd_dpm_combphy_notify_event_compare(struct pd_dpm_combphy_event even
 }
 int pd_dpm_handle_combphy_event(struct pd_dpm_combphy_event event)
 {
-	int ret = 0;
-
 	hwlog_info("%s +\n", __func__);
+	int ret = 0;
 	mutex_lock(&g_pd_di->pd_combphy_notify_lock);
 	if (g_pd_di->last_combphy_notify_event.dev_type == TCA_DP_IN || g_pd_di->last_combphy_notify_event.dev_type == TCA_DP_OUT || g_pd_di->last_combphy_notify_event.dev_type == TCA_ID_FALL_EVENT) {
 		if ((event.dev_type == TCA_CHARGER_CONNECT_EVENT) || event.dev_type == TCA_CHARGER_DISCONNECT_EVENT) {
@@ -1940,6 +1672,9 @@ static int pd_dpm_probe(struct platform_device *pdev)
 	struct pd_dpm_info *di;
 	enum hisi_charger_type type;
 	hwlog_info("%s +\n", __func__);
+
+	struct dual_role_phy_desc *desc;
+	struct dual_role_phy_instance *dual_role;
 #ifdef CONFIG_CONTEXTHUB_PD
 	pd_dpm_init_combphy_notify_event_buffer();
 #endif
@@ -1957,7 +1692,6 @@ static int pd_dpm_probe(struct platform_device *pdev)
 	mutex_init(&di->sink_vbus_lock);
 
 	BLOCKING_INIT_NOTIFIER_HEAD(&di->pd_evt_nh);
-	BLOCKING_INIT_NOTIFIER_HEAD(&di->pd_port_status_nh);
 	ATOMIC_INIT_NOTIFIER_HEAD(&di->pd_wake_unlock_evt_nh);
 
 	di->usb_nb.notifier_call = pd_dpm_report_bc12;
@@ -1977,11 +1711,6 @@ static int pd_dpm_probe(struct platform_device *pdev)
 	} else {
 		hwlog_info("abnormal_cc_detection = %d \n", abnormal_cc_detection);
 	}
-	if (of_property_read_u32(di->dev->of_node, "abnormal_cc_interval", &abnormal_cc_interval)) {
-		hwlog_err("get abnormal_cc_interval fail!\n");
-		abnormal_cc_interval = PD_DPM_CC_CHANGE_INTERVAL;
-	}
-	hwlog_info("abnormal_cc_interval= %d \n", abnormal_cc_interval);
 
 	if (abnormal_cc_detection)
 		init_fb_notification();
@@ -2004,6 +1733,7 @@ static int pd_dpm_probe(struct platform_device *pdev)
 	di->last_usb_event = PD_DPM_USB_TYPEC_NONE;
 	di->pending_usb_event = PD_DPM_USB_TYPEC_NONE;
 
+	mutex_init(&vboost_ctrl_lock);
 	mutex_init(&di->usb_lock);
 	mutex_init(&typec_state_lock);
 	mutex_init(&typec_wait_lock);
@@ -2017,9 +1747,7 @@ static int pd_dpm_probe(struct platform_device *pdev)
 	di->usb_wq = create_workqueue("pd_dpm_usb_wq");
 	INIT_DELAYED_WORK(&di->usb_state_update_work,
 		pd_dpm_usb_update_state);
-        INIT_DELAYED_WORK(&di->cc_moisture_flag_restore_work,
-                pd_dpm_cc_moisture_flag_restore);
-
+	INIT_WORK(&di->recovery_work, pd_dpm_recovery_work);
 
 	platform_set_drvdata(pdev, di);
 
@@ -2028,6 +1756,12 @@ static int pd_dpm_probe(struct platform_device *pdev)
 
 	type = hisi_get_charger_type();
 
+	di->vconn_en = of_get_named_gpio(di->dev->of_node, "vconn_en", 0);
+	hwlog_info("vconn_en = %d\n", di->vconn_en);
+	if (!gpio_is_valid(di->vconn_en)) {
+		hwlog_err("%s: get vconn_en fail\n", __func__);
+		gpio_free(di->vconn_en);
+	}
 	hwlog_info("%s:  bc12 type = %d \n", __func__, type);
 
 	init_completion(&pd_get_typec_state_completion);
@@ -2036,7 +1770,7 @@ static int pd_dpm_probe(struct platform_device *pdev)
 #endif
 	di->bc12_event = type;
 	cable_detect_ops_register(&cable_detect_ops);
-	hwlog_info("%s - probe ok\n", __func__);
+	hwlog_info("%s -\n", __func__);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(pd_dpm_probe);

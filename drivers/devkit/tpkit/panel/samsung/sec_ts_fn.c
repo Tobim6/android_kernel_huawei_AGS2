@@ -56,7 +56,7 @@ int sec_ts_glove_mode_enables(struct sec_ts_data *ts, bool enable)
 		goto glove_enable_err;
 	}
 
-	TS_LOG_INFO("%s: glove:%d, status:%x\n", __func__,
+	TS_LOG_ERR("%s: glove:%d, status:%x\n", __func__,
 		enable, ts->touch_functions);
 
 	return ret;
@@ -455,10 +455,6 @@ int run_self_delta_read_all(struct sec_ts_data *ts, struct sec_ts_test_mode *mod
 	mode->frame_channel = TEST_MODE_READ_CHANNEL;
 	mode->allnode = TEST_MODE_ALL_NODE;
 
-	if(ts->ic_name == S6SY761X){
-		mode->type = TYPE_RAW_DATA;
-	}
-
 	return sec_ts_read_raw_data(ts, mode);
 }
 
@@ -526,10 +522,10 @@ err_exit:
  */
 int sec_ts_get_rawcap_debug(struct sec_ts_data *ts, struct ts_diff_data_info *info)
 {
-	int i = 0;
+	int i;
 	int ret = NO_ERR;
 	struct sec_ts_test_mode mode;
-	u8 *rBuff = NULL;
+	u8 *rBuff;
 	int result_size = SEC_TS_SELFTEST_REPORT_SIZE + ts->tx_count * ts->rx_count * 2;
 	int raw_count = ts->tx_count * ts->rx_count;
 
@@ -982,15 +978,11 @@ int sec_ts_run_self_test(struct sec_ts_data *ts, struct ts_rawdata_info *info)
 	int raw_count = ts->tx_count * ts->rx_count;
 	int sf_raw_count = ts->tx_count + ts->rx_count;
 	int sf_offset;
-	int ibuff_offset = 0;
 	u8 img_ver[4] = {0,};
 
 	if (ts->power_status == SEC_TS_STATE_POWER_OFF) {
 		TS_LOG_ERR("%s: Touch is stopped!\n", __func__);
 		return -ENOMEM;
-	}
-	if(ts->ic_name == S6SY761X) {
-		wake_lock(&ts->wakelock);//add wakelock ,avoid i2c suspend
 	}
 	raw_count = ts->tx_count * ts->rx_count;
 	memset(info->result, 0, sizeof(info->result));
@@ -1068,9 +1060,6 @@ int sec_ts_run_self_test(struct sec_ts_data *ts, struct ts_rawdata_info *info)
 			__func__, img_ver[0], img_ver[1], img_ver[2], img_ver[3]);
 
 err_exit:
-	if(ts->ic_name == S6SY761X) {
-		wake_unlock(&ts->wakelock);//add wakelock ,avoid i2c suspend
-	}
 	snprintf(result_buff, SEC_CMD_STR_LEN,
 		"[%d,%d,%d],[%d,%d,%d],[%d,%d,%d],[%d,%d,%d];",
 		mode[SEC_TS_RAWCAP_TEST].avg, mode[SEC_TS_RAWCAP_TEST].max, mode[SEC_TS_RAWCAP_TEST].min,
@@ -1086,20 +1075,11 @@ err_exit:
 		TS_LOG_ERR("%s:self test fail panel_reason: %s\n",
 				__func__, result_buff);
 	}
-	ibuff_offset = strlen(result_buff);
 
-	if(ts->ic_name == S6SY761X){
-		snprintf(result_buff + ibuff_offset, SEC_CMD_STR_LEN - ibuff_offset, "%s-%s%s-%x.%x.%x.%x",
-			ts->module_name, SEC_TS_VENDOR_NAME, ts->project_id,
-			img_ver[0], img_ver[1], img_ver[2], img_ver[3]);
-	} else {
-		snprintf(result_buff + ibuff_offset, SEC_CMD_STR_LEN - ibuff_offset, "%s-%s%s-%x.%x.%x.%x",
+	snprintf(result_buff + strlen(result_buff), SEC_CMD_STR_LEN, "%s-%s%s-%x.%x.%x.%x",
 			ts->module_name, SEC_TS_VENDOR_NAME, SEC_TS_HW_PROJECTID,
 			img_ver[0], img_ver[1], img_ver[2], img_ver[3]);
-	}
-
-	strncat(info->result, result_buff, TS_RAWDATA_RESULT_MAX-1);
-	TS_LOG_INFO("%s, %s\n", __func__, info->result);
+	strncat(info->result, result_buff, SEC_CMD_STR_LEN);
 
 	return ret;
 }

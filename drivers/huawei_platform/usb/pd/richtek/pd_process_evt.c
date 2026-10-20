@@ -265,9 +265,6 @@ bool pd_process_protocol_error(
 	case PE_BIST_TEST_DATA:
 		PE_DBG("Igrone Unknown Event\r\n");
 		return false;
-	default:
-		PE_DBG("Miss match\r\n");
-		break;
 	};
 
 	if (pd_port->tcpc_dev->pd_wait_hard_reset_complete) {
@@ -289,44 +286,6 @@ bool pd_process_protocol_error(
 		PE_TRANSIT_SEND_SOFT_RESET_STATE(pd_port);
 
 	return true;
-}
-
-#ifdef CONFIG_USB_PD_RESET_CABLE
-static inline bool pd_process_cable_ctrl_msg_accept(
-	pd_port_t *pd_port, pd_event_t *pd_event)
-{
-	switch (pd_port->pe_state_curr) {
-#ifdef CONFIG_PD_SRC_RESET_CABLE
-	case PE_SRC_CBL_SEND_SOFT_RESET:
-		vdm_put_dpm_discover_cable_event(pd_port);
-		return false;
-#endif /* CONFIG_PD_SRC_RESET_CABLE */
-
-#ifdef CONFIG_PD_DFP_RESET_CABLE
-	case PE_DFP_CBL_SEND_SOFT_RESET:
-		PE_TRANSIT_READY_STATE(pd_port);
-		return true;
-#endif /* CONFIG_PD_DFP_RESET_CABLE */
-	}
-
-	return false;
-}
-#endif /* CONFIG_USB_PD_RESET_CABLE */
-
-static inline bool pd_process_event_cable(
-	pd_port_t *pd_port, pd_event_t *pd_event)
-{
-	bool ret = false;
-
-#ifdef CONFIG_USB_PD_RESET_CABLE
-	if (pd_event->msg == PD_CTRL_ACCEPT)
-		ret = pd_process_cable_ctrl_msg_accept(pd_port, pd_event);
-#endif /* CONFIG_USB_PD_RESET_CABLE */
-
-	if (!ret)
-		PE_DBG("Ignore not SOP Ctrl Msg\n");
-
-	return ret;
 }
 
 bool pd_process_data_msg_bist(
@@ -582,22 +541,6 @@ bool pd_process_dpm_msg_softreset(
 	return true;
 }
 
-static inline int pd_handle_tcp_event_cable_softreset(pd_port_t *pd_port)
-{
-#ifdef CONFIG_PD_DFP_RESET_CABLE
-	if (!pd_check_pe_state_ready(pd_port))
-		return false;
-
-	if (pd_port->data_role != PD_ROLE_DFP)
-		return false;
-
-	PE_TRANSIT_STATE(pd_port, PE_DFP_CBL_SEND_SOFT_RESET);
-	return true;
-#else
-	return false;
-#endif /* CONFIG_PD_DFP_RESET_CABLE */
-}
-
 bool pd_process_dpm_msg_hardreset(
 	pd_port_t *pd_port, pd_event_t *pd_event)
 {
@@ -684,10 +627,6 @@ bool pd_process_event_dpm_pd_request(
 
 	case PD_DPM_PD_REQUEST_SOFTRESET:
 		ret = pd_process_dpm_msg_softreset(pd_port, pd_event);
-		break;
-
-	case PD_DPM_PD_REQUEST_CBL_SOFTRESET:
-		ret = pd_handle_tcp_event_cable_softreset(pd_port);
 		break;
 
 	case PD_DPM_PD_REQUEST_HARDRESET:
@@ -890,7 +829,7 @@ static inline bool pe_exit_idle_state(
 
 #ifdef CONFIG_USB_PD_RECV_HRESET_COUNTER
 	pd_port->recv_hard_reset_count = 0;
-#endif /* CONFIG_USB_PD_RECV_HRESET_COUNTER */
+#endif	/* CONFIG_USB_PD_RECV_HRESET_COUNTER */
 
 	pd_port->pe_ready = 0;
 	pd_port->pd_connected = 0;
@@ -1006,8 +945,10 @@ bool pd_process_event(pd_port_t *pd_port, pd_event_t *pd_event, bool vdm_evt)
 
 	if ((pd_event->event_type == PD_EVT_CTRL_MSG) &&
 		(pd_event->msg != PD_CTRL_GOOD_CRC) &&
-		(pd_event->pd_msg->frame_type != TCPC_TX_SOP))
-		return pd_process_event_cable(pd_port, pd_event);
+		(pd_event->pd_msg->frame_type != TCPC_TX_SOP)) {
+		PE_DBG("Igrone not SOP Ctrl Msg\r\n");
+		return false;
+	}
 
 	if (pd_event_msg_match(pd_event, PD_EVT_DPM_MSG, PD_DPM_PD_REQUEST))
 		return pd_process_event_dpm_pd_request(pd_port, pd_event);

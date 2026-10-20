@@ -39,9 +39,7 @@
 #endif
 #include <linux/raid/pq.h>
 #include <huawei_platform/power/huawei_charger_sh.h>
-#ifdef CONFIG_HISI_BCI_BATTERY
 #include <linux/power/hisi/hisi_bci_battery.h>
-#endif
 #include <huawei_platform/power/charger/charger_ap/bq25892/bq25892_charger.h>
 #include <linux/hisi/hisi_adc.h>
 #include <inputhub_route.h>
@@ -364,7 +362,7 @@ static ssize_t bq25892_sysfs_store(struct device *dev,
 		info->reg = info2->reg;
 	}
 	if (!strncmp(("reg_addr"), attr->attr.name, strlen("reg_addr"))) {
-		if (v < (u8) BQ25892_REG_TOTAL_NUM) {
+		if (v < (u8) BQ25892_REG_TOTAL_NUM && v >= (u8) 0x00) {
 			info->reg = v;
 			return count;
 		} else {

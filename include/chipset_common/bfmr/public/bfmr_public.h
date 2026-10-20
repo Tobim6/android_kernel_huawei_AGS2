@@ -59,9 +59,6 @@ typedef enum BFM_ERRNO_CODE
     BL1_BL2_LOAD_FAIL,
     BL1_BL2_VERIFY_FAIL,
     BL1_WDT,
-    BL1_BOOT_ERR_STORAGE,
-    BL1_BOOT_ERR_POWERMGMT,
-    BL1_BOOT_ERR_SECURITY,
 
     /* PL1 -- Platform 1 -- it's only for hisi */
     BL1_PL1_START = (BL1_STAGE <<24)|(HISI_PLATFORM<<16),
@@ -115,10 +112,6 @@ typedef enum BFM_ERRNO_CODE
     BL2_EMMC_INIT_FAIL,
     BL2_PANIC,
     BL2_WDT,
-    BL2_BOOT_ERR_STORAGE,
-    BL2_BOOT_ERR_POWERMGMT,
-    BL2_BOOT_ERR_DISPLAY,
-    BL2_BOOT_ERR_SECURITY,
 
     /* PL1 -- Platform 1 -- it's only for hisi */
     BL2_PL1_START = (BL2_STAGE <<24)|(HISI_PLATFORM<<16),
@@ -132,7 +125,6 @@ typedef enum BFM_ERRNO_CODE
     BL2_FASTBOOT_S_LOADLPMCU_FAIL,
     BL2_FASTBOOT_S_IMG_VERIFY_FAIL,
     BL2_FASTBOOT_S_SOC_TEMP_ERR,
-    BL2_PL1_BAT_LOW_POWER,
 
     /* PL2 -- Platform 2 -- it's only for qualcomm */
     BL2_PL2_START = (BL2_STAGE <<24)|(QUALCOMM_PLATFORM<<16),
@@ -151,20 +143,6 @@ typedef enum BFM_ERRNO_CODE
     KERNEL_PRESS10S,
     KERNEL_BOOT_TIMEOUT,
     KERNEL_AP_COMBINATIONKEY,
-    KERNEL_BOOT_ERR_STORAGE,
-    KERNEL_BOOT_ERR_POWERMGMT,
-    KERNEL_BOOT_ERR_TASKSCHED,
-    KERNEL_BOOT_ERR_CAMERA,
-    KERNEL_BOOT_ERR_AUDIO,
-    KERNEL_BOOT_ERR_SENSOR,
-    KERNEL_BOOT_ERR_BT,
-    KERNEL_BOOT_ERR_WIFI,
-    KERNEL_BOOT_ERR_GPS,
-    KERNEL_BOOT_ERR_NFC,
-    KERNEL_BOOT_ERR_TP,
-    KERNEL_BOOT_ERR_DISPLAY,
-    KERNEL_BOOT_ERR_MODEM,
-    KERNEL_BOOT_ERR_SECURITY,
 
     KERNEL_PL1_START = (KERNEL_STAGE <<24)|(HISI_PLATFORM<<16),
     KERNEL_AP_S_ABNORMAL,
@@ -228,52 +206,14 @@ typedef enum BFM_ERRNO_CODE
     DATA_NOSPC, /* added by qidechun, NOSPC means data partition is full */
     VENDOR_MOUNT_FAIL,
     NATIVE_PANIC,
-    NATIVE_BOOT_ERR_STORAGE,
-    NATIVE_BOOT_ERR_POWERMGMT,
-    NATIVE_BOOT_ERR_TASKSCHED,
-    NATIVE_BOOT_ERR_CAMERA,
-    NATIVE_BOOT_ERR_AUDIO,
-    NATIVE_BOOT_ERR_SENSOR,
-    NATIVE_BOOT_ERR_BT,
-    NATIVE_BOOT_ERR_WIFI,
-    NATIVE_BOOT_ERR_GPS,
-    NATIVE_BOOT_ERR_NFC,
-    NATIVE_BOOT_ERR_TP,
-    NATIVE_BOOT_ERR_DISPLAY,
-    NATIVE_BOOT_ERR_MODEM,
-    NATIVE_BOOT_ERR_SECURITY,
-    MAPLE_ESCAPE_DLOPEN_MRT, /*maple system boot failed cause by dlopen libandroidmpl-rt.so */
-    MAPLE_ESCAPE_CRITICAL_CRASH, /*maple system 'mygote'and 'maple system server' crash 4 times at 4 minutes*/
-    MAPLE_CRITICAL_CRASH_MYGOTE_DATA, /*mygote data caused crash*/
-    MAPLE_CRITICAL_CRASH_SYSTEMSERVER_DATA, /*sysvr data caused crash*/
+
     /* android frameworkl stage's bootFail errors */
     ANDROID_FRAMEWORK_ERRNO_START = (ANDROID_FRAMEWORK_STAGE <<24)|(COMMON_PLATFORM<<16),
     SYSTEM_SERVICE_LOAD_FAIL,
     PREBOOT_BROADCAST_FAIL,
     VM_OAT_FILE_DAMAGED,
     PACKAGE_MANAGER_SETTING_FILE_DAMAGED,
-    FRK_USER_DATA_DAMAGED,
-    FRK_BOOT_ERR_RUNTIME,
-    FRK_BOOT_ERR_GRAPHIC_BOOT_ERR,
-    FRK_BOOT_ERR_GOOGLEVERSION,
-    FRK_BOOT_ERR_LOCATION_SERVICE,
-    FRK_BOOT_ERR_IPC,
-    FRK_BOOT_ERR_DATASTORAGE,
-    FRK_BOOT_ERR_SYSTEM_RES,
-    FRK_BOOT_ERR_SECURITYMGMT,
-    FRK_BOOT_ERR_APPMGMT,
-    FRK_BOOT_ERR_DYNAMIC_BASE_ABILITY,
-    FRK_BOOT_ERR_SURFACEFLINGER,
-    FRK_BOOT_ERR_WNDMGMTSERVICE,
-    FRK_BOOT_ERR_IMGENGINE,
-    FRK_BOOT_ERR_CONTROLFRAME,
-    FRK_BOOT_ERR,
-    APP_BOOT_ERR,
 
-	HARDWARE_ERRNO_START = 0x7fff0000,
-    STORAGE_RDONLY=0x7ffffffb,
-    BFM_HARDWARE_FAULT = 0x7ffffffc,
-	HARDWARE_ERRNO_END = BFM_HARDWARE_FAULT,
     BOOTUP_SLOWLY = 0x7ffffffd,
     POWEROFF_ABNORMAL = 0x7ffffffe,
     BFM_ERRNO_MAX_COUNT,
@@ -364,18 +304,12 @@ typedef enum BFM_BOOT_STAGE_CODE
     /* native stage */
     NATIVE_STAGE_START = (NATIVE_STAGE <<24)|(COMMON_PLATFORM<<16),
     STAGE_INIT_START,
-    STAGE_RESIZE_FS_START,
-    STAGE_RESIZE_FS_END,
-    STAGE_CHECK_FS_START,
-    STAGE_CHECK_FS_END,
     STAGE_ON_EARLY_INIT,
     STAGE_ON_INIT,
     STAGE_ON_EARLY_FS,
     STAGE_ON_FS,
     STAGE_ON_POST_FS,
     STAGE_ON_POST_FS_DATA,
-    STAGE_RESTORECON_START,
-    STAGE_RESTORECON_END,
     STAGE_ON_EARLY_BOOT,
     STAGE_ON_BOOT,
 
@@ -388,16 +322,6 @@ typedef enum BFM_BOOT_STAGE_CODE
     STAGE_PHASE_SYSTEM_SERVICES_READY,
     STAGE_PHASE_ACTIVITY_MANAGER_READY,
     STAGE_PHASE_THIRD_PARTY_APPS_CAN_START,
-    STAGE_FRAMEWORK_JAR_DEXOPT_START,
-    STAGE_FRAMEWORK_JAR_DEXOPT_END,
-    STAGE_APP_DEXOPT_START,
-    STAGE_APP_DEXOPT_END,
-    STAGE_PHASE_BOOT_COMPLETED,
-
-    STAGE_SYSTEM_SERVER_DEX2OAT_START = ANDROID_FRAMEWORK_STAGE_START + 0x20 + 0x01,
-    STAGE_SYSTEM_SERVER_DEX2OAT_END,
-    STAGE_SYSTEM_SERVER_INIT_START,
-    STAGE_SYSTEM_SERVER_INIT_END,
 
     STAGE_BOOT_SUCCESS = 0x7FFFFFFF,
 } bfmr_detail_boot_stage_e;
@@ -405,21 +329,20 @@ typedef enum BFM_BOOT_STAGE_CODE
 
 /*----export macroes-----------------------------------------------------------------*/
 
-#define bfmr_is_bl1_errno(x) (((x) & (0xFF <<24)) ==  (((unsigned int)BL1_STAGE) <<24))
-#define bfmr_is_bl2_errno(x) (((x) & (0xFF <<24)) ==  (((unsigned int)BL2_STAGE) <<24))
-#define bfmr_is_kernel_errno(x) (((x) & (0xFF <<24)) ==  (((unsigned int)KERNEL_STAGE) <<24))
-#define bfmr_is_native_errno(x) (((x) & (0xFF <<24)) ==  (((unsigned int)NATIVE_STAGE) <<24))
-#define bfmr_is_android_framework_errno(x) (((x) & (0xFF <<24)) ==  (((unsigned int)ANDROID_FRAMEWORK_STAGE) <<24))
+#define bfmr_is_bl1_errno(x) (((x) & (0xFF <<24)) ==  (BL1_STAGE <<24))
+#define bfmr_is_bl2_errno(x) (((x) & (0xFF <<24)) ==  (BL2_STAGE <<24))
+#define bfmr_is_kernel_errno(x) (((x) & (0xFF <<24)) ==  (KERNEL_STAGE <<24))
+#define bfmr_is_native_errno(x) (((x) & (0xFF <<24)) ==  (NATIVE_STAGE <<24))
+#define bfmr_is_android_framework_errno(x) (((x) & (0xFF <<24)) ==  (ANDROID_FRAMEWORK_STAGE <<24))
 
 #define bfmr_is_boot_success(x) ((x) == STAGE_BOOT_SUCCESS)
-#define bfmr_is_bl1_stage(x) ((((x) & (0xFF <<24)) ==  (((unsigned int)BL1_STAGE <<24))) && ! bfmr_is_boot_success(x))
-#define bfmr_is_bl2_stage(x) (((x) & (0xFF <<24)) ==  (((unsigned int)BL2_STAGE) <<24))
-#define bfmr_is_kernel_stage(x) (((x) & (0xFF <<24)) ==  (((unsigned int)KERNEL_STAGE) <<24))
-#define bfmr_is_native_stage(x) (((x) & (0xFF <<24)) ==  (((unsigned int)NATIVE_STAGE) <<24))
-#define bfmr_is_android_framework_stage(x) (((x) & (0xFF <<24)) ==  (((unsigned int)ANDROID_FRAMEWORK_STAGE) <<24))
+#define bfmr_is_bl1_stage(x) ((((x) & (0xFF <<24)) ==  (BL1_STAGE <<24)) && ! bfmr_is_boot_success(x))
+#define bfmr_is_bl2_stage(x) (((x) & (0xFF <<24)) ==  (BL2_STAGE <<24))
+#define bfmr_is_kernel_stage(x) (((x) & (0xFF <<24)) ==  (KERNEL_STAGE <<24))
+#define bfmr_is_native_stage(x) (((x) & (0xFF <<24)) ==  (NATIVE_STAGE <<24))
+#define bfmr_is_android_framework_stage(x) (((x) & (0xFF <<24)) ==  (ANDROID_FRAMEWORK_STAGE <<24))
 
 #define bfmr_get_boot_stage_from_bootfail_errno(x) ((((unsigned int)(x)) >> 24) & (0xFF))
-#define bfmr_get_boot_stage_from_detail_stage(x) ((((unsigned int)(x)) >> 24) & (0xFF))
 
 #define BFMR_MAX(a, b) (((a) > (b)) ? (a) : (b))
 #define BFMR_MIN(a, b) (((a) < (b)) ? (a) : (b))

@@ -303,7 +303,13 @@ static ssize_t pm_wakeup_irq_show(struct kobject *kobj,
 	return pm_wakeup_irq ? sprintf(buf, "%u\n", pm_wakeup_irq) : -ENODATA;
 }
 
-power_attr_ro(pm_wakeup_irq);
+static ssize_t pm_wakeup_irq_store(struct kobject *kobj,
+					struct kobj_attribute *attr,
+					const char *buf, size_t n)
+{
+	return -EINVAL;
+}
+power_attr(pm_wakeup_irq);
 
 #else /* !CONFIG_PM_SLEEP_DEBUG */
 static inline void pm_print_times_init(void) {}
@@ -581,7 +587,14 @@ static ssize_t pm_trace_dev_match_show(struct kobject *kobj,
 	return show_trace_dev_match(buf, PAGE_SIZE);
 }
 
-power_attr_ro(pm_trace_dev_match);
+static ssize_t
+pm_trace_dev_match_store(struct kobject *kobj, struct kobj_attribute *attr,
+			 const char *buf, size_t n)
+{
+	return -EINVAL;
+}
+
+power_attr(pm_trace_dev_match);
 
 #endif /* CONFIG_PM_TRACE */
 
@@ -660,7 +673,6 @@ static int __init pm_init(void)
 		return error;
 	hibernate_image_size_init();
 	hibernate_reserved_size_init();
-	pm_states_init();
 	power_kobj = kobject_create_and_add("power", NULL);
 	if (!power_kobj)
 		return -ENOMEM;

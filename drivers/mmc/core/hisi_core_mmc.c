@@ -2,15 +2,12 @@
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/pm_runtime.h>
+
+
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/mmc.h>
-#include <linux/mfd/hisi_pmic_mntn.h>
-#include <linux/hisi/rdr_pub.h>
-#include <linux/reboot.h>
-#include <linux/hisi/mmc_trace.h>
-#include <linux/hisi/rdr_hisi_platform.h>
-#include <linux/version.h>
+
 #include "core.h"
 #include "bus.h"
 #include "host.h"
@@ -20,14 +17,12 @@
 #include "sd_ops.h"
 #include "sdio_ops.h"
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-#include "card.h"
-#endif
 
+
+/*lint -e730 -e747*/
 extern void mmc_set_ios(struct mmc_host *host);
 extern void mmc_bus_get(struct mmc_host *host);
 extern void mmc_bus_put(struct mmc_host *host);
-extern int mmc_blk_is_retryable(struct mmc_host *mmc);
 #ifdef CONFIG_MMC_CQ_HCI
 extern void mmc_blk_cmdq_dishalt(struct mmc_card *card);
 extern int cmdq_is_reset(struct mmc_host *host);
@@ -37,9 +32,6 @@ extern int mmc_blk_cmdq_halt(struct mmc_card *card);
 bool g_mmc_reset_status;
 #endif
 
-#if defined(CONFIG_HISI_DEBUG_FS)
-extern unsigned int sd_test_reset_flag;
-#endif
 
 void mmc_power_up_vcc(struct mmc_host *host,u32 ocr)
 {
@@ -87,22 +79,6 @@ void mmc_power_off_vcc(struct mmc_host *host)
 	 * can be successfully turned on again.
 	 */
 	mmc_delay(1);
-}
-
-void hisi_mmc_power_off(struct mmc_host *host)
-{
-	if (mmc_card_removable_mmc(host->card))
-		mmc_power_off(host);
-	else
-		mmc_power_off_vcc(host);
-}
-
-void hisi_mmc_power_up(struct mmc_host *host)
-{
-	if (mmc_card_removable_mmc(host->card))
-		mmc_power_up(host, host->card->ocr);
-	else
-		mmc_power_up_vcc(host, host->card->ocr);
 }
 
 
@@ -237,26 +213,21 @@ int mmc_card_sleepawake(struct mmc_host *host, int sleep)
 
 void mmc_decode_ext_csd_emmc50(struct mmc_card *card, u8 *ext_csd)
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 76))
-	card->ext_csd.pre_eol_info = ext_csd[EXT_CSD_PRE_EOL_INFO];
-	card->ext_csd.device_life_time_est_typ_a = ext_csd[EXT_CSD_DEVICE_LIFE_TIME_EST_TYP_A];
-	card->ext_csd.device_life_time_est_typ_b = ext_csd[EXT_CSD_DEVICE_LIFE_TIME_EST_TYP_B];
-#endif
-	card->ext_csd.raw_sleep_noti_time = ext_csd[EXT_CSD_SLEEP_NOTIFICATION_TIME];
-	if (card->ext_csd.raw_sleep_noti_time > 0 && card->ext_csd.raw_sleep_noti_time <= 0x17)
-	{
-		card->ext_csd.sleep_notification_time = ((unsigned int)1 << card->ext_csd.raw_sleep_noti_time) / 100;/*ms, raw_sleep_noti_time Units: 10us */
-		pr_debug("%s: support SLEEP_NOTIFICATION. sleep_notification_time=%d ms\n", mmc_hostname(card->host), card->ext_csd.sleep_notification_time);
-	}
+		card->ext_csd.raw_sleep_noti_time = ext_csd[EXT_CSD_SLEEP_NOTIFICATION_TIME];
+		if (card->ext_csd.raw_sleep_noti_time > 0 && card->ext_csd.raw_sleep_noti_time <= 0x17)
+		{
+			card->ext_csd.sleep_notification_time = ((unsigned int)1 << card->ext_csd.raw_sleep_noti_time) / 100;/*ms, raw_sleep_noti_time Units: 10us */
+			pr_debug("%s: support SLEEP_NOTIFICATION. sleep_notification_time=%d ms\n", mmc_hostname(card->host), card->ext_csd.sleep_notification_time);
+		}
 
 #ifdef CONFIG_MMC_CQ_HCI
-	card->ext_csd.cmdq_support = ext_csd[EXT_CSD_CMDQ_SUPPORT] & 0x1;
-	if (card->ext_csd.cmdq_support) {
-		card->ext_csd.cmdq_depth = (ext_csd[EXT_CSD_CMDQ_DEPTH] & 0x1F) + 1;
-		pr_err("%s: %s: CMDQ supported: depth: %d\n",
-			mmc_hostname(card->host), __func__,
-			card->ext_csd.cmdq_depth);
-	}
+		card->ext_csd.cmdq_support = ext_csd[EXT_CSD_CMDQ_SUPPORT] & 0x1;
+		if (card->ext_csd.cmdq_support) {
+			card->ext_csd.cmdq_depth = (ext_csd[EXT_CSD_CMDQ_DEPTH] & 0x1F) + 1;
+			pr_err("%s: %s: CMDQ supported: depth: %d\n",
+				mmc_hostname(card->host), __func__,
+				card->ext_csd.cmdq_depth);
+		}
 #endif
 }
 
@@ -470,21 +441,9 @@ err_handle:
 }
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-
-void mmc_process_ap_err(struct mmc_card *card)
-{
-	/*mmc removed card will reset fail when operate card,so just print warning*/
-	if (mmc_card_removable_mmc(card))
-		WARN_ON(1);
-	else
-		rdr_syserr_process_for_ap((u32)MODID_AP_S_PANIC_Storage, 0ull, 0ull);
-}
-
 int hisi_mmc_reset(struct mmc_host *host)
 {
 	int ret;
-	int retry = 3;
-	unsigned long timeout;
 	struct mmc_card *card = host->card;
 
 	pr_err("%s enter\n", __func__);
@@ -492,38 +451,18 @@ int hisi_mmc_reset(struct mmc_host *host)
 	g_mmc_reset_status = true;
 #endif
 
+
 	if (!host->ops->hw_reset)
 		return -EOPNOTSUPP;
 
-	do {
-		if (host->is_coldboot_on_reset_fail) {
-			mmc_set_cold_reset(host);
-			timeout = jiffies + 10*60*HZ;
-			mod_timer(&host->err_handle_timer, timeout);
-		}
+	host->ops->hw_reset(host);
 
-		host->ops->hw_reset(host);
+	mmc_power_off(host);
+	mdelay(200);
+	mmc_power_up(host, host->card->ocr);
 
-		mmc_power_off(host);
-		mdelay(200);
-		mmc_power_up(host, host->card->ocr);
-
-		ret = host->bus_ops->power_restore(host);
-	} while (--retry && ret);
-
-	if (ret) {
-		if (host->is_coldboot_on_reset_fail) {
-#ifdef CONFIG_HISI_BB
-			rdr_syserr_process_for_ap(RDR_MODID_MMC_COLDBOOT, 0, 0);
-#else
-			machine_restart("AP_S_EMMC_COLDBOOT");
-#endif
-		} else {
-			mmc_process_ap_err(card);
-		}
-	}
-
-	pr_err("%s exit\n", __func__);
+	ret = host->bus_ops->power_restore(host);
+	pr_err("%s exit,ret=%d\n", __func__, ret);
 #ifdef CONFIG_EMMC_FAULT_INJECT
 	g_mmc_reset_status = false;
 #endif
@@ -543,16 +482,14 @@ static int __mmc_send_status_direct(struct mmc_card *card, u32 *status,
 	struct mmc_request mrq = {NULL};
 	struct mmc_host *host;
 
-	if (!card)
-		rdr_syserr_process_for_ap((u32)MODID_AP_S_PANIC_Storage, 0ull, 0ull);
-	if (!card->host)/*lint !e613*/
-		rdr_syserr_process_for_ap((u32)MODID_AP_S_PANIC_Storage, 0ull, 0ull);
+	BUG_ON(!card);/*lint !e730*/
+	BUG_ON(!card->host);/*lint !e730*/
 
-	host = card->host;/*lint !e613*/
+	host = card->host;
 	cmd.opcode = MMC_SEND_STATUS;
-	if (!mmc_host_is_spi(card->host))/*lint !e613*/
-		cmd.arg = card->rca << 16;/*lint !e613*/
-	cmd.flags = MMC_RSP_SPI_R2 | MMC_RSP_R1 | MMC_CMD_AC;
+	if (!mmc_host_is_spi(card->host))
+		cmd.arg = card->rca << 16;
+	cmd.flags = MMC_RSP_SPI_R2 | MMC_RSP_R1 | MMC_CMD_AC;/*lint !e845*/
 	if (ignore_crc)
 		cmd.flags &= ~MMC_RSP_CRC;
 
@@ -589,11 +526,9 @@ int mmc_switch_irq_safe(struct mmc_card *card, u8 set, u8 index, u8 value)
 	u32 status = 0;
 	u32 cmd_retries = 10;
 
-	if (!card)
-		rdr_syserr_process_for_ap((u32)MODID_AP_S_PANIC_Storage, 0ull, 0ull);
-	if (!card->host)/*lint !e613*/
-		rdr_syserr_process_for_ap((u32)MODID_AP_S_PANIC_Storage, 0ull, 0ull);
-	host = card->host;/*lint !e613*/
+	BUG_ON(!card);/*lint !e730*/
+	BUG_ON(!card->host);/*lint !e730*/
+	host = card->host;
 
 	cmd.opcode = MMC_SWITCH;
 	cmd.arg = (MMC_SWITCH_MODE_WRITE_BYTE << 24) |
@@ -630,14 +565,14 @@ int mmc_switch_irq_safe(struct mmc_card *card, u8 set, u8 index, u8 value)
 		 */
 		if (--cmd_retries == 0) {
 			pr_err("%s: Card stuck in programming state! %s\n",
-				mmc_hostname(host), __func__);
+				mmc_hostname(host), __func__);/*lint !e613*/
 			return -ETIMEDOUT;
 		}
 	} while (R1_CURRENT_STATE(status) == R1_STATE_PRG);
 
 	if (status & 0xFDFFA000)
 		pr_warn("%s: unexpected status %#x after switch\n",
-			mmc_hostname(host), status);
+			mmc_hostname(host), status);/*lint !e613*/
 	if (status & R1_SWITCH_ERROR)
 		return -EBADMSG;
 
@@ -656,7 +591,7 @@ int mmc_try_claim_host(struct mmc_host *host)
 	unsigned long flags;
 	bool pm = false;
 
-	if(!spin_trylock_irqsave(&host->lock, flags))/*lint !e666*/
+	if(!spin_trylock_irqsave(&host->lock, flags))/*lint !e730 !e550 !e1072 !e666*/
 		return 0;
 
 	if (!host->claimed || host->claimer == current) {
@@ -679,7 +614,7 @@ EXPORT_SYMBOL(mmc_try_claim_host);
  * This is a helper function, which fetches a runtime pm reference for the
  * card device and also claims the host.
  */
-
+/*lint -save -e715*/
 int mmc_get_card_hisi(struct mmc_card *card, bool use_irq)
 {
 	int claimed = 0;
@@ -690,13 +625,10 @@ int mmc_get_card_hisi(struct mmc_card *card, bool use_irq)
 		claimed = mmc_try_claim_host(card->host);
 		if (claimed)
 			break;
-		udelay(10);
+		udelay(10);/*lint !e778 !e774 !e747*/
 	}while(--try_count>0);
 	if (!claimed) {
-		pr_err("%s try to claim host failed, claimed:%d, claimer:%s, claim_cnt:%d\n",
-			__func__, card->host->claimed,
-			card->host->claimer ? card->host->claimer->comm : "NULL",
-			card->host->claim_cnt);
+		pr_err("%s try to claim host failed\n", __func__);
 		ret = -EIO;
 		goto out;
 	}
@@ -734,6 +666,7 @@ release_host:
 out:
 	return ret;
 }
+/*lint -restore*/
 
 void mmc_put_card_irq_safe(struct mmc_card *card)
 {
@@ -796,7 +729,6 @@ static void dw_mmc_sd_downshift(struct mmc_card *card)
 /*********************sd ops begin**********************/
 static int mmc_do_sd_reset(struct mmc_host *host)
 {
-	int ret = 0;
 	struct mmc_card *card = host->card;
 #ifdef CONFIG_SD_SDIO_CRC_RETUNING
 	/*Only do retuning once,to ensure if the retuning function cant fix the error,we can do reset*/
@@ -807,16 +739,6 @@ static int mmc_do_sd_reset(struct mmc_host *host)
 		}
 	}
 #endif
-	/*reset card only once after init card*/
-	if (mmc_blk_is_retryable(host)) {
-		if (host->reset_count > 3)
-			return -EOPNOTSUPP;
-	} else {
-		if (host->reset_count > 0)
-			return -EOPNOTSUPP;
-	}
-
-	host->reset_count ++;
 
              /*make sure if we need slowdown sd clk*/
 	if (host->ops->downshift && host->card) {
@@ -834,10 +756,6 @@ static int mmc_do_sd_reset(struct mmc_host *host)
 	if (host->ops->hw_reset)
 		host->ops->hw_reset(host);
 
-	/*clear the reset flag after reset has been done*/
-#if defined(CONFIG_HISI_DEBUG_FS)
-	sd_test_reset_flag = 0;
-#endif
 	/* Only for K930/920 SD slow down clk*/
 	if (host->ops->slowdown_clk)
 		host->ops->slowdown_clk(host, host->ios.timing);
@@ -849,10 +767,7 @@ static int mmc_do_sd_reset(struct mmc_host *host)
 	mmc_power_up(host,host->card->ocr);
 	(void)mmc_select_voltage(host, host->card->ocr);
 
-	ret = host->bus_ops->power_restore(host);
-	if(0 == ret)
-		host->reset_count = 0;
-	return ret;
+	return host->bus_ops->power_restore(host);
 }
 
 #ifdef CONFIG_SD_SDIO_CRC_RETUNING
@@ -945,25 +860,5 @@ int mmc_power_restore_host_for_wifi(struct mmc_host *host)
 	return ret;
 }
 EXPORT_SYMBOL(mmc_power_restore_host_for_wifi);
+/*lint +e730 +e747*/
 
-
-void mmc_error_handle_timeout_timer(unsigned long data)
-{
-	unsigned long flags;
-	struct mmc_host *host = (struct mmc_host*)data;;
-
-	spin_lock_irqsave(&host->lock, flags);
-	host->reset_num = 0;
-	hisi_pmic_set_cold_reset(PMIC_HRESET_HOT);
-	spin_unlock_irqrestore(&host->lock, flags);
-}
-
-void mmc_set_cold_reset(struct mmc_host *host)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&host->lock, flags);
-	hisi_pmic_set_cold_reset(PMIC_HRESET_COLD);
-	host->reset_num++;
-	spin_unlock_irqrestore(&host->lock, flags);
-}

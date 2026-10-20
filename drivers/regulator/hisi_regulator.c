@@ -39,8 +39,6 @@
 #endif
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_PMIC_REGULATOR_TAG
 
 #if 1
 #define BRAND_DEBUG(args...) pr_debug(args);

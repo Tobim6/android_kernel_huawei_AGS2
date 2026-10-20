@@ -414,12 +414,6 @@ static int ak8789_get_common_configs(struct hall_device *hall_dev,
 	if (ret)
 		hwlog_warn("Failed to get gpio_type; ret:%d\n", ret);
 
-	ret = of_property_read_u32(node, HALL_INT_DELAY, &hall_dev->hall_int_delay);
-	if (ret){
-		hwlog_warn("Failed to get int delay time ret:%d, choose default 50ms\n", ret);
-		hall_dev->hall_int_delay = HALL_DEFAULT_INT_DELAY;
-	}
-
 	hwlog_info("[%s] get conf successed\n", __func__);
 	return 0;
 
@@ -463,12 +457,8 @@ static irqreturn_t ak8789_event_handler(int irq, void *hall_dev)
 	if (hall_gpio_type & 0x01) {
 		if (trig_val & IRQF_TRIGGER_FALLING) {
 			ret = irq_set_irq_type(irq, IRQF_TRIGGER_RISING);
-			if (ret < 0)
-				hwlog_err("set irq type err\n");
 		} else if (trig_val & IRQF_TRIGGER_RISING) {
 			ret = irq_set_irq_type(irq, IRQF_TRIGGER_FALLING);
-			if (ret < 0)
-				hwlog_err("set irq type err\n");
 		} else {
 			/*hwlog_err("Invalid trigger:%d\n", trig_val);*/
 			return IRQ_NONE;
@@ -476,12 +466,8 @@ static irqreturn_t ak8789_event_handler(int irq, void *hall_dev)
 	} else {
 		if (trig_val & IRQF_TRIGGER_LOW) {
 			ret = irq_set_irq_type(irq, IRQF_TRIGGER_HIGH);
-			if (ret < 0)
-				hwlog_err("set irq type err\n");
 		} else if (trig_val & IRQF_TRIGGER_HIGH) {
 			ret = irq_set_irq_type(irq, IRQF_TRIGGER_LOW);
-			if (ret < 0)
-				hwlog_err("set irq type err\n");
 		} else {
 			/*hwlog_err("Invalid trigger:%d\n", trig_val);*/
 			return IRQ_NONE;
@@ -524,7 +510,7 @@ static irqreturn_t ak8789_event_handler(int irq, void *hall_dev)
 	h_dev->h_info.last_time[index].tv_sec = now.tv_sec;
 	h_dev->h_info.last_time[index].tv_usec = now.tv_usec;
 #endif
-	queue_delayed_work(data->hall_wq, &h_dev->h_delayed_work, msecs_to_jiffies(h_dev->hall_int_delay));
+	queue_delayed_work(data->hall_wq, &h_dev->h_delayed_work, HZ / 20);
 
 	return IRQ_HANDLED;
 }

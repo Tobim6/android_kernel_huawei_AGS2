@@ -18,7 +18,3 @@ obj-$(CONFIG_INPUTHUB_20)  += contexthub_pm.o
 obj-$(CONFIG_INPUTHUB_20)  += ca_channel.o
 obj-$(CONFIG_INPUTHUB_20)  += fingerprint_channel.o
 obj-$(CONFIG_INPUTHUB_20)  += contexthub_ext_log.o
-obj-$(CONFIG_INPUTHUB_20)  += fingerprint_ud_channel.o
-obj-$(CONFIG_INPUTHUB_20)  += vibrator_channel.o
-obj-$(CONFIG_INPUTHUB_20)  += big_data_channel.o
-obj-$(CONFIG_INPUTHUB_20)  += kbhub_channel.o

@@ -20,7 +20,7 @@
 HWLOG_REGIST();
 
 
-#if (defined CONFIG_HUAWEI_TP_KIT_COLOR_INFO) || (defined CONFIG_HUAWEI_TP_KIT_COLOR_INFO_3_0)
+#ifdef CONFIG_HUAWEI_TP_KIT_COLOR_INFO
 #define TP_COLOR_SIZE   15
 #define FIRST_ELEMENT   0
 extern u8 cypress_ts_kit_color[TP_COLOR_SIZE];
@@ -59,7 +59,7 @@ static void tp_nv_write_work_fn(struct work_struct *work)
 	user_info.nv_operation = 0;
 	user_info.nv_number = 16;
 	user_info.valid_size = 15;
-	strncpy(user_info.nv_data, g_nv_data,  sizeof(user_info.nv_data));
+	strncpy(user_info.nv_data, g_nv_data, sizeof(user_info.nv_data));
 	strncpy(user_info.nv_name, "TPCOLOR", sizeof(user_info.nv_name));
 	user_info.nv_name[sizeof(user_info.nv_name) - 1] = '\0';
 	ret = hisi_nve_direct_access(&user_info);
@@ -181,7 +181,7 @@ static int write_tp_color_to_nv(void)
 		phone_color = cypress_tp_color[0];
 	else if (is_color_correct(lcd_id))
 		phone_color = lcd_id;
-#if (defined CONFIG_HUAWEI_TP_KIT_COLOR_INFO) || (defined CONFIG_HUAWEI_TP_KIT_COLOR_INFO_3_0)
+#ifdef CONFIG_HUAWEI_TP_KIT_COLOR_INFO
 	else if (is_color_correct(cypress_ts_kit_color[FIRST_ELEMENT])) {
 		phone_color = cypress_ts_kit_color[FIRST_ELEMENT];
 	}
@@ -241,6 +241,7 @@ static int write_tp_color_to_nv(void)
 static ssize_t attr_get_tp_color_info(struct device *dev,
 				      struct device_attribute *attr, char *buf)
 {
+	int ret = 0;
 	u8 lcd_id = 0;
 	u8 phone_color = 0;
 	lcd_id = read_tp_color();
@@ -254,7 +255,7 @@ static ssize_t attr_get_tp_color_info(struct device *dev,
 		phone_color = cypress_tp_color[0];
 	else if (is_color_correct(lcd_id))
 		phone_color = lcd_id;
-#if (defined CONFIG_HUAWEI_TP_KIT_COLOR_INFO) || (defined CONFIG_HUAWEI_TP_KIT_COLOR_INFO_3_0)
+#ifdef CONFIG_HUAWEI_TP_KIT_COLOR_INFO
 	else if (is_color_correct(cypress_ts_kit_color[FIRST_ELEMENT])) {
 		phone_color = cypress_ts_kit_color[FIRST_ELEMENT];
 	}

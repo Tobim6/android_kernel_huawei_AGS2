@@ -98,7 +98,6 @@ changes:
 #define CY_MAX_ELEN 100
 #endif
 
-#define PT_MAX_MSG_LEN		255
 #define LCD_PANEL_INFO_MAX_LEN  128
 #define LCD_PANEL_TYPE_DEVICE_NODE_NAME     "huawei,lcd_panel_type"
 
@@ -419,8 +418,7 @@ enum parade_loader_platform_flags {
 	CY_LOADER_FLAG_CALIBRATE_AFTER_TTCONFIG_UPGRADE,
 };
 
-struct parade_oem_data;
-struct parade_oem_ops;
+
 
 struct parade_touch_firmware {
 	const uint8_t *img;
@@ -452,13 +450,13 @@ struct parade_core_platform_data {
 	int irq_gpio;
 	int rst_gpio;
 	int level_irq_udelay;
-	int hid_desc_register;
+	u16 hid_desc_register;
 	u16 vendor_id;
 	u16 product_id;
 	struct touch_settings *sett[CY_TOUCH_SETTINGS_MAX];
 	u32 flags;
 	u8 wakeup_gesture_enable;
-	s8 irq_config; /* 0:LOW LEVEL 1:HIGH LEVEL 2:RAISE EDGE 3:FALL EDGE */
+	u8 irq_config;/* 0 - LOW LEVEL  1 - HIGH LEVEL  2 - RAISE EDGE  3 - FALL EDGE*/
 	int (*irq_stat)(struct ts_kit_device_data *pdata);
 	bool check_irq_state;
 };
@@ -1482,7 +1480,7 @@ struct parade_core_data {
 	bool  is_need_check_mode_before_status_resume;
 
 	int create_project_id_flag;
-	int need_provide_projectID_for_sensor;
+    int need_provide_projectID_for_sensor;
 	int get_module_name_flag;
 	int cm_delta_lattice_flag;
 	u32 cy_hid_reset_timeout; /* get from dts setting for ESD reset time*/
@@ -1499,9 +1497,8 @@ struct parade_core_data {
 	/*for mmi test item 4 report rate check support*/
 	int report_rate_check_supported;
 	int self_noise_supported;
-	int lcd_panel_name_from_lcdkit;//0 : panel name from others ,1 : panel name from  lcdkit_tp.c
 	int current_distinguishability;//false :use default distinguishability,true :second distinguishability
-	int fw_only_depend_on_lcd ;//0 : fw depend on TP and others ,1 : fw only depend on lcd.
+	int fw_only_depend_on_lcd ;;//0 : fw depend on TP and others ,1 : fw only depend on lcd.
 	char lcd_panel_info[LCD_PANEL_INFO_MAX_LEN] ;
 	char * sign_of_second_distinguishability;
 	/*after resume flag, do nothing in after resume when it is 1*/

@@ -23,10 +23,6 @@ extern "C" {
 #define FUSB3601_I2C_SMBUS_REQUIRED_FUNC    (I2C_FUNC_SMBUS_WRITE_I2C_BLOCK | \
                                              I2C_FUNC_SMBUS_READ_BYTE_DATA)
 
-#define SOURCE_CURRENT_1500 150
-#define SOURCE_CURRENT_1000 100
-
-#define CC_STATUS_MASK 0x0F
 /*******************************************************************************
 * Driver structs
 ******************************************************************************/

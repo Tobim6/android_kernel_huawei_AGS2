@@ -19,7 +19,6 @@
 #include <linux/power/hisi_hi6521_charger_power.h>
 #include <linux/bitops.h>
 #include <sound/hi6555c_common.h>
-#include <securec.h>
 
 
 #define FLASH_LED_MAX			(16)
@@ -130,6 +129,12 @@ static int hw_scharger_flash_mode(struct hw_flash_ctrl_t *flash_ctrl, int data)
     ret = regulator_enable(pdata->flash_inter_ldo);
     if (ret < 0) {
         cam_err("%s regulator_enable flash_inter_ldo fail ret = %d", __func__, ret);
+/* #if defined (CONFIG_HUAWEI_DSM) */
+/*         if (!dsm_client_ocuppy(client_ovisp22)){ */
+/*             dsm_client_record(client_ovisp22,"[%s]regulator_enable flash_inter_ldo fail mode %d\n",__func__,mode); */
+/*             dsm_client_notify(client_ovisp22, DSM_ISP22_FLASH_ERROR_NO); */
+/*         } */
+/* #endif */
         goto err_out;
     }
     udelay(500);
@@ -140,18 +145,20 @@ static int hw_scharger_flash_mode(struct hw_flash_ctrl_t *flash_ctrl, int data)
     ret = regulator_set_current_limit(pdata->flash_mode_ldo, data, data);
     if (ret < 0) {
         cam_err("%s regulator_set_current_limit  fail ret = %d current is %d", __func__, ret, data);
-        if (0 != regulator_disable(pdata->flash_inter_ldo)) {
-            cam_notice("Failed: flash_inter_ldo regulator_disable\n");
-        }
+        regulator_disable(pdata->flash_inter_ldo);
         goto err_out;
     }
 
     ret = regulator_enable(pdata->flash_mode_ldo);
     if (ret < 0) {
         cam_err("%s regulator_enable torch_mode_ldo fail ret = %d", __func__, ret);
-        if (0 != regulator_disable(pdata->flash_inter_ldo)) {
-            cam_notice("Failed: flash_inter_ldo regulator_disable\n");
-        }
+/* #if defined (CONFIG_HUAWEI_DSM) */
+/*         if (!dsm_client_ocuppy(client_ovisp22)){ */
+/*             dsm_client_record(client_ovisp22,"[%s]regulator_enable flash_mode_ldo fail mode %d\n",__func__,mode); */
+/*             dsm_client_notify(client_ovisp22, DSM_ISP22_FLASH_ERROR_NO); */
+/*         } */
+/* #endif */
+        regulator_disable(pdata->flash_inter_ldo);
         goto err_out;
     }
 
@@ -206,6 +213,12 @@ static int hw_scharger_torch_mode(struct hw_flash_ctrl_t *flash_ctrl, int data)
     ret = regulator_enable(pdata->flash_inter_ldo);
     if (ret < 0) {
         cam_err("%s regulator_enable flash_inter_ldo fail ret = %d", __func__, ret);
+        /* #if defined (CONFIG_HUAWEI_DSM) */
+        /* if (!dsm_client_ocuppy(client_ovisp22)){ */
+        /*     dsm_client_record(client_ovisp22,"[%s]regulator_enable flash_inter_ldo fail mode %d\n",__func__,mode); */
+        /*     dsm_client_notify(client_ovisp22, DSM_ISP22_FLASH_ERROR_NO); */
+        /* } */
+        /* #endif */
         return ret;
     }
 
@@ -223,9 +236,13 @@ static int hw_scharger_torch_mode(struct hw_flash_ctrl_t *flash_ctrl, int data)
     ret = regulator_enable(pdata->torch_mode_ldo);
     if (ret < 0) {
         cam_err("%s regulator_enable torch_mode_ldo fail ret = %d", __func__, ret);
-        if (0 != regulator_disable(pdata->flash_inter_ldo)) {
-            cam_notice("Failed: flash_inter_ldo regulator_disable\n");
-        }
+/* #if defined (CONFIG_HUAWEI_DSM) */
+/*         if (!dsm_client_ocuppy(client_ovisp22)){ */
+/*             dsm_client_record(client_ovisp22,"[%s]regulator_enable torch_mode_ldo fail mode %d\n",__func__,mode); */
+/*             dsm_client_notify(client_ovisp22, DSM_ISP22_FLASH_ERROR_NO); */
+/*         } */
+/* #endif */
+        regulator_disable(pdata->flash_inter_ldo);
         return ret;
     }
     pdata->status |= BIT(TORCH_MODE);
@@ -286,22 +303,14 @@ static int hw_scharger_off(struct hw_flash_ctrl_t *flash_ctrl)
     mutex_lock(flash_ctrl->hw_flash_mutex);
 
     if (BIT(TORCH_MODE) & pdata->status) {
-        if (0 != regulator_disable(pdata->torch_mode_ldo)) {
-            cam_notice("Failed: torch_mode_ldo regulator_disable\n");
-        }
-        if (0 != regulator_disable(pdata->flash_inter_ldo)) {
-            cam_notice("Failed: flash_inter_ldo regulator_disable\n");
-        }
+        regulator_disable(pdata->torch_mode_ldo);
+        regulator_disable(pdata->flash_inter_ldo);
         pdata->status &= ~BIT(TORCH_MODE);
     }
 
     if (BIT(FLASH_MODE) & pdata->status) {
-        if (0 != regulator_disable(pdata->flash_mode_ldo)) {
-            cam_notice("Failed: flash_mode_ldo regulator_disable\n");
-        }
-        if (0 != regulator_disable(pdata->flash_inter_ldo)) {
-            cam_notice("Failed: flash_inter_ldo regulator_disable\n");
-        }
+        regulator_disable(pdata->flash_mode_ldo);
+        regulator_disable(pdata->flash_inter_ldo);
         pdata->status &= ~BIT(FLASH_MODE);
     }
 
@@ -480,7 +489,7 @@ static ssize_t hw_scharger_flash_mask_show(struct device *dev,
 {
     int rc = 0;
 
-    snprintf_s(buf, MAX_ATTRIBUTE_BUFFER_SIZE, MAX_ATTRIBUTE_BUFFER_SIZE-1,  "flash_mask_disabled=%d.\n",
+    snprintf(buf, MAX_ATTRIBUTE_BUFFER_SIZE, "flash_mask_disabled=%d.\n",
             hw_scharger_ctrl.flash_mask_enable);
     rc = strlen(buf)+1;
     return rc;
@@ -603,10 +612,8 @@ static int hw_scharger_probe(struct platform_device *pdev)
     int ret = 0;
     struct regulator *ldo = NULL;
 
-    ret = memset_s(&hw_scharger_pdata, sizeof(hw_scharger_pdata), 0, sizeof(hw_scharger_pdata));
-    if (ret != EOK) {
-        cam_err("%s. failed to memset_s write_data.", __func__);
-    }
+    memset(&hw_scharger_pdata, 0, sizeof(hw_scharger_pdata));
+
     ldo = devm_regulator_get(&pdev->dev, SCHG_BOOST_REGULATOR);
     if (IS_ERR_OR_NULL(ldo)) {
         cam_err("%s: Could not get regulator : %s\n", __func__, SCHG_BOOST_REGULATOR);

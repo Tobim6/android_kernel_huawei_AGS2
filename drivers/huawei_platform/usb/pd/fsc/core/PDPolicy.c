@@ -30,7 +30,7 @@
 
 #include <linux/kernel.h>
 #include <linux/printk.h>
-#include <huawei_platform/usb/hw_pd_dev.h>
+
 #include "PD_Types.h"
 #include "PDPolicy.h"
 #include "PDProtocol.h"
@@ -67,6 +67,12 @@ extern FSC_U8                    nRetries;                                      
 extern FSC_BOOL                 g_Idle;                                         // Puts state machine into Idle state
 extern USBTypeCCurrent          SourceCurrent;                                  // TypeC advertised current
 extern FSC_U8                   DetachThreshold;
+#ifdef FSC_HAVE_CUSTOM_SRC2
+extern FSC_BOOL                 ExpectingVdmResponse;
+extern int                      support_smart_holder;
+#endif
+
+extern void delay_schedule_isPRSwap(void);
 
 // Device Policy Manager Variables
 FSC_BOOL                        USBPDTxFlag;                                    // Flag to indicate that we need to send a message (set by device policy manager)
@@ -140,7 +146,6 @@ FSC_U16                         auto_mode_disc_tracker;
 
 extern FSC_BOOL                 mode_entered;
 extern SvidInfo                 core_svid_info;
-extern FSC_BOOL                 ExpectingVdmResponse;
 #endif // FSC_HAVE_VDM
 
 #ifdef FSC_HAVE_DP
@@ -150,20 +155,7 @@ extern FSC_S32                  AutoModeEntryObjPos;
 
 extern FSC_BOOL                 ProtocolCheckRxBeforeTx;
 extern FSC_U8                   loopCounter;        // Used to count the number of Unattach<->AttachWait loops
-#define PD_FIXED_POWER_VOL_STEP 50
-static FSC_U32 	pd_limit_voltage = PD_09_V;
 
-#define PD_ADAPTER_5V                    5000
-#define PD_ADAPTER_20V                  20000
-
-void SetPDLimitVoltage(int vol)
-{
-	if (vol < PD_ADAPTER_5V || vol > PD_ADAPTER_20V) {
-		FSC_PRINT("FUSB %s - Set limit voltage over range\n", __func__);
-		return;
-	}
-	pd_limit_voltage = vol / PD_FIXED_POWER_VOL_STEP;
-}
 /////////////////////////////////////////////////////////////////////////////
 //                  Timer Interrupt service routine
 /////////////////////////////////////////////////////////////////////////////
@@ -185,7 +177,7 @@ void InitializePDPolicyVariables(void)
     SinkUSBSuspendOperation = No_USB_Suspend_May_Be_Set;                                            // Whether the sink wants to continue operation during USB suspend
     SinkUSBCommCapable = USB_Comms_Capable;                                                 // Whether the sink is USB communications capable
 
-    CapsHeaderSink.NumDataObjects = platform_sink_pdo_number();                                          // Set the number of power objects
+    CapsHeaderSink.NumDataObjects = Num_Snk_PDOs;                                          // Set the number of power objects
     CapsHeaderSink.PortDataRole = 0;                                            // Set the data role to UFP by default
     CapsHeaderSink.PortPowerRole = 0;                                           // By default, set the device to be a sink
     CapsHeaderSink.SpecRevision = 1;                                            // Set the spec revision to 2.0
@@ -442,9 +434,9 @@ void USBPDEnable(FSC_BOOL DeviceUpdate, SourceOrSink TypeCDFP)
         {
             USBPDActive = TRUE;                                                 // Set the active flag
             platform_set_timer(&NoResponseTimer, T_TIMER_DISABLE);                                  // Disable the no response timer by default
-            PolicyIsSource = (FSC_BOOL)TypeCDFP;                                          // Set whether we should be initially a source or sink
-            PolicyIsDFP = (FSC_BOOL)TypeCDFP;
-            IsVCONNSource = (FSC_BOOL)TypeCDFP;
+            PolicyIsSource = TypeCDFP;                                          // Set whether we should be initially a source or sink
+            PolicyIsDFP = TypeCDFP;
+            IsVCONNSource = TypeCDFP;
             // Set the initial data port direction
             if (PolicyIsSource)                                                 // If we are a source...
             {
@@ -513,11 +505,12 @@ void USBPDEnable(FSC_BOOL DeviceUpdate, SourceOrSink TypeCDFP)
         if(Attempts_Discov_SOP)
         {
             AutoVdmState = AUTO_VDM_INIT;
-        } else {
+        }
+        else
+        {
             AutoVdmState = AUTO_VDM_DONE;
         }
 #endif /* FSC_HAVE_VDM */
-        resetDp();
     }
 }
 
@@ -542,7 +535,7 @@ void USBPDDisable(FSC_BOOL DeviceUpdate)
     PDTxStatus = txIdle;                                                        // Reset the transmitter status
     PolicyIsSource = FALSE;                                                     // Clear the is source flag until we connect again
     PolicyHasContract = FALSE;                                                  // Clear the has contract flag
-    DetachThreshold = DETACH_THRESHOLD_5V;    // Default to 5V detach threshold
+    DetachThreshold = VBUS_MDAC_3P36;    // Default to 5V detach threshold
     platform_notify_bist(FALSE);
     platform_notify_pd_contract(FALSE, 0, 0, 0);
 
@@ -790,8 +783,8 @@ void PolicyErrorRecovery(void)
 #if defined(FSC_HAVE_SRC) || (defined(FSC_HAVE_SNK) && defined(FSC_HAVE_ACCMODE))
 void PolicySourceSendHardReset(void)
 {
-    FSC_U8 data;
     HardResetCounter++;
+    FSC_U8 data;
     data = Registers.Control.byte[3] | 0x40;                                    // Set the send hard reset bit
     DeviceWrite(regControl3, 1, &data);
 }
@@ -839,14 +832,19 @@ void PolicySourceStartup(void)
 #ifdef FSC_HAVE_VDM
     FSC_S32 i;
 #endif // FSC_HAVE_VDM
+    CCTermType temp;
+
+
 
     switch (PolicySubIndex)
     {
         case 0:
             // Set masks for PD
             Registers.Mask.M_COLLISION = 0;
+            if(platform_get_pr_swap_wa_enabled())
+                Registers.Mask.M_CRC_CHK = 0;
             Registers.Mask.M_VBUSOK = 0;
-            //Registers.Mask.M_BC_LVL = 1;
+            Registers.Mask.M_BC_LVL = 1;
             DeviceWrite(regMask, 1, &Registers.Mask.byte);
             Registers.MaskAdv.M_RETRYFAIL = 0;
             Registers.MaskAdv.M_HARDSENT = 0;
@@ -903,20 +901,28 @@ void PolicySourceStartup(void)
 
 	#ifdef FSC_HAVE_VDM
                 mode_entered = FALSE;
-#ifdef FSC_HAVE_CUSTOM_SRC2
-		if (pd_dpm_get_is_support_smart_holder())
-			ExpectingVdmResponse = FALSE;
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
+	#ifdef FSC_HAVE_CUSTOM_SRC2
+                if (support_smart_holder)
+                    ExpectingVdmResponse = FALSE;
+	#endif
                 auto_mode_disc_tracker = 0;
 
                 core_svid_info.num_svids = 0;
                 for (i = 0; i < MAX_NUM_SVIDS; i++) {
                     core_svid_info.svids[i] = 0;
                 }
+                if(Attempts_Discov_SOP){
+                    AutoVdmState = AUTO_VDM_INIT;
+                }
+                else{
+                    AutoVdmState = AUTO_VDM_DONE;
+                }
 	#endif // FSC_HAVE_VDM
 
 	#ifdef FSC_HAVE_DP
                 AutoModeEntryObjPos = -1;
+
+                resetDp();
 	#endif // FSC_HAVE_DP
                 PolicySubIndex++;
             }
@@ -927,7 +933,6 @@ void PolicySourceStartup(void)
                 PolicyState = peSourceSendCaps;                                             // Go to the source caps
                 PolicySubIndex = 0;
                 requestDiscoverIdentity(SOP_TYPE_SOP1);
-		pd_set_product_type(PD_DPM_INVALID_VAL);
             }
             break;
         default:
@@ -1061,7 +1066,7 @@ void PolicySourceTransitionDefault(void)
                 Registers.Power.PD_RCVR_DIS = 1;
                 DeviceWrite(regPower, 1, &Registers.Power.byte);                // Commit the power setting
                 PolicyHasContract = FALSE;
-                DetachThreshold = DETACH_THRESHOLD_5V;    // Default to 5V detach threshold
+                DetachThreshold = VBUS_MDAC_3P36;    // Default to 5V detach threshold
                 platform_notify_bist(FALSE);
                 platform_notify_pd_contract(FALSE, 0, 0, 0);
                 if(!PolicyIsDFP)                                                    // Make sure date role is DFP
@@ -1236,7 +1241,7 @@ void PolicySourceTransitionSupply(void)
             {
                 if((!isVBUSOverVoltage(VBUS_MDAC_5P46) && isVBUSOverVoltage(VBUS_MDAC_4P62)) || (platform_check_timer(&PolicyStateTimer)))   // Check that VBUS is between 4.6 and 5.5 V
                 {
-                    DetachThreshold = DETACH_THRESHOLD_5V;   // 5V detach threshold
+                    DetachThreshold = VBUS_MDAC_3P36;   // 5V detach threshold
                     PolicySubIndex++;
                 }
             }
@@ -1425,16 +1430,20 @@ void PolicySourceReady(void)
         }
         USBPDTxFlag = FALSE;
     }
-    else if((UUT_Device_Type != 3) && (Requests_PR_Swap_As_Src))
+    else if(PartnerCaps.object == 0)
+    {
+        PolicyState = peSourceGetSinkCaps;                                      // Go to the get sink caps state
+        PolicySubIndex = 0;                                                     // Clear the sub index
+        PDTxStatus = txIdle;                                                    // Clear the transmitter status
+    }
+    else if((UUT_Device_Type != 3) && (Requests_PR_Swap_As_Src) && (PartnerCaps.FPDOSink.DualRolePower == 1))
     {
         PolicyState = peSourceSendPRSwap;                       // Issue a PR_Swap message
         PolicySubIndex = 0;                                     // Clear the sub index
         PDTxStatus = txIdle;                                    // Clear the transmitter status
     }
 #ifdef FSC_HAVE_VDM
-    else if(PolicyIsDFP && (AutoVdmState != AUTO_VDM_DONE)
-                        && (ExpectingVdmResponse == FALSE)
-                        && (platform_check_timer(&PolicyStateTimer)))
+    else if(PolicyIsDFP && (AutoVdmState != AUTO_VDM_DONE))
     {
         autoVdmDiscovery();
     }
@@ -1764,7 +1773,7 @@ void PolicySourceSendPRSwap(void)
                         case CMTAccept:                                         // If we get the Accept message...
                             IsPRSwap = TRUE;
                             PolicyHasContract = FALSE;
-                            DetachThreshold = DETACH_THRESHOLD_5V;    // Default to 5V detach threshold
+                            DetachThreshold = VBUS_MDAC_3P36;    // Default to 5V detach threshold
                             platform_notify_pd_contract(FALSE, 0, 0, 0);
                             platform_set_timer(&PolicyStateTimer, tSrcTransition);                  // Start the sink transition timer
                             PolicySubIndex++;                                   // Increment the subindex to move onto the next step
@@ -1864,7 +1873,10 @@ void PolicySourceEvaluatePRSwap(void)
     switch(PolicySubIndex)
     {
         case 0: // Send either the Accept or Reject command
-            if (!Accepts_PR_Swap_As_Src || (UUT_Device_Type == 3) )
+            if (!Accepts_PR_Swap_As_Src || (UUT_Device_Type == 3) ||
+                    ((CapsSource[0].FPDOSupply.DualRolePower == FALSE) || (PartnerCaps.FPDOSink.DualRolePower == FALSE) || // Determine Accept/Reject based on DualRolePower bit in current PDO
+                    ((CapsSource[0].FPDOSupply.ExternallyPowered == TRUE) && // Must also reject if we are externally powered and partner is not
+                    (PartnerCaps.FPDOSink.SupplyType == pdoTypeFixed) && (PartnerCaps.FPDOSink.ExternallyPowered == FALSE))))
             {
                 PolicySendCommand(CMTReject, peSourceReady, 0);                 // Send the reject if we are not a DRP
             }
@@ -1874,15 +1886,13 @@ void PolicySourceEvaluatePRSwap(void)
                 {
                     IsPRSwap = TRUE;
                     PolicyHasContract = FALSE;
+                    DetachThreshold = VBUS_MDAC_3P36;    // Default to 5V detach threshold
                     platform_notify_pd_contract(FALSE, 0, 0, 0);
-                    platform_vbus_timer(tSrcTransition);
-
-                    /* Timeout wait for vSafe0V */
-                    platform_start_timer(&PolicyStateTimer,
-					tPSHardResetMax +
-					tSafe0V +
-					tSrcTurnOn);
-                    g_Idle = TRUE;
+					platform_vbus_timer(tSrcTransition);
+                    RoleSwapToAttachedSink();
+                    //platform_set_timer(&PolicyStateTimer, tSrcTransition);
+					platform_start_timer(&PolicyStateTimer, tPSHardResetMax + tSafe0V + tSrcTurnOn); // Timeout wait for vSafe0V
+					g_Idle = TRUE;
                 }
             }
             break;
@@ -1896,33 +1906,24 @@ void PolicySourceEvaluatePRSwap(void)
             }
             break;
         case 2:
-            g_Idle = TRUE;
-
-		/*
-		 * Allow time for the supply to fall
-		 * then send the PS_RDY message
-		 */
-		if (!isVBUSOverVoltage(VBUS_MDAC_1P68V)) {
-			/* Allow some extra time(50ms) for VBUS to discharge */
-			platform_set_timer(&PolicyStateTimer,
-				tSrcTransition + 50);
-			/* Default to 5V detach threshold */
-			DetachThreshold = DETACH_THRESHOLD_5V;
-			RoleSwapToAttachedSink();
-			PolicyIsSource = FALSE;
-			Registers.Switches.POWERROLE = PolicyIsSource;
-			DeviceWrite(regSwitches1, 1,
-				&Registers.Switches.byte[1]);
-			Registers.Measure.MDAC = DetachThreshold;
-			DeviceWrite(regMeasure, 1, &Registers.Measure.byte);
-			PolicySubIndex++;
-			g_Idle = FALSE;
-		/* Break out if we never see 0V */
-		} else if (PolicyStateTimer.expired == TRUE) {
-			PolicyState = peErrorRecovery;
-			PolicySubIndex = 0;
-			g_Idle = FALSE;
-		}
+			g_Idle = TRUE;
+            if (VbusVSafe0V())  // Allow time for the supply to fall and then send the PS_RDY message
+            {
+                platform_set_timer(&PolicyStateTimer, tSrcTransition - 5);                              // Allow some extra time for VBUS to discharge
+                PolicyIsSource = FALSE;
+                Registers.Switches.POWERROLE = PolicyIsSource;
+                DeviceWrite(regSwitches1, 1, &Registers.Switches.byte[1]);
+				Registers.Measure.MDAC = DetachThreshold;
+				DeviceWrite(regMeasure, 1, &Registers.Measure.byte);
+                PolicySubIndex++;
+				g_Idle = FALSE;
+            }
+            else if (PolicyStateTimer.expired == TRUE)                                      // Break out if we never see 0V
+            {
+                PolicyState = peErrorRecovery;
+                PolicySubIndex = 0;
+				g_Idle = FALSE;
+            }
             break;
         case 3:
             if(platform_check_timer(&PolicyStateTimer))
@@ -1955,9 +1956,12 @@ void PolicySourceEvaluatePRSwap(void)
                                 platform_delay_10us(3000);
                             }
                             PolicySubIndex++;                                 // Increment the sub index
-                            IsPRSwap = FALSE;
+			    if(platform_get_pr_swap_wa_enabled())
+                                delay_schedule_isPRSwap();
+                            else
+				IsPRSwap = FALSE;
                             platform_set_timer(&PolicyStateTimer, tGoodCRCDelay);                   // Make sure GoodCRC has time to send
-							Registers.Status.I_COMP_CHNG = 1;   /* Force check for VBUS */
+			    Registers.Status.I_COMP_CHNG = 1;   /* Force check for VBUS */
                             break;
                         default:                                                // For all other commands received, simply ignore them
                             break;
@@ -2067,8 +2071,8 @@ void PolicySourceEvaluateVCONNSwap(void)
                         case CMTPS_RDY:                                         // If we get the PS_RDY message...
                             Registers.Switches.VCONN_CC1 = 0;                   // Disable the VCONN source
                             Registers.Switches.VCONN_CC2 = 0;                   // Disable the VCONN source
-                            //Registers.Switches.PDWN1 = 1;                       // Ensure the pull-down on CC1 is enabled
-                           // Registers.Switches.PDWN2 = 1;                       // Ensure the pull-down on CC2 is enabled
+                            Registers.Switches.PDWN1 = 1;                       // Ensure the pull-down on CC1 is enabled
+                            Registers.Switches.PDWN2 = 1;                       // Ensure the pull-down on CC2 is enabled
                             platform_set_vconn(FALSE);
                             DeviceWrite(regSwitches0, 1, &Registers.Switches.byte[0]); // Commit the register setting to the device
                             IsVCONNSource = FALSE;
@@ -2102,9 +2106,9 @@ void PolicySourceEvaluateVCONNSwap(void)
 #ifdef FSC_HAVE_SNK
 void PolicySinkSendHardReset(void)
 {
-    FSC_U8 data;
-    HardResetCounter++;
+	HardResetCounter++;
     IsHardReset = TRUE;
+	FSC_U8 data;
     data = Registers.Control.byte[3] | 0x40;                                    // Set the send hard reset bit
     DeviceWrite(regControl3, 1, &data);                                         // Send the hard reset
 }
@@ -2165,7 +2169,7 @@ void PolicySinkTransitionDefault(void)
             ProtocolFlushTxFIFO();
             IsHardReset = TRUE;
             PolicyHasContract = FALSE;
-            DetachThreshold = DETACH_THRESHOLD_5V;    // Default to 5V detach threshold
+            DetachThreshold = VBUS_MDAC_3P36;    // Default to 5V detach threshold
             platform_notify_bist(FALSE);
             platform_notify_pd_contract(FALSE, 0, 0, 0);
 
@@ -2212,11 +2216,6 @@ void PolicySinkTransitionDefault(void)
             {
                 PolicySubIndex++;
             }
-            else if (Registers.Status.BC_LVL == 0)
-            {
-                PolicyState = peSinkStartup;//
-                PolicySubIndex = 0;
-            }
             else if (platform_check_timer(&PolicyStateTimer))                                      // Break out if we never see 0V
             {
                 if(PolicyHasContract)
@@ -2239,6 +2238,9 @@ void PolicySinkTransitionDefault(void)
             PDTxStatus = txIdle;                                                        // Reset the transmitter status
             break;
     }
+
+
+
 }
 
 void PolicySinkStartup(void)
@@ -2250,6 +2252,8 @@ void PolicySinkStartup(void)
     Registers.Status.I_COMP_CHNG = 1;   /* Force check for VBUS */
 
     Registers.Mask.M_COLLISION = 0;
+    if(platform_get_pr_swap_wa_enabled())
+        Registers.Mask.M_CRC_CHK = 0;
     DeviceWrite(regMask, 1, &Registers.Mask.byte);
     Registers.MaskAdv.M_RETRYFAIL = 0;
     Registers.MaskAdv.M_HARDSENT = 0;
@@ -2277,12 +2281,13 @@ void PolicySinkStartup(void)
 
     USBPDContract.object = 0;                                           // Clear the USB PD contract (output power to 5V default)
     PartnerCaps.object = 0;                                         // Clear partner sink caps
-    IsPRSwap = FALSE;
+    if(!platform_get_pr_swap_wa_enabled())
+	IsPRSwap = FALSE;
     PolicyIsSource = FALSE;                                                     // Clear the flag to indicate that we are a sink (for PRSwaps)
     Registers.Switches.POWERROLE = PolicyIsSource;
     DeviceWrite(regSwitches1, 1, &Registers.Switches.byte[1]);
     ResetProtocolLayer(FALSE);
-    Registers.Switches.AUTO_CRC = 1;                                            // turn on Auto CRC
+	Registers.Switches.AUTO_CRC = 1;                                            // turn on Auto CRC
     DeviceWrite(regSwitches1, 1, &Registers.Switches.byte[1]);	// Reset the protocol layer
     Registers.Power.PWR = 0xF;                                         // Enable the internal oscillator for USB PD
     Registers.Power.PD_RCVR_DIS = 0; /* Enable receiver */
@@ -2297,9 +2302,9 @@ void PolicySinkStartup(void)
 #ifdef FSC_HAVE_VDM
     auto_mode_disc_tracker = 0;
 #ifdef FSC_HAVE_CUSTOM_SRC2
-	if (pd_dpm_get_is_support_smart_holder())
-		ExpectingVdmResponse = FALSE;
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
+    if (support_smart_holder)
+        ExpectingVdmResponse = FALSE;
+#endif
     mode_entered = FALSE;
 
     core_svid_info.num_svids = 0;
@@ -2310,6 +2315,8 @@ void PolicySinkStartup(void)
 
 #ifdef FSC_HAVE_DP
     AutoModeEntryObjPos = -1;
+
+    resetDp();
 #endif // FSC_HAVE_DP
     PolicySinkDiscovery();
 }
@@ -2381,7 +2388,6 @@ void PolicySinkEvaluateCaps(void)
     // The evaluate caps
     FSC_S32 i, reqPos;
     FSC_U32 objVoltage = 0;
-    FSC_U32 optional_max_power = 0;
     FSC_U32 objCurrent, objPower, MaxPower, SelVoltage, ReqCurrent;
     objCurrent = 0;
     platform_set_timer(&NoResponseTimer, T_TIMER_DISABLE);                                          // Stop the no response timer
@@ -2428,14 +2434,6 @@ void PolicySinkEvaluateCaps(void)
                 objPower = 0;                                                   // Set the object power to zero so we ignore for now
                 break;
         }
-
-        if (objPower > optional_max_power) {
-            optional_max_power = objPower;
-        }
-
-        if (objVoltage > pd_limit_voltage)
-                continue;
-
         if (objPower >= MaxPower)                                               // If the current object has power greater than or equal the previous objects
         {
             MaxPower = objPower;                                                // Store the objects power
@@ -2458,30 +2456,17 @@ void PolicySinkEvaluateCaps(void)
             SinkRequest.FVRDO.CapabilityMismatch = FALSE;                       // There can't be a capabilities mismatch
         else                                                                    // Otherwise...
         {
-            if (CapsReceived[SinkRequest.FVRDO.ObjectPosition-1].FPDOSupply.MaxCurrent < ReqCurrent)   // If the max power available is less than the max power requested...
+            if (objCurrent < ReqCurrent)                                        // If the max power available is less than the max power requested...
             {
                 SinkRequest.FVRDO.CapabilityMismatch = TRUE;                    // flag the source that we need more power
-                SinkRequest.FVRDO.MinMaxCurrent = CapsReceived[SinkRequest.FVRDO.ObjectPosition-1].FPDOSupply.MaxCurrent;
-                SinkRequest.FVRDO.OpCurrent =  CapsReceived[SinkRequest.FVRDO.ObjectPosition-1].FPDOSupply.MaxCurrent;
+                SinkRequest.FVRDO.MinMaxCurrent = CapsSink[0].FPDOSink.OperationalCurrent;
+                SinkRequest.FVRDO.OpCurrent =  objCurrent;
             }
             else                                                                // Otherwise...
             {
                 SinkRequest.FVRDO.CapabilityMismatch = FALSE;                   // there is no mismatch in the capabilities
             }
         }
-
-        if (optional_max_power >= PD_18_W)
-        {
-            pd_dpm_set_optional_max_power_status(true);
-        } else {
-            pd_dpm_set_optional_max_power_status(false);
-        }
-
-	if (optional_max_power >= PD_9_W)
-		pd_dpm_set_wireless_cover_power_status(true);
-	else
-		pd_dpm_set_wireless_cover_power_status(false);
-
         PolicyState = peSinkSelectCapability;                                   // Go to the select capability state
         PolicySubIndex = 0;                                                     // Reset the sub index
         platform_set_timer(&PolicyStateTimer, tSenderResponse);                                     // Initialize the sender response timer
@@ -2761,10 +2746,6 @@ void PolicySinkReady(void)
         PolicyState = peSinkSendPRSwap;                       // Issue a PR_Swap message
         PolicySubIndex = 0;                                     // Clear the sub index
         PDTxStatus = txIdle;                                    // Clear the transmitter status
-    } else if (PolicyIsDFP && (AutoVdmState != AUTO_VDM_DONE)
-                        && (ExpectingVdmResponse == FALSE)
-                        && (platform_check_timer(&PolicyStateTimer))) {
-        autoVdmDiscovery();
     }
     else
     {
@@ -2995,7 +2976,7 @@ void PolicySinkSendPRSwap(void)
                         case CMTAccept:                                         // If we get the Accept message...
                             IsPRSwap = TRUE;
                             PolicyHasContract = FALSE;
-                            DetachThreshold = DETACH_THRESHOLD_5V;    // Default to 5V detach threshold
+                            DetachThreshold = VBUS_MDAC_3P36;    // Default to 5V detach threshold
                             platform_notify_pd_contract(FALSE, 0, 0, 0);
                             platform_set_timer(&PolicyStateTimer, tPSSourceOff);                    // Start the sink transition timer
                             PolicySubIndex++;                                   // Increment the subindex to move onto the next step
@@ -3079,7 +3060,7 @@ void PolicySinkEvaluatePRSwap(void)
                 if (PolicySendCommand(CMTAccept, peSinkEvaluatePRSwap, 1) == STAT_SUCCESS) // Send the Accept message and wait for the good CRC
                 {
                     PolicyHasContract = FALSE;
-                    DetachThreshold = DETACH_THRESHOLD_5V;    // Default to 5V detach threshold
+                    DetachThreshold = VBUS_MDAC_3P36;    // Default to 5V detach threshold
                     platform_notify_pd_contract(FALSE, 0, 0, 0);
                     platform_set_timer(&PolicyStateTimer, tPSSourceOff);                         // Start the sink transition timer
                 }
@@ -3133,12 +3114,12 @@ void PolicySinkEvaluatePRSwap(void)
 #ifdef FSC_HAVE_VDM
 
 void PolicyGiveVdm(void) {
-	// Have we received a VDM message
-	if (ProtocolMsgRx && PolicyRxHeader.MessageType == DMTVenderDefined
+
+    if (ProtocolMsgRx && PolicyRxHeader.MessageType == DMTVenderDefined       // Have we received a VDM message
 #ifdef FSC_HAVE_CUSTOM_SRC2
-		&& !pd_dpm_get_is_support_smart_holder()
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
-	)
+        && !support_smart_holder
+#endif
+       )
     {
         sendVdmMessageFailed();                                                 // if we receive anything, kick out of here (interruptible)
         PolicySubIndex = 0;                                                     // Reset the sub index
@@ -3219,20 +3200,22 @@ void PolicyVdm (void) {
     }
     else
     {
-#ifdef FSC_HAVE_CUSTOM_SRC2
-	if (!pd_dpm_get_is_support_smart_holder()) {
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
-	if (sendingVdmData) {
-		result = PolicySendData(DMTVenderDefined, vdm_msg_length,
-				vdm_msg_obj, vdm_next_ps, 0, vdm_sop);
-		if (result == STAT_SUCCESS || result == STAT_ERROR) {
-			FSC_PRINT("FUSB %s-VDM Sent Via PolicyVDM\n", __func__);
-			sendingVdmData = FALSE;
-		}
-	}
-#ifdef FSC_HAVE_CUSTOM_SRC2
-	}
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
+    #ifdef FSC_HAVE_CUSTOM_SRC2
+        if (!support_smart_holder)
+        {
+    #endif
+            if (sendingVdmData)
+            {
+                result = PolicySendData(DMTVenderDefined, vdm_msg_length, vdm_msg_obj, vdm_next_ps, 0, vdm_sop);
+                if (result == STAT_SUCCESS || result == STAT_ERROR)
+                {
+                    FSC_PRINT("FUSB %s - VDM Sent Via PolicyVDM\n",__func__);
+                    sendingVdmData = FALSE;
+                }
+            }
+    #ifdef FSC_HAVE_CUSTOM_SRC2
+        }
+    #endif
     }
 
     if (VdmTimerStarted && (platform_check_timer(&VdmTimer)))
@@ -3453,13 +3436,14 @@ FSC_U8 PolicySendData(FSC_U8 MessageType, FSC_U8 NumDataObjects, doDataObject_t*
             Status = STAT_SUCCESS;
             break;
         case txError:                                                           // Didn't receive a GoodCRC message...
-#ifdef FSC_HAVE_CUSTOM_SRC2
-			if (pd_dpm_get_is_support_smart_holder())
-				if (sop == SOP_TYPE_SOP1) {
-					PDTxStatus = txIdle;
-					return STAT_ERROR;
-				}
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
+        #ifdef FSC_HAVE_CUSTOM_SRC2
+            if (support_smart_holder)
+                if (sop == SOP_TYPE_SOP1)
+                {
+                    PDTxStatus = txIdle;
+                    return STAT_ERROR;
+                }
+        #endif
             if (PolicyState == peSourceSendCaps)                                // If we were in the send source caps state when the error occurred...
                 PolicyState = peSourceDiscovery;                                // Go to the discovery state
             else if (PolicyIsSource)                                            // Otherwise, if we are a source...
@@ -3637,7 +3621,7 @@ void InitializeVdmManager(void)
 	vdmm.inform_id			= &vdmInformIdentity;
 #ifdef FSC_HAVE_CUSTOM_SRC2
 	vdmm.inform_raw_vdo_data = &vdmInformRawData;
-#endif /* FSC_HAVE_CUSTOM_SRC2 */
+#endif
 	vdmm.inform_svids		= &vdmInformSvids;
 	vdmm.inform_modes		= &vdmInformModes;
 	vdmm.inform_attention   = &vdmInformAttention;
@@ -3744,7 +3728,8 @@ void autoVdmDiscovery (void)
 			AutoVdmState = AUTO_VDM_DISCOVER_MODES_PP;
 			requestDiscoverSvids(SOP_TYPE_SOP);
 			FSC_PRINT("FUSB %s - AUTO_VDM_DISCOVER_SVIDS_PP\n",__func__);
-                } else {
+		}
+		else {
 			AutoVdmState = AUTO_VDM_DONE;
 			FSC_PRINT("FUSB %s - Modal Operation Not Supported - AutoVDM Done\n",__func__);
 		}
@@ -4077,11 +4062,4 @@ void EnableUSBPD(void)
 
 void SetVbusTransitionTime(FSC_U32 time_ms) {
     VbusTransitionTime = time_ms * TICK_SCALE_TO_MS;
-}
-
-void SetPolicyState(PolicyState_t state)
-{
-	PolicyState = state;
-	PolicySubIndex = 0;
-	PDTxStatus = txIdle;
 }

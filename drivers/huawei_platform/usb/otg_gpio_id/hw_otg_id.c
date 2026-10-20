@@ -19,11 +19,9 @@
 #include <linux/mfd/hisi_pmic.h>
 #include <pmic_interface.h>
 #include <linux/hisi/hisi_adc.h>
+#include <huawei_platform/usb/huawei_ycable.h>
 
-#ifdef CONFIG_HUAWEI_YCABLE
-#include <huawei_platform/usb/hw_ycable.h>
-#endif
-
+struct ycable_info *ycable = NULL;
 static struct otg_gpio_id_dev *otg_gpio_id_dev_p = NULL;
 static int startup_otg_sample = SAMPLE_DOING;
 
@@ -40,24 +38,6 @@ static int startup_otg_sample = SAMPLE_DOING;
 #define USB_CHARGER_INSERTED   1
 #define USB_CHARGER_REMOVE     0
 
-int hw_get_otg_id_gpio_value(int *gpio_value)
-{
-	int ret = -1;
-
-	if (otg_gpio_id_dev_p == NULL) {
-		hw_usb_err("error:otg_id null\n");
-		return ret;
-	}
-
-	if(gpio_value == NULL) {
-		hw_usb_err("error:gpio value is null\n");
-		return ret;
-	}
-
-	*gpio_value = gpio_get_value(otg_gpio_id_dev_p->gpio);
-
-	return 0;
-}
 
 /*************************************************************************************************
 *  Function:       hw_is_usb_cable_connected
@@ -72,11 +52,7 @@ static int hw_is_usb_cable_connected(void)
     int ret = 0;
 
     if (0 == dev->fpga_flag) {
-#if defined(CONFIG_DEC_USB)
         ret = (hisi_pmic_reg_read(PMIC_STATUS0_ADDR(0)) & (VBUS4P3_D10 | VBUS_COMP_VBAT_D20));
-#else
-        ret = hisi_pmic_get_vbus_status();
-#endif
     }
 	hw_usb_err("%s ret is %d !\n", __func__, ret);
     return ret;
@@ -93,42 +69,14 @@ static int hw_is_usb_cable_connected(void)
 static int hw_otg_id_notifier_call(struct notifier_block *usb_nb,
 				    unsigned long event, void *data)
 {
-#if defined(CONFIG_DEC_USB)
-    if (DISABLE_USB_IRQ == event && otg_gpio_id_dev_p->otg_irq_enabled) {
-        hw_usb_err("%s disable the otg irq!\n", __func__);
+    if (DISABLE_USB_IRQ == event) {
+		hw_usb_err("%s disable the otg irq!\n", __func__);
         disable_irq_nosync(otg_gpio_id_dev_p->irq);
-        otg_gpio_id_dev_p->otg_irq_enabled = false;
-    } else if (DISABLE_USB_IRQ == !event && !otg_gpio_id_dev_p->otg_irq_enabled){
-        hw_usb_err("%s enable the otg irq!\n", __func__);
-        enable_irq(otg_gpio_id_dev_p->irq);
-        otg_gpio_id_dev_p->otg_irq_enabled = true;
-    } else {
-        hw_usb_err("%s event %u when irq state %d\n", __func__, event, otg_gpio_id_dev_p->otg_irq_enabled);
     }
-#else
-    switch(event){
-        case CHARGER_TYPE_NONE:
-            if (!otg_gpio_id_dev_p->otg_irq_enabled) {
-                hw_usb_err("%s enable the otg irq %ld!\n", __func__, event);
-                enable_irq(otg_gpio_id_dev_p->irq);
-                otg_gpio_id_dev_p->otg_irq_enabled = true;
-            }
-            break;
-        case CHARGER_TYPE_SDP:
-        case CHARGER_TYPE_CDP:
-        case CHARGER_TYPE_DCP:
-        case CHARGER_TYPE_UNKNOWN:
-            if (otg_gpio_id_dev_p->otg_irq_enabled) {
-                hw_usb_err("%s disable the otg irq %ld!\n", __func__, event);
-                disable_irq_nosync(otg_gpio_id_dev_p->irq);
-                otg_gpio_id_dev_p->otg_irq_enabled = false;
-            }
-            break;
-        default:
-            hw_usb_err("%s ignore other types %ld when irq state %d\n",
-                __func__, event, otg_gpio_id_dev_p->otg_irq_enabled);
-    }
-#endif
+	else {
+		hw_usb_err("%s enable the otg irq!\n", __func__);
+		enable_irq(otg_gpio_id_dev_p->irq);
+	}
     return NOTIFY_OK;
 }
 
@@ -180,6 +128,29 @@ static int hw_otg_id_adc_sampling(struct otg_gpio_id_dev *otg_gpio_id_dev_p)
 	return avgvalue;
 }
 
+/**********************************************************
+*  Function:       is_ycable_charger_connect
+*  Description:    if is suppurt ycable and ycable-charger is connect
+*  Parameters:     NULL
+*  return value:   true  --- if is suppurt ycable and ycable-charger is connect
+*                  false --- other
+**********************************************************/
+static bool is_ycable_charger_connect(void)
+{
+	int avgvalue = 0;
+
+	if ((ycable == NULL) || !ycable->ycable_support) {
+		return false;
+	}
+
+	avgvalue = hw_otg_id_adc_sampling(otg_gpio_id_dev_p);
+	if ((avgvalue >= YCABLE_CHG_THRESHOLD_VOLTAGE_MIN) &&
+		(avgvalue <= YCABLE_CHG_THRESHOLD_VOLTAGE_MAX)) {
+		return true;
+	}
+
+	return false;
+}
 
 /*************************************************************************************************
 *  Function:       hw_otg_id_intb_work
@@ -189,57 +160,46 @@ static int hw_otg_id_adc_sampling(struct otg_gpio_id_dev *otg_gpio_id_dev_p)
 **************************************************************************************************/
 static void hw_otg_id_intb_work(struct work_struct *work)
 {
-	int gpio_value = -1;
-	int avgvalue = 0;
+    int gpio_value = -1;
+    int avgvalue = 0;
 	static bool is_otg_has_inserted = false;
 
-	/* Fix the different of schager V200 and V300 */
-	if (!is_otg_has_inserted) {
-		if (VBUS_IS_CONNECTED == !hw_is_usb_cable_connected()) {
-			hw_usb_err("%s Vbus is inerted!\n", __func__);
-#ifdef CONFIG_HUAWEI_YCABLE
-			avgvalue = hw_otg_id_adc_sampling(otg_gpio_id_dev_p);
-			if (!ycable_is_charge_connect(avgvalue)) {
+    /* Fix the different of schager V200 and V300 */
+    if (!is_otg_has_inserted) {
+    	if (VBUS_IS_CONNECTED == !hw_is_usb_cable_connected()) {
+            hw_usb_err("%s Vbus is inerted!\n", __func__);
+			if(!is_ycable_charger_connect()) {
 				return;
 			}
-#else
-			return;
-#endif
 		}
-	}
+    }
 
-	gpio_value = gpio_get_value(otg_gpio_id_dev_p->gpio);
-	if (0 == gpio_value){
+    gpio_value = gpio_get_value(otg_gpio_id_dev_p->gpio);
+    if (0 == gpio_value){
 		hw_usb_err("%s Send ID_FALL_EVENT\n", __func__);
 		avgvalue = hw_otg_id_adc_sampling(otg_gpio_id_dev_p);
 
-		if((avgvalue >= 0) && (avgvalue <= ADC_VOLTAGE_LIMIT)){
+        if((avgvalue >= 0) && (avgvalue <= ADC_VOLTAGE_LIMIT)){
 			is_otg_has_inserted = true;
-			hisi_usb_otg_event(ID_FALL_EVENT);
-#ifdef CONFIG_HUAWEI_YCABLE
-			ycable_handle_otg_event(ID_FALL_EVENT, !YCABLE_NEED_WAIT);
-#endif
-		}
+            hisi_usb_otg_event(ID_FALL_EVENT);
+        }
 		else {
-			hw_usb_err("%s avgvalue is %d.\n", __func__, avgvalue);
+		    hw_usb_err("%s avgvalue is %d.\n", __func__, avgvalue);
 			is_otg_has_inserted = true;
-#ifdef CONFIG_HUAWEI_YCABLE
-			if (ycable_is_charge_connect(avgvalue)) {
-				/* last cable plug out will call completion, so here reinit it */
-				ycable_init_devoff_completion();
-				hisi_usb_otg_event(CHARGER_DISCONNECT_EVENT);
-				hisi_usb_otg_event(ID_FALL_EVENT);
-				ycable_handle_otg_event(ID_FALL_EVENT, YCABLE_NEED_WAIT);
-			}
-#endif
-		}
-	} else {
+            if (is_ycable_charger_connect()){
+                hw_usb_err("%s ycable avgvalue is %d.\n", __func__, avgvalue);
+                hisi_usb_otg_event(CHARGER_DISCONNECT_EVENT);
+                hisi_usb_otg_event(ID_FALL_EVENT);
+            }
+        }
+    }
+    else{
 		hw_usb_err("%s Send ID_RISE_EVENT\n", __func__);
 		is_otg_has_inserted = false;
-		hisi_usb_otg_event(ID_RISE_EVENT);
-	}
+        hisi_usb_otg_event(ID_RISE_EVENT);
+    }
 
-	return;
+    return;
 }
 
 /*************************************************************************************************
@@ -268,6 +228,85 @@ static irqreturn_t hw_otg_id_irq_handle(int irq, void *dev_id)
     return IRQ_HANDLED;
 }
 
+/**********************************************************
+*  Function:       ycable_info_alloc
+*  Description:    ycable info alloc
+*  Parameters:     NULL
+*  return value:   NULL
+**********************************************************/
+static struct ycable_info *ycable_info_alloc(void)
+{
+	struct ycable_info *st_ycable = NULL;
+
+	st_ycable = kzalloc(sizeof(*st_ycable), GFP_KERNEL);
+	if (!st_ycable) {
+		hw_usb_err("alloc ycable failed\n");
+		return NULL;
+	}
+
+	return st_ycable;
+}
+
+
+/**********************************************************
+*  Function:       ycable_info_free
+*  Description:    ycable info free
+*  Parameters:     NULL
+*  return value:   NULL
+**********************************************************/
+static void ycable_info_free(void)
+{
+	if(ycable != NULL) {
+		kfree(ycable);
+		ycable = NULL;
+	}
+}
+
+/**********************************************************
+*  Function:       ycable_init
+*  Description:    ycable init
+*  Parameters:     device_node np
+*  return value:   NULL
+**********************************************************/
+static void ycable_init(struct device_node *np)
+{
+	int ret = 0;
+
+	if (!of_property_read_bool(np, "ycable_support")) {
+		return;
+	}
+
+	ycable = ycable_info_alloc();
+	if(!ycable) {
+		hw_usb_err("alloc ycable failed\n");
+		return;
+	}
+
+	/*ycable input current */
+	ret = of_property_read_u32(np, "ycable_iin_curr", &(ycable->ycable_iin_curr));
+	if (ret) {
+		hw_usb_err("get ycable_iin_curr failed\n");
+		ycable->ycable_iin_curr = YCABLE_CURR_DEFAULT;
+	}
+	hw_usb_err("ycable_iin_curr = %d\n", ycable->ycable_iin_curr);
+	/*ycable charge current */
+	ret = of_property_read_u32(np, "ycable_ichg_curr", &(ycable->ycable_ichg_curr));
+	if (ret) {
+		hw_usb_err("get ycable_ichg_curr failed\n");
+		ycable->ycable_ichg_curr = YCABLE_CURR_DEFAULT;
+	}
+	hw_usb_err("ycable_ichg_curr = %d\n", ycable->ycable_ichg_curr);
+
+	ycable->ycable_otg_enable_flag = false;
+	ycable->ycable_charger_enable_flag = false;
+	ycable->ycable_wdt_time_out = 0;
+	ycable->ycable_gpio = otg_gpio_id_dev_p->gpio;
+	ycable->otg_adc_channel = otg_gpio_id_dev_p->otg_adc_channel;
+	ycable->ycable_support = true;
+	hw_usb_err("ycable is support\n");
+}
+
+
 /*************************************************************************************************
 *  Function:       hw_otg_id_probe
 *  Discription:    otg probe function.
@@ -277,8 +316,8 @@ static irqreturn_t hw_otg_id_irq_handle(int irq, void *dev_id)
 static int hw_otg_id_probe(struct platform_device *pdev)
 {
     int ret = 0;
-    int avgvalue = 0;
-    int adc_voltage_min = ADC_VOLTAGE_LIMIT;
+	int avgvalue = 0;
+	int adc_voltage_min = ADC_VOLTAGE_LIMIT;
     struct device_node *np = NULL;
     struct device* dev = NULL;
 
@@ -294,19 +333,14 @@ static int hw_otg_id_probe(struct platform_device *pdev)
         hw_usb_err("%s alloc otg_dev failed! not enough memory\n", __func__);
         return ret;
     }
-    platform_set_drvdata(pdev, otg_gpio_id_dev_p);
+	platform_set_drvdata(pdev, otg_gpio_id_dev_p);
     otg_gpio_id_dev_p->pdev = pdev;
-    otg_gpio_id_dev_p->otg_irq_enabled = true;
-    otg_gpio_id_dev_p->otg_nb.notifier_call = hw_otg_id_notifier_call;
-#if defined(CONFIG_DEC_USB)
-    ret = hisi_usb_otg_irq_notifier_register(&otg_gpio_id_dev_p->otg_nb);
-#else
-    ret = hisi_charger_type_notifier_register(&otg_gpio_id_dev_p->otg_nb);
-#endif
-    if (ret < 0) {
-        hw_usb_err("%s hisi_usb_otg_irq_notifier_register failed\n", __func__);
-        goto err_notifier_register;
-    }
+	otg_gpio_id_dev_p->otg_nb.notifier_call = hw_otg_id_notifier_call;
+	ret = hisi_usb_otg_irq_notifier_register(&otg_gpio_id_dev_p->otg_nb);
+	if (ret < 0) {
+		hw_usb_err("%s hisi_usb_otg_irq_notifier_register failed\n", __func__);
+		goto err_notifier_register;
+	}
 
     dev = &pdev->dev;
     np = dev->of_node;
@@ -337,7 +371,7 @@ static int hw_otg_id_probe(struct platform_device *pdev)
     /*init otg intr handle work funtion*/
     INIT_WORK(&otg_gpio_id_dev_p->otg_intb_work, hw_otg_id_intb_work);
 
-    /*
+	/*
      * init otg gpio process
      */
     ret = gpio_request(otg_gpio_id_dev_p->gpio, "otg_gpio_irq");
@@ -348,19 +382,22 @@ static int hw_otg_id_probe(struct platform_device *pdev)
 
     avgvalue = hw_otg_id_adc_sampling(otg_gpio_id_dev_p);
     startup_otg_sample = SAMPLE_DONE;
-#ifdef CONFIG_HUAWEI_YCABLE
-    if (ycable_is_support()) {
-        adc_voltage_min = ycable_get_gpio_adc_min();
+
+    ycable_init(np);
+    if (ycable != NULL && ycable->ycable_support) {
+        adc_voltage_min = YCABLE_CHG_THRESHOLD_VOLTAGE_MAX;
     }
-#endif
+
     if ((avgvalue > adc_voltage_min) && (avgvalue <= ADC_VOLTAGE_MAX)) {
-        hw_usb_err("%s Set gpio_direction_output, avgvalue is %d.\n", __func__, avgvalue);
-        ret = gpio_direction_output(otg_gpio_id_dev_p->gpio,1);
-    } else {
+		hw_usb_err("%s Set gpio_direction_output, avgvalue is %d.\n", __func__, avgvalue);
+		ret = gpio_direction_output(otg_gpio_id_dev_p->gpio,1);
+                goto err_detect_otg_id;
+    }
+	else {
         ret = gpio_direction_input(otg_gpio_id_dev_p->gpio);
         if (ret < 0) {
             hw_usb_err("%s gpio_direction_input error!!! ret=%d. gpio=%d.\n", __func__, ret, otg_gpio_id_dev_p->gpio);
-            goto err_detect_otg_id;
+            goto err_set_gpio_direction;
         }
     }
 
@@ -368,14 +405,6 @@ static int hw_otg_id_probe(struct platform_device *pdev)
     if (otg_gpio_id_dev_p->irq < 0) {
         hw_usb_err("%s gpio_to_irq error!!! dev_p->gpio=%d, dev_p->irq=%d.\n", __func__, otg_gpio_id_dev_p->gpio, otg_gpio_id_dev_p->irq);
         goto err_gpio_to_irq;
-    } else {
-        hw_usb_err("%s otg irq is %d.\n", __func__, otg_gpio_id_dev_p->irq);
-        if (0 == !hw_is_usb_cable_connected()) {
-            hw_otg_id_notifier_call(NULL, !USB_CHARGER_INSERTED, NULL);
-        }
-        else {
-            hw_otg_id_notifier_call(NULL, !USB_CHARGER_REMOVE, NULL);
-        }
     }
 
     ret = request_irq(otg_gpio_id_dev_p->irq, hw_otg_id_irq_handle,
@@ -385,11 +414,7 @@ static int hw_otg_id_probe(struct platform_device *pdev)
         goto err_request_irq;
     } else {
         if (VBUS_IS_CONNECTED == !hw_is_usb_cable_connected()) {
-#if defined(CONFIG_DEC_USB)
             hw_otg_id_notifier_call(NULL, !USB_CHARGER_INSERTED, NULL);
-#else
-            hw_otg_id_notifier_call(NULL, CHARGER_TYPE_SDP, NULL);
-#endif
         }
     }
 
@@ -400,36 +425,32 @@ static int hw_otg_id_probe(struct platform_device *pdev)
       schedule_work(&otg_gpio_id_dev_p->otg_intb_work);
     }
 
-    hw_usb_err("Exit [%s]-\n", __func__);
+    usb_dbg("Exit [%s]-\n", __func__);
 
     return 0;
 
 	err_notifier_register:
 		devm_kfree(&pdev->dev, otg_gpio_id_dev_p);
 		otg_gpio_id_dev_p = NULL;
+		ycable_info_free();
 		return 0;
 	err_property_read_u32:
 	err_of_get_named_gpio:
 	err_gpio_request:
-#if defined(CONFIG_DEC_USB)
 		hisi_usb_otg_irq_notifier_unregister(&otg_gpio_id_dev_p->otg_nb);
-#else
-		hisi_charger_type_notifier_unregister(&otg_gpio_id_dev_p->otg_nb);
-#endif
 		devm_kfree(&pdev->dev, otg_gpio_id_dev_p);
 		otg_gpio_id_dev_p = NULL;
+		ycable_info_free();
 		return 0;
 	err_detect_otg_id:
+	err_set_gpio_direction:
 	err_gpio_to_irq:
 	err_request_irq:
-#if defined(CONFIG_DEC_USB)
 		hisi_usb_otg_irq_notifier_unregister(&otg_gpio_id_dev_p->otg_nb);
-#else
-		hisi_charger_type_notifier_unregister(&otg_gpio_id_dev_p->otg_nb);
-#endif
 		gpio_free(otg_gpio_id_dev_p->gpio);
 		devm_kfree(&pdev->dev, otg_gpio_id_dev_p);
 		otg_gpio_id_dev_p = NULL;
+		ycable_info_free();
 		return 0;
 }
 
@@ -446,15 +467,12 @@ static int hw_otg_id_remove(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-#if defined(CONFIG_DEC_USB)
 	hisi_usb_otg_irq_notifier_unregister(&otg_gpio_id_dev_p->otg_nb);
-#else
-	hisi_charger_type_notifier_unregister(&otg_gpio_id_dev_p->otg_nb);
-#endif
 	free_irq(otg_gpio_id_dev_p->irq, pdev);
     gpio_free(otg_gpio_id_dev_p->gpio);
     devm_kfree(&pdev->dev, otg_gpio_id_dev_p);
 	otg_gpio_id_dev_p = NULL;
+	ycable_info_free();
 	return 0;
 }
 

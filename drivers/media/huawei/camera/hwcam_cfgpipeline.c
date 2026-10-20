@@ -73,8 +73,7 @@ static DECLARE_WAIT_QUEUE_HEAD(s_wait_closing_pipeline);
 static LIST_HEAD(s_pipelines_closing);
 
 static void hwcam_cfgpipeline_force_close(struct work_struct *work);
-static int  hwcam_cfgpipeline_mount_req_on_cancel(hwcam_cfgreq_intf_t* pintf,
-                int reason);
+
 enum
 {
     HWCAM_WAIT4STOPPING_TIME                    =   30000,   // 30s
@@ -878,6 +877,46 @@ hwcam_cfgpipeline_vo_notify(
     return 0;
 }
 
+static long
+hwcam_cfgpipeline_vo_mount_buf(
+        hwcam_cfgpipeline_t* cam,
+        hwcam_buf_info_t* bi)
+{
+    long rc = -EINVAL;
+
+    switch (bi->kind)
+    {
+    case HWCAM_BUF_KIND_PIPELINE_CAPABILITY:
+        break;
+    case HWCAM_BUF_KIND_PIPELINE_PARAM:
+        break;
+    default:
+        HWCAM_CFG_ERR("invalid buffer kind(%d)! \n", bi->kind);
+        break;
+    }
+    return rc;
+}
+
+static long
+hwcam_cfgpipeline_vo_unmount_buf(
+        hwcam_cfgpipeline_t* cam,
+        hwcam_buf_info_t* bi)
+{
+    long rc = -EINVAL;
+
+    switch (bi->kind)
+    {
+    case HWCAM_BUF_KIND_PIPELINE_CAPABILITY:
+        break;
+    case HWCAM_BUF_KIND_PIPELINE_PARAM:
+        break;
+    default:
+        HWCAM_CFG_ERR("invalid buffer kind(%d)! \n", bi->kind);
+        break;
+    }
+    return rc;
+}
+
 static void
 hwcam_cfgpipeline_subscribed_event_ops_merge(
         const struct v4l2_event* old,
@@ -918,6 +957,14 @@ hwcam_cfgpipeline_vo_do_ioctl(
     case HWCAM_V4L2_IOCTL_NOTIFY:
         rc = hwcam_cfgpipeline_vo_notify(pl,
                 (struct v4l2_event*)arg);
+        break;
+    case HWCAM_V4L2_IOCTL_MOUNT_BUF:
+        rc = hwcam_cfgpipeline_vo_mount_buf(pl,
+                (hwcam_buf_info_t*)arg);
+        break;
+    case HWCAM_V4L2_IOCTL_UNMOUNT_BUF:
+        rc = hwcam_cfgpipeline_vo_unmount_buf(pl,
+                (hwcam_buf_info_t*)arg);
         break;
     case VIDIOC_SUBSCRIBE_EVENT:
         rc = v4l2_event_subscribe(&pl->rq,
@@ -1072,7 +1119,6 @@ hwcam_cfgpipeline_mount_req_put(
         hwcam_cfgreq_intf_t* pintf)
 {
     hwcam_cfgpipeline_mount_req_t* mpr = I2MPR(pintf);
-
     return kref_put(&mpr->ref, hwcam_cfgpipeline_mount_req_release);
 }
 
@@ -1245,6 +1291,7 @@ hwcam_cfgpipeline_mount_req_release(
     hwcam_cfgpipeline_mount_req_t* mpr = REF2MPR(r);
 
     hwcam_cfgpipeline_mount_req_on_cancel(&mpr->intf, -ENOENT);
+
     if (mpr->pipeline) {
         hwcam_cfgpipeline_intf_put(mpr->pipeline);
     }

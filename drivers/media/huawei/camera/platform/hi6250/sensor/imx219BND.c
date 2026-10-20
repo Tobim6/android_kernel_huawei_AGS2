@@ -12,7 +12,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 static hwsensor_vtbl_t s_imx219BND_vtbl;
 static bool power_on_status = false;//false: power off, true:power on
 /*lint -e826 -e31 -e485 -e785 -e731 -e846 -e514 -e866 -e30 -e84 -e838 -e64 -e528 -e753 -e749 -e715 -esym(826, 31, 485, 785, 731, 846, 514, 866, 30, 84, 838, 64, 528, 753, 749, 715*)*/
@@ -540,8 +539,10 @@ int imx219BND_config(hwsensor_intf_t* si, void  *argp)
         case SEN_CONFIG_READ_REG_SETTINGS:
             break;
         case SEN_CONFIG_ENABLE_CSI:
+            //ret = si->vtbl->csi_enable(si);
             break;
         case SEN_CONFIG_DISABLE_CSI:
+            //ret = si->vtbl->csi_disable(si);
             break;
         case SEN_CONFIG_MATCH_ID:
             ret = si->vtbl->match_id(si,argp);
@@ -598,7 +599,7 @@ static int __init imx219BND_init_module(void)
 
 static void __exit imx219BND_exit_module(void)
 {
-    hwsensor_unregister(Sensor2Pdev(s_imx219BND));
+    hwsensor_unregister(&s_imx219BND.intf);
     platform_driver_unregister(&s_imx219BND_driver);
 }
 /*lint -restore*/

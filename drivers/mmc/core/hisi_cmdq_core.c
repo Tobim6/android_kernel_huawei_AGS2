@@ -18,7 +18,6 @@
 #include <linux/ioprio.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
-#include <linux/hisi/rdr_hisi_platform.h>
 #include <trace/events/mmc.h>
 
 /*move from core.c*/
@@ -69,7 +68,7 @@ int mmc_start_cmdq_request(struct mmc_host *host,
 				mrq->data->timeout_clks, cmdq_write_blocks);
 			}
 		}
-		if (mrq->cmdq_req && mrq->cmdq_req->cmdq_req_flags & DCMD) {
+		if (mrq->cmdq_req && mrq->cmdq_req->cmdq_req_flags & DCMD && mrq->cmd) {
 			if (mrq->cmd->opcode == MMC_SWITCH
 				|| mrq->cmd->opcode == MMC_ERASE_GROUP_START
 				|| mrq->cmd->opcode == MMC_ERASE_GROUP_END
@@ -85,19 +84,17 @@ int mmc_start_cmdq_request(struct mmc_host *host,
 	mrq->cmd->retries = CMDQ_RETRY;
 	mrq->cmd->mrq = mrq;
 	if (mrq->data) {
-		if (mrq->data->blksz > host->max_blk_size)
-			rdr_syserr_process_for_ap((u32)MODID_AP_S_PANIC_Storage, 0ull, 0ull);
-		if (mrq->data->blocks > host->max_blk_count)
-			rdr_syserr_process_for_ap((u32)MODID_AP_S_PANIC_Storage, 0ull, 0ull);
-		if (mrq->data->blocks * mrq->data->blksz >
-			host->max_req_size)
-			rdr_syserr_process_for_ap((u32)MODID_AP_S_PANIC_Storage, 0ull, 0ull);
+		BUG_ON(mrq->data->blksz > host->max_blk_size);
+		BUG_ON(mrq->data->blocks > host->max_blk_count);
+		BUG_ON(mrq->data->blocks * mrq->data->blksz >
+			host->max_req_size);
 
 		mrq->cmd->data = mrq->data;
 		mrq->data->error = 0;
 		mrq->data->mrq = mrq;
 	}
 
+	led_trigger_event(host->led, LED_FULL);
 
 #ifdef CONFIG_HW_MMC_MAINTENANCE_CMD
 	record_mmc_cmdq_cmd(mrq);
@@ -233,6 +230,9 @@ EXPORT_SYMBOL(mmc_discard_queue);
  */
 int mmc_cmdq_discard_queue(struct mmc_host *host, u32 tasks)
 {
+#if 0
+	return mmc_discard_queue(host, tasks);
+#else
 	int ret;
 
 	ret = host->cmdq_ops->discard_task(host, tasks, true);
@@ -240,5 +240,6 @@ int mmc_cmdq_discard_queue(struct mmc_host *host, u32 tasks)
 		pr_err("%s: discard queue fail\n", __func__);
 
 	return ret;
+#endif
 }
 EXPORT_SYMBOL(mmc_cmdq_discard_queue);

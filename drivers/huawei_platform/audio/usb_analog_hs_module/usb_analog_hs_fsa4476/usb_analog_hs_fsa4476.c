@@ -30,9 +30,6 @@
 #include <linux/fs.h>
 #include "huawei_platform/audio/usb_analog_hs_fsa4476.h"
 #include <linux/hisi/hi64xx/hi64xx_mbhc.h>
-#ifdef CONFIG_SUPERSWITCH_FSC
-#include "../../../usb/superswitch/fsc/Platform_Linux/fusb3601_global.h"
-#endif
 
 #define LOG_TAG "usb_analog_hs_fsa4476"
 #define SD_GPIO_SCTRL_REG    0xfff0a314
@@ -78,8 +75,6 @@ struct usb_ana_hs_fsa4476_data {
     int gpio_en1;
     int gpio_en2;
     int gpio_enn;
-    int mic_gnd_np; /* H: sbu1/sbu2 hung up; L: sbu1/sbu2 connected to mic/gnd */
-    int mic_gnd_switch; /* H: sbu1-->mic, sbu2-->gnd; L: sbu1-->gnd, sbu2-->mic */
     int mic_switch_delay_time;
     int registed;  //usb analog headset dev register flag
     int sd_gpio_used;
@@ -94,15 +89,7 @@ struct usb_ana_hs_fsa4476_data {
     struct usb_analog_hs_dev *codec_ops_dev;
     void *private_data;  //store codec description data
     int usb_analog_hs_in;
-    bool using_superswitch;
-    bool support_cc;
-    bool connect_linein_r;
-    bool switch_antenna; //HUAWEI USB-C TO 3.5MM AUDIO ADAPTER has TDD noise, when usb analog hs plug in, need switch to upper antenna.
-};
-
-enum {
-    FSA4776_ENABLE     = 0,
-    FSA4776_DISABLE    = 1,
+    bool pd_unlock_enable;
 };
 
 static struct usb_ana_hs_fsa4476_data *g_pdata_fsa4476 = NULL;
@@ -125,54 +112,6 @@ static inline void usb_analog_hs_gpio_set_value(int gpio, int value)
     }
 }
 
-void usb_analog_hs_fsa4476_set_gpio_state(int enn, int en1, int en2)
-{
-    if (g_pdata_fsa4476->using_superswitch) {
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_enn, enn);
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en1, en1);
-        if(g_pdata_fsa4476->mic_gnd_np> 0) {
-            usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_np, (en1==0) ? 1:0);
-        }
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en2, en2);
-        if(g_pdata_fsa4476->mic_gnd_switch> 0) {
-            usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_switch, en2);
-        }
-    } else if (g_pdata_fsa4476->support_cc) {
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en1, en1);
-        if(g_pdata_fsa4476->mic_gnd_np> 0) {
-            usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_np, (en1==0) ? 1:0);
-        }
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en2, en2);
-        if(g_pdata_fsa4476->mic_gnd_switch> 0) {
-            usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_switch, en2);
-        }
-    }
-    return;
-}
-
-static void usb_analog_hs_fsa4476_enable(int enable)
-{
-    if (g_pdata_fsa4476->using_superswitch) {
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_enn, enable);
-    }
-    return;
-}
-
-#ifdef CONFIG_SUPERSWITCH_FSC
-static int set_superswitch_sbu_switch(SbuSwitch_t SbuSwitch)
-{
-    if (g_pdata_fsa4476->using_superswitch) {
-        struct fusb3601_chip *chip = fusb3601_GetChip();
-        if (!chip) {
-            loge("fusb3601_chip is NULL!\n");
-            return -1;
-        }
-        FUSB3601_set_sbu_switch(&chip->port, SbuSwitch);
-    }
-    return 0;
-}
-#endif
-
 static void usb_analog_hs_plugin_work(struct work_struct *work)
 {
     IN_FUNCTION;
@@ -180,26 +119,15 @@ static void usb_analog_hs_plugin_work(struct work_struct *work)
     wake_lock(&g_pdata_fsa4476->wake_lock);
     //change codec hs resistence from 70ohm to 3Kohm, to reduce the pop sound in hs when usb analog hs plug in.
     g_pdata_fsa4476->codec_ops_dev->ops.hs_high_resistence_enable(g_pdata_fsa4476->private_data, true);
-    #ifdef CONFIG_SUPERSWITCH_FSC
-    if (set_superswitch_sbu_switch(Sbu_Cross_Close_Aux) < 0) { //SBU2 connect to HS_FB
-        wake_unlock(&g_pdata_fsa4476->wake_lock);
-        return;
-    }
-    #endif
-
-    if (g_pdata_fsa4476->switch_antenna) {
-        pd_dpm_send_event(ANA_AUDIO_IN_EVENT); //notify the phone: usb analog hs plug in, switch to upper antenna, to avoid TDD-noise
-    }
-
-    usb_analog_hs_fsa4476_enable(FSA4776_ENABLE);
     usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en1, 1);
-    if(g_pdata_fsa4476->mic_gnd_np > 0) {
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_np, 0);
-    }
     msleep(DEFLAUT_SLEEP_TIME_20MS);
     g_pdata_fsa4476->codec_ops_dev->ops.plug_in_detect(g_pdata_fsa4476->private_data);
     mutex_lock(&g_pdata_fsa4476->mutex);
     g_pdata_fsa4476->usb_analog_hs_in = USB_ANA_HS_PLUG_IN;
+    //unlock pd wakelock to low power
+    if (g_pdata_fsa4476->pd_unlock_enable) {
+        pd_dpm_wakelock_ctrl(PD_WAKE_UNLOCK);
+    }
 
     mutex_unlock(&g_pdata_fsa4476->mutex);
     //recovery codec hs resistence to 70ohm, to avoid affecting other hs businesses.
@@ -214,11 +142,6 @@ static void usb_analog_hs_plugout_work(struct work_struct *work)
     IN_FUNCTION;
 
     wake_lock(&g_pdata_fsa4476->wake_lock);
-    if (g_pdata_fsa4476->analog_hs_plugin_delay_wq) {
-         logi("remove plugin work in plugin_delay_workqueue if exist to prevent GPIO-EN1 remaining high caused by inserting-removing headset too fast!\n");
-         cancel_delayed_work(&g_pdata_fsa4476->analog_hs_plugin_delay_work);
-         flush_workqueue(g_pdata_fsa4476->analog_hs_plugin_delay_wq);
-    }
     if (g_pdata_fsa4476->usb_analog_hs_in == USB_ANA_HS_PLUG_IN) {
         logi("usb analog hs plug out act!\n");
         g_pdata_fsa4476->codec_ops_dev->ops.plug_out_detect(g_pdata_fsa4476->private_data);
@@ -226,24 +149,7 @@ static void usb_analog_hs_plugout_work(struct work_struct *work)
         g_pdata_fsa4476->usb_analog_hs_in = USB_ANA_HS_PLUG_OUT;
         mutex_unlock(&g_pdata_fsa4476->mutex);
         usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en1, 0);
-        if(g_pdata_fsa4476->mic_gnd_np > 0) {
-            usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_np, 1);
-        }
         usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en2, 0);
-        if(g_pdata_fsa4476->mic_gnd_switch > 0) {
-            usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_switch, 0);
-        }
-        if (g_pdata_fsa4476->switch_antenna) {
-            pd_dpm_send_event(ANA_AUDIO_OUT_EVENT); //notify the phone: usb analog hs plug out.
-        }
-
-        #ifdef CONFIG_SUPERSWITCH_FSC
-        if (set_superswitch_sbu_switch(Sbu_None) < 0) { //HS_FB disconnect
-            wake_unlock(&g_pdata_fsa4476->wake_lock);
-            return;
-        }
-        #endif
-        usb_analog_hs_fsa4476_enable(FSA4776_DISABLE);
     }
     wake_unlock(&g_pdata_fsa4476->wake_lock);
 
@@ -283,11 +189,13 @@ int usb_ana_hs_fsa4476_dev_register(struct usb_analog_hs_dev *dev, void *codec_d
 
 int usb_ana_hs_fsa4476_check_hs_pluged_in(void)
 {
-    int analog_hs_state = pd_dpm_get_analog_hs_state();
+    int typec_detach = PD_DPM_TYPEC_UNATTACHED;
 
-    logi("analog_hs_state =%d\n",analog_hs_state);
+    pd_dpm_get_typec_state(&typec_detach);
 
-    if(analog_hs_state)
+    logi("typec_detach =%d\n",typec_detach);
+
+    if(typec_detach == PD_DPM_USB_TYPEC_AUDIO_ATTACHED)
         return USB_ANA_HS_PLUG_IN;
     else
         return USB_ANA_HS_PLUG_OUT;
@@ -296,7 +204,7 @@ int usb_ana_hs_fsa4476_check_hs_pluged_in(void)
 void usb_ana_hs_fsa4476_mic_swtich_change_state(void)
 {
     int gpio_mic_sel_val = 0;
-    int gpio_mic_gnd_switch = 0;
+
     /* usb analog headset driver not be probed, just return */
     if (g_pdata_fsa4476 == NULL) {
         loge("pdata is NULL\n");
@@ -312,40 +220,19 @@ void usb_ana_hs_fsa4476_mic_swtich_change_state(void)
 
     gpio_mic_sel_val = usb_analog_hs_gpio_get_value(g_pdata_fsa4476->gpio_en2);
     logi("gpio mic sel is %d!\n", gpio_mic_sel_val);
-    if(g_pdata_fsa4476->mic_gnd_switch > 0) {
-        gpio_mic_gnd_switch = usb_analog_hs_gpio_get_value(g_pdata_fsa4476->mic_gnd_switch);
-        logi("gpio mic gnd switch is %d!\n", gpio_mic_gnd_switch);
-    }
 
     if (gpio_mic_sel_val == 0) {
         gpio_mic_sel_val = 1;
-        #ifdef CONFIG_SUPERSWITCH_FSC
-        if (set_superswitch_sbu_switch(Sbu_Close_Aux) < 0) { //SBU1 connect to HS_FB
-            return;
-        }
-        #endif
     } else {
         gpio_mic_sel_val = 0;
-        #ifdef CONFIG_SUPERSWITCH_FSC
-        if (set_superswitch_sbu_switch(Sbu_Cross_Close_Aux) < 0) { //SBU2 connect to HS_FB
-            return;
-        }
-        #endif
     }
     logi("gpio mic sel will set to %d!\n", gpio_mic_sel_val);
 
     usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en2, gpio_mic_sel_val);
-    if(g_pdata_fsa4476->mic_gnd_switch > 0) {
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_switch, gpio_mic_sel_val);
-    }
     if(g_pdata_fsa4476->mic_switch_delay_time > 0)
         msleep(g_pdata_fsa4476->mic_switch_delay_time);
     gpio_mic_sel_val = usb_analog_hs_gpio_get_value(g_pdata_fsa4476->gpio_en2);
     logi("gpio mic sel change to %d!\n",gpio_mic_sel_val);
-    if(g_pdata_fsa4476->mic_gnd_switch > 0) {
-        gpio_mic_gnd_switch = usb_analog_hs_gpio_get_value(g_pdata_fsa4476->mic_gnd_switch);
-        logi("gpio mic gnd switch change to %d!\n",gpio_mic_gnd_switch);
-    }
 
     OUT_FUNCTION;
 
@@ -365,37 +252,20 @@ void usb_ana_hs_fsa4476_plug_in_out_handle(int hs_state)
     }
     IN_FUNCTION;
 
+    logi("hs_state is %d[%s]\n",hs_state,
+        (hs_state == USB_ANA_HS_PLUG_IN)?"PLUG_IN":"PLUG_OUT");
+
     wake_lock_timeout(&g_pdata_fsa4476->wake_lock, msecs_to_jiffies(1000));
 
-    switch (hs_state) {
-        case USB_ANA_HS_PLUG_IN:
-            queue_delayed_work(g_pdata_fsa4476->analog_hs_plugin_delay_wq,
-                    &g_pdata_fsa4476->analog_hs_plugin_delay_work,
-                    msecs_to_jiffies(800));
-            break;
-        case USB_ANA_HS_PLUG_OUT:
-            queue_delayed_work(g_pdata_fsa4476->analog_hs_plugout_delay_wq,
-                    &g_pdata_fsa4476->analog_hs_plugout_delay_work, 0);
-            break;
-        case DP_PLUG_IN:
-            usb_analog_hs_fsa4476_set_gpio_state(FSA4776_ENABLE, 0, 0);
-            break;
-        case DP_PLUG_IN_CROSS:
-            usb_analog_hs_fsa4476_set_gpio_state(FSA4776_ENABLE, 0, 1);
-            break;
-        case DP_PLUG_OUT:
-            usb_analog_hs_fsa4476_set_gpio_state(FSA4776_DISABLE, 0, 0);
-            break;
-        case DIRECT_CHARGE_IN:
-            usb_analog_hs_fsa4476_set_gpio_state(FSA4776_ENABLE, 0, 0);
-            break;
-        case DIRECT_CHARGE_OUT:
-            usb_analog_hs_fsa4476_set_gpio_state(FSA4776_DISABLE, 0, 0);
-            break;
-        default:
-            break;
+    if(hs_state == USB_ANA_HS_PLUG_IN) {
+        queue_delayed_work(g_pdata_fsa4476->analog_hs_plugin_delay_wq,
+                           &g_pdata_fsa4476->analog_hs_plugin_delay_work,
+                           msecs_to_jiffies(800));
+    } else {
+        queue_delayed_work(g_pdata_fsa4476->analog_hs_plugout_delay_wq,
+                           &g_pdata_fsa4476->analog_hs_plugout_delay_work,
+                           0);
     }
-    logi("hs_state is %d\n", hs_state);
     OUT_FUNCTION;
 }
 
@@ -421,7 +291,7 @@ MODULE_DEVICE_TABLE(of, usb_ana_hs_fsa4476_of_match);
 /* load dts config for board difference */
 static void load_gpio_type_config(struct device_node *node)
 {
-    unsigned int temp = USB_ANALOG_HS_GPIO_SOC;
+    unsigned int temp;
 
     if (!of_property_read_u32(node, "gpio_type", &temp)) {
         g_pdata_fsa4476->gpio_type = temp;
@@ -505,51 +375,6 @@ static int usb_ana_hs_fsa4476_load_gpio_pdata(struct device *dev,
     }
     gpio_direction_output(data->gpio_en2, 0);
 
-    /* get mic and gnd hung up gpio */
-    data->mic_gnd_np= of_get_named_gpio(dev->of_node, "mic_gnd_np", 0);
-    if (data->mic_gnd_np < 0) {
-        logi(":Looking up %s property in node mic_gnd_np failed %d\n"
-            , dev->of_node->full_name, data->mic_gnd_np);
-        //if not use this gpio, set a invalid value -1
-        data->mic_gnd_np = -1;
-    } else {
-        if (!gpio_is_valid(data->mic_gnd_np)) {
-            loge("mic_gnd_np is unvalid!\n");
-            ret = -ENOENT;
-            goto mic_gnd_np_gpio_invalid_err;
-        }
-
-        /* applay for mic and gnd hung up gpio */
-        ret = gpio_request(data->mic_gnd_np, "swtich_hs_mic_gnd_np");
-        if (ret < 0) {
-            loge("error request GPIO for swtich_hs_mic_gnd_np fail %d\n", ret);
-            goto mic_gnd_np_gpio_invalid_err;
-        }
-        gpio_direction_output(data->mic_gnd_np, 1);
-    }
-    /* get mic gnd switch gpio */
-    data->mic_gnd_switch= of_get_named_gpio(dev->of_node, "mic_gnd_switch", 0);
-    if (data->mic_gnd_switch < 0) {
-        logi(":Looking up %s property in node mic_gnd_switch failed %d\n"
-            , dev->of_node->full_name, data->mic_gnd_switch);
-        //if not use this gpio, set a invalid value -1
-        data->mic_gnd_switch = -1;
-    } else {
-        if (!gpio_is_valid(data->mic_gnd_switch)) {
-            loge("mic_gnd_switch is unvalid!\n");
-            ret = -ENOENT;
-            goto mic_gnd_switch_gpio_invalid_err;
-        }
-
-        /* applay for mic and gnd switch gpio */
-        ret = gpio_request(data->mic_gnd_switch, "swtich_hs_mic_gnd_switch");
-        if (ret < 0) {
-            loge("error request GPIO for swtich_hs_mic_gnd_switch fail %d\n", ret);
-            goto mic_gnd_switch_gpio_invalid_err;
-        }
-        gpio_direction_output(data->mic_gnd_switch, 1);
-    }
-
     /*get sd gpio use config*/
     data->sd_gpio_used = of_get_named_gpio(dev->of_node, "sd_gpio_used", 0);
     if (data->sd_gpio_used < 0) {
@@ -558,13 +383,6 @@ static int usb_ana_hs_fsa4476_load_gpio_pdata(struct device *dev,
     }
 
     return 0;
-
-mic_gnd_switch_gpio_invalid_err:
-    if(data->mic_gnd_np > 0) {
-        gpio_free(data->mic_gnd_np);
-    }
-mic_gnd_np_gpio_invalid_err:
-    gpio_free(data->gpio_en2);
 fsa4476_get_gpio_en2_switch_err:
     gpio_free(data->gpio_en1);
 fsa4476_get_gpio_switch_enn_err:
@@ -585,15 +403,8 @@ static void usb_analog_hs_free_gpio(struct usb_ana_hs_fsa4476_data *data)
 
     if(data->gpio_en2 > 0)
         gpio_free(data->gpio_en2);
-
-    if(data->mic_gnd_np> 0)
-        gpio_free(data->mic_gnd_np);
-
-    if(data->mic_gnd_switch> 0)
-        gpio_free(data->mic_gnd_switch);
 }
 
-#ifdef USB_ANALOG_HEADSET_DEBUG
 static ssize_t usb_ana_hs_fsa4476_mic_switch_show(struct device *dev,
                       struct device_attribute *attr, char *buf)
 {
@@ -640,17 +451,10 @@ static ssize_t usb_ana_hs_fsa4476_mic_switch_store(struct device *dev,
         return count;
     }
 
-    if(val) {
+    if(ret)
         usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en2, 1);
-        if(g_pdata_fsa4476->mic_gnd_switch> 0) {
-            usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_switch, 1);
-        }
-    } else {
+    else
         usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en2, 0);
-        if(g_pdata_fsa4476->mic_gnd_switch> 0) {
-            usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_switch, 0);
-        }
-    }
 
     return count;
 }
@@ -666,7 +470,6 @@ static struct attribute *usb_ana_hs_fsa4476_attributes[] = {
 static const struct attribute_group usb_ana_hs_fsa4476_attr_group = {
     .attrs = usb_ana_hs_fsa4476_attributes,
 };
-#endif
 
 static long usb_ana_hs_fsa4476_ioctl(struct file *file, unsigned int cmd,
                                unsigned long arg)
@@ -688,36 +491,14 @@ static long usb_ana_hs_fsa4476_ioctl(struct file *file, unsigned int cmd,
             logi("gpio_mic_sel_val = %d!\n", gpio_mic_sel_val);
             ret = put_user((__u32)(gpio_mic_sel_val),p_user);
             break;
-        case IOCTL_USB_ANA_HS_GET_CONNECT_LINEIN_R_STATE:
-            logi("connect_linein_r = %d!\n", g_pdata_fsa4476->connect_linein_r);
-            ret = put_user((__u32)(g_pdata_fsa4476->connect_linein_r),p_user);
-            break;
         case IOCTL_USB_ANA_HS_GND_FB_CONNECT:
             logi("usb analog hs fsa4476 ioctl gnd fb connect\n");
-            #ifdef CONFIG_SUPERSWITCH_FSC
-            if (set_superswitch_sbu_switch(Sbu_Cross_Close_Aux) < 0) { //SBU2 connect to HS_FB
-                return -1;
-            }
-            #endif
-            usb_analog_hs_fsa4476_enable(FSA4776_ENABLE);
             usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en1, 1);
-            if(g_pdata_fsa4476->mic_gnd_np> 0) {
-                usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_np, 0);
-            }
             //usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en2, 1);
             break;
         case IOCTL_USB_ANA_HS_GND_FB_DISCONNECT:
             logi("usb analog hs fsa4476 ioctl gnd fb disconnect\n");
-            #ifdef CONFIG_SUPERSWITCH_FSC
-            if (set_superswitch_sbu_switch(Sbu_None) < 0) { //HS_FB disconnect
-                return -1;
-            }
-            #endif
-            usb_analog_hs_fsa4476_enable(FSA4776_DISABLE);
             usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en1, 0);
-            if(g_pdata_fsa4476->mic_gnd_np> 0) {
-                usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_np, 1);
-            }
             //usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en2, 0);
             break;
         default:
@@ -773,7 +554,6 @@ static int usb_ana_hs_fsa4476_probe(struct platform_device *pdev)
     struct device *dev = &pdev->dev;
     struct device_node *node =  dev->of_node;
     const char *mic_switch_delay = "mic_switch_delay";
-    const char *connect_linein_r = "connect_linein_r";
     int ret = 0;
     int val = 0;
 
@@ -806,48 +586,15 @@ static int usb_ana_hs_fsa4476_probe(struct platform_device *pdev)
         }
     }
 
-
-    if (!of_property_read_u32(dev->of_node, connect_linein_r, &val)){
-        if(0 == val) {
-            g_pdata_fsa4476->connect_linein_r = false;
+    if (!of_property_read_u32(dev->of_node, "pd_unlock_enable", &val)){
+        if(val) {
+            g_pdata_fsa4476->pd_unlock_enable = true;
         } else {
-            g_pdata_fsa4476->connect_linein_r = true;
+            g_pdata_fsa4476->pd_unlock_enable = false;
         }
     } else {
-        logi("%s(%d): connect_linein_r isn't in dt node and set dafault value: true\n", __FUNCTION__,__LINE__);
-        g_pdata_fsa4476->connect_linein_r = true;
-    }
-
-    if (!of_property_read_u32(dev->of_node, "support_cc", &val)) {
-        if (val) {
-            g_pdata_fsa4476->support_cc = true;
-        } else {
-            g_pdata_fsa4476->support_cc = false;
-        }
-    } else {
-        logi("%s(%d): support_cc isn't in dt node and set dafault value: false\n", __FUNCTION__,__LINE__);
-        g_pdata_fsa4476->support_cc = false;
-    }
-
-    if (!of_property_read_u32(node, "using_superswitch", &val)) {
-        if (val) {
-            g_pdata_fsa4476->using_superswitch = true;
-        } else {
-            g_pdata_fsa4476->using_superswitch = false;
-        }
-    } else {
-        g_pdata_fsa4476->using_superswitch = false;
-    }
-
-    if (!of_property_read_u32(node, "switch_antenna", &val)) {
-        if (val) {
-            g_pdata_fsa4476->switch_antenna = true;
-        } else {
-            g_pdata_fsa4476->switch_antenna = false;
-        }
-    } else {
-        logi("%s(%d): switch_antenna isn't in dt node and set dafault value: false\n", __FUNCTION__,__LINE__);
-        g_pdata_fsa4476->switch_antenna = false;
+        logi("%s(%d): pd_unlock_enable isn't in dt node and set dafault value: false\n", __FUNCTION__,__LINE__);
+        g_pdata_fsa4476->pd_unlock_enable = false;
     }
 
     wake_lock_init(&g_pdata_fsa4476->wake_lock, WAKE_LOCK_SUSPEND, "usb_analog_hs");
@@ -857,20 +604,9 @@ static int usb_ana_hs_fsa4476_probe(struct platform_device *pdev)
     load_gpio_type_config(node);
     g_pdata_fsa4476->registed = USB_ANALOG_HS_NOT_REGISTER;
     g_pdata_fsa4476->usb_analog_hs_in = USB_ANA_HS_PLUG_OUT;
-
-    if (g_pdata_fsa4476->using_superswitch) {
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_enn, FSA4776_DISABLE);
-    } else {
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_enn, FSA4776_ENABLE);
-    }
+    usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_enn, 0);
     usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en1, 0);
-    if(g_pdata_fsa4476->mic_gnd_np> 0) {
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_np, 1);
-    }
     usb_analog_hs_gpio_set_value(g_pdata_fsa4476->gpio_en2, 0);
-    if(g_pdata_fsa4476->mic_gnd_switch> 0) {
-        usb_analog_hs_gpio_set_value(g_pdata_fsa4476->mic_gnd_switch, 0);
-    }
 
     /* create workqueue */
     g_pdata_fsa4476->analog_hs_plugin_delay_wq =
@@ -904,11 +640,9 @@ static int usb_ana_hs_fsa4476_probe(struct platform_device *pdev)
         goto fsa4476_err_misc_register;
     }
 
-#ifdef USB_ANALOG_HEADSET_DEBUG
     ret = sysfs_create_group(&dev->kobj, &usb_ana_hs_fsa4476_attr_group);
     if (ret < 0)
         loge("failed to register sysfs\n");
-#endif
 
     logi("usb_analog_hs probe success!\n");
     return 0;
@@ -955,11 +689,7 @@ static int usb_ana_hs_fsa4476_remove(struct platform_device *pdev)
 
     usb_analog_hs_free_gpio(g_pdata_fsa4476);
     misc_deregister(&usb_ana_hs_fsa4476_device);
-
-#ifdef USB_ANALOG_HEADSET_DEBUG
     sysfs_remove_group(&pdev->dev.kobj, &usb_ana_hs_fsa4476_attr_group);
-#endif
-
     kfree(g_pdata_fsa4476);
     g_pdata_fsa4476 = NULL;
 

@@ -34,9 +34,8 @@ struct bkops_debug_ops {
 	bool skip_bkops_stop;
 	bool disable_bkops;
 	bool bkops_force_query;
-	u32 sim_bkops_query_delay; /* in ms */
 };
-#endif /* CONFIG_HISI_DEBUG_FS */
+#endif
 
 typedef enum {
 	BKOPS_100MS,
@@ -57,7 +56,6 @@ struct bkops_stats {
 	u32 bkops_abort_count; /* bkops was interrupted before completed */
 	u32 bkops_actual_query_count;
 	u32 bkops_idle_work_canceled_count;
-	u32 bkops_idle_work_waited_count;
 	u32 bkops_time_query_count;
 	u32 bkops_write_query_count;
 	u32 bkops_discard_query_count;
@@ -84,7 +82,7 @@ struct bkops_stats {
 enum bkops_dev_type {
 	BKOPS_DEV_NONE,
 	BKOPS_DEV_MMC,
-	BKOPS_DEV_UFS_1861,
+	BKOPS_DEV_UFS_VV,
 	BKOPS_DEV_UFS_HYNIX,
 	BKOPS_DEV_TYPE_MAX,
 };

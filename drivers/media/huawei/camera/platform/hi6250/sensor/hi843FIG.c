@@ -13,7 +13,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 #define GPIO_LOW_STATE       0
 #define GPIO_HIGH_STATE      1
 
@@ -591,7 +590,7 @@ gpio_error:
 pinctrl_exit:
     devm_pinctrl_put(p);
 matchID_exit:
-    if (cdata->data != SENSOR_INDEX_INVALID) {
+    if (cdata->data != SENSOR_INDEX_INVALID) {/*lint !e650*/
         cam_info("%s, cdata->cfg.name = %s", __func__,cdata->cfg.name );
     }
 
@@ -659,7 +658,22 @@ int hi843FIG_config(hwsensor_intf_t* si, void  *argp)
             mutex_unlock(&hi843FIG_power_lock);
             /*lint -e455 +esym(455,*)*/
             break;
-
+        /*
+        case SEN_CONFIG_WRITE_REG:
+            break;
+        case SEN_CONFIG_READ_REG:
+            break;
+        case SEN_CONFIG_WRITE_REG_SETTINGS:
+            break;
+        case SEN_CONFIG_READ_REG_SETTINGS:
+            break;
+        case SEN_CONFIG_ENABLE_CSI:
+            //ret = si->vtbl->csi_enable(si);
+            break;
+        case SEN_CONFIG_DISABLE_CSI:
+            //ret = si->vtbl->csi_disable(si);
+            break;
+        */
         case SEN_CONFIG_MATCH_ID:
             if(NULL == si->vtbl->match_id){
                 cam_err("%s. si->vtbl->match_id is null.", __func__);
@@ -715,10 +729,10 @@ static int32_t hi843FIG_platform_probe(struct platform_device* pdev)
     rc = rpmsg_sensor_register(pdev, (void*)&s_hi843FIG);
     if (0 != rc){
         cam_err("%s rpmsg_sensor_register fail.\n", __func__);
-        hwsensor_unregister(Sensor2Pdev(s_hi843FIG));
+        hwsensor_unregister(&s_hi843FIG.intf);
         goto hi843FIG_sensor_probe_fail;
     }
-hi843FIG_sensor_probe_fail:
+    hi843FIG_sensor_probe_fail:
     return rc;
 }
 
@@ -731,7 +745,7 @@ static int __init hi843FIG_init_module(void)
 static void __exit hi843FIG_exit_module(void)
 {
     rpmsg_sensor_unregister((void *)&s_hi843FIG);
-    hwsensor_unregister(Sensor2Pdev(s_hi843FIG));
+    hwsensor_unregister(&s_hi843FIG.intf);
     platform_driver_unregister(&s_hi843FIG_driver);
 }
 /*lint -restore*/

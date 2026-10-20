@@ -44,10 +44,6 @@
 #include <linux/regulator/consumer.h>
 #endif
 
-#ifdef CONFIG_HUAWEI_HW_DEV_DCT
-#include <huawei_platform/devdetect/hw_dev_dec.h>
-#endif
-
 #ifdef CONFIG_HUAWEI_DSM_AUDIO_MODULE
 #define CONFIG_HUAWEI_DSM_AUDIO
 #endif
@@ -58,7 +54,6 @@
 #include "smartpakit.h"
 
 #define HWLOG_TAG smartpakit
-#define REG_PRINT_NUM 2
 HWLOG_REGIST();
 
 #define SMARTPAKIT_IOCTL_OPS(pakit, func) \
@@ -74,6 +69,9 @@ EXPORT_SYMBOL_GPL(smartpakit_priv);
 // 0 not init completed, 1 init completed
 int smartpakit_init_flag = 0;
 EXPORT_SYMBOL_GPL(smartpakit_init_flag);
+
+int smartpakit_i2c_probe_skip[SMARTPAKIT_CHIP_VENDOR_MAX] = { 0 };
+EXPORT_SYMBOL_GPL(smartpakit_i2c_probe_skip);
 
 static void smartpakit_reset_i2c_addr_to_pa_index(smartpakit_i2c_priv_t *i2c_priv, unsigned int id)
 {
@@ -91,60 +89,6 @@ static void smartpakit_reset_i2c_addr_to_pa_index(smartpakit_i2c_priv_t *i2c_pri
 			if (i2c_priv->i2c_pseudo_addr < SMARTPAKIT_I2C_ADDR_ARRAY_MAX) {
 				smartpakit_priv->i2c_addr_to_pa_index[i2c_priv->i2c_pseudo_addr] = (unsigned char)id;
 			}
-		}
-	}
-}
-
-static void smartpakit_check_and_set_hw_dev_flag(void)
-{
-	bool diff_flag = false;
-	int i = 0;
-
-	if (NULL == smartpakit_priv) {
-		hwlog_info("%s: smartpakit_priv is NULL.\n", __func__);
-		return;
-	}
-
-	if (smartpakit_priv->i2c_num < smartpakit_priv->pa_num) {
-#ifndef CONFIG_FINAL_RELEASE
-		hwlog_info("%s: i2c_num < pa_num.\n", __func__);
-#endif
-		return;
-	}
-
-	if (smartpakit_priv->pa_num > 1) {
-		for (i = 1; i < smartpakit_priv->pa_num; i++) {
-			if (strcmp(smartpakit_priv->chip_model_list[0], smartpakit_priv->chip_model_list[i])) {
-				diff_flag = true;
-				break;
-			}
-		}
-	}
-
-	if (diff_flag) {
-		hwlog_info("%s: PLEASE NOTE: CHIP_MODEL NOT SAME!!!\n", __func__);
-	} else {
-#ifndef CONFIG_FINAL_RELEASE
-		hwlog_info("%s: check chip_model success.\n", __func__);
-#endif
-
-#ifdef CONFIG_HUAWEI_HW_DEV_DCT
-		set_hw_dev_flag(DEV_I2C_SPEAKER);
-#endif
-	}
-
-	return;
-}
-
-static void smartpakit_set_gpio_for_check_request(smartpakit_i2c_priv_t *i2c_priv)
-{
-	if (i2c_priv != NULL) {
-		if (i2c_priv->hw_reset != NULL) {
-			smartpakit_priv->gpio_of_hw_reset[i2c_priv->chip_id] = i2c_priv->hw_reset->gpio;
-		}
-
-		if (i2c_priv->irq_handler != NULL) {
-			smartpakit_priv->gpio_of_irq[i2c_priv->chip_id] = i2c_priv->irq_handler->gpio;
 		}
 	}
 }
@@ -172,16 +116,8 @@ int smartpakit_register_i2c_device(smartpakit_i2c_priv_t *i2c_priv)
 
 		smartpakit_priv->i2c_num++;
 		smartpakit_priv->i2c_priv[i2c_priv->chip_id] = i2c_priv;
-		strncpy(smartpakit_priv->chip_model_list[i2c_priv->chip_id], i2c_priv->chip_model,
-			(strlen(i2c_priv->chip_model) < SMARTPAKIT_NAME_MAX) ? strlen(i2c_priv->chip_model) : (SMARTPAKIT_NAME_MAX - 1));
 		smartpakit_reset_i2c_addr_to_pa_index(i2c_priv, i2c_priv->chip_id);
-		smartpakit_check_and_set_hw_dev_flag();
-
-		smartpakit_set_gpio_for_check_request(i2c_priv);
-
-#ifndef CONFIG_FINAL_RELEASE
 		hwlog_info("%s: i2c_priv registered, success!!!\n", __func__);
-#endif
 	}
 
 	return ret;
@@ -229,13 +165,9 @@ void smartpakit_register_ioctl_ops(smartpakit_i2c_ioctl_ops_t *ops)
 	if (smartpakit_priv != NULL) {
 		if (NULL == smartpakit_priv->ioctl_ops) {
 			smartpakit_priv->ioctl_ops = ops;
-#ifndef CONFIG_FINAL_RELEASE
 			hwlog_info("%s: ioctl_ops registered, success!!!\n", __func__);
-#endif
 		} else {
-#ifndef CONFIG_FINAL_RELEASE
 			hwlog_info("%s: ioctl_ops registered, skip!!!\n", __func__);
-#endif
 		}
 	} else {
 		hwlog_err("%s: ioctl_ops register failed!!!\n", __func__);
@@ -252,10 +184,9 @@ int smartpakit_parse_params(smartpakit_pa_ctl_sequence_t *sequence, void __user 
 	int val_num = 0;
 	int ret = 0;
 	int i = 0;
-	unsigned int need_print_node_num = 0;
 
-	hwlog_debug("%s: enter ...\n", __func__);
-	if ((NULL == smartpakit_priv) || (NULL == sequence) || (NULL == arg)) {
+	hwlog_info("%s: enter ...\n", __func__);
+	if ((NULL == sequence) || (NULL == arg)) {
 		hwlog_err("%s: invalid argument!!!\n", __func__);
 		return -EINVAL;
 	}
@@ -269,11 +200,9 @@ int smartpakit_parse_params(smartpakit_pa_ctl_sequence_t *sequence, void __user 
 		smartpakit_set_param_t s;
 
 		// for system/lib64/*.so(64 bits)
-#ifndef CONFIG_FINAL_RELEASE
-		hwlog_info("%s: copy_from_user b64...\n", __func__);
-#endif
+		hwlog_info("%s: copy_from_user b64 %p...\n", __func__, arg);
 		if (copy_from_user(&s, arg, sizeof(smartpakit_set_param_t))) {
-			hwlog_err("%s: get set_param copy_from_user fail!!!\n", __func__);
+			hwlog_err("%s: get set_param copy_from_user fail!!!", __func__);
 			ret = -EFAULT;
 			goto err_out;
 		}
@@ -286,11 +215,9 @@ int smartpakit_parse_params(smartpakit_pa_ctl_sequence_t *sequence, void __user 
 		smartpakit_set_param_compat_t s_compat;
 
 		// for system/lib/*.so(32 bits)
-#ifndef CONFIG_FINAL_RELEASE
-		hwlog_info("%s: copy_from_user b32...\n", __func__);
-#endif
+		hwlog_info("%s: copy_from_user b32 %p...\n", __func__, arg);
 		if (copy_from_user(&s_compat, arg, sizeof(smartpakit_set_param_compat_t))) {
-			hwlog_err("%s: get set_param_compat copy_from_user fail!!!\n", __func__);
+			hwlog_err("%s: get set_param_compat copy_from_user fail!!!", __func__);
 			ret = -EFAULT;
 			goto err_out;
 		}
@@ -299,12 +226,11 @@ int smartpakit_parse_params(smartpakit_pa_ctl_sequence_t *sequence, void __user 
 		param.param_num   = s_compat.param_num;
 		param.params      = compat_ptr(s_compat.params_ptr);
 	}
-
 #endif // CONFIG_COMPAT
 
-	hwlog_debug("%s: regs_num=%d.\n", __func__, param.param_num);
-	if ((0 == param.param_num) || (param.param_num > SMARTPAKIT_IO_PARAMS_NUM_MAX) || (NULL == (void *)param.params)) {
-		hwlog_err("%s: reg_w_sequence invalid argument(%d,%pK)!!!\n", __func__, param.param_num, (void *)param.params);
+	hwlog_info("%s: regs_num=%d, regs_user=%p.\n", __func__, param.param_num, (void *)param.params);
+	if ((0 == param.param_num) || (NULL == (void *)param.params)) {
+		hwlog_err("%s: reg_w_sequence invalid argument(%d,%p)!!!\n", __func__, param.param_num, (void *)param.params);
 		ret = -EINVAL;
 		goto err_out;
 	}
@@ -328,7 +254,7 @@ int smartpakit_parse_params(smartpakit_pa_ctl_sequence_t *sequence, void __user 
 	}
 
 	if (copy_from_user(node, (void __user *)param.params, sizeof(smartpakit_param_node_t) * param_num_need_ops)) { /*lint !e737*/
-		hwlog_err("%s: set regs copy_from_user failed!!!\n", __func__);
+		hwlog_err("%s: set regs copy_from_user failed!!!", __func__);
 		ret = -EIO;
 		goto err_out;
 	}
@@ -357,11 +283,6 @@ int smartpakit_parse_params(smartpakit_pa_ctl_sequence_t *sequence, void __user 
 			if (0 == pa_ctl_write) {
 				continue;
 			}
-			if (i >= smartpakit_priv->i2c_num) {
-				ret = -EINVAL;
-				hwlog_info("%s: pa_ctl_mask param invalid.\n", __func__);
-				goto err_out;
-			}
 
 			sequence->pa_ctl_index_max = (unsigned int)i;
 			sequence->pa_ctl_index[sequence->pa_ctl_num] = (unsigned int)i;
@@ -372,18 +293,13 @@ int smartpakit_parse_params(smartpakit_pa_ctl_sequence_t *sequence, void __user 
 	sequence->param_num = (unsigned int)param_num_need_ops;
 	sequence->node = node;
 
-#ifndef CONFIG_FINAL_RELEASE
 	hwlog_info("%s: pa_ctl_mask=0x%04x, pa_ctl[%d]=%d, %d, %d, %d.\n", __func__, param.pa_ctl_mask, sequence->pa_ctl_num,
 		sequence->pa_ctl_index[0], sequence->pa_ctl_index[1], sequence->pa_ctl_index[2], sequence->pa_ctl_index[3]);
-#endif
-
-	need_print_node_num = (sequence->param_num < REG_PRINT_NUM) ? sequence->param_num : REG_PRINT_NUM;
-
-	for (i = 0; i < need_print_node_num; i++) {
-		hwlog_info("%s: reg[%d]=0x%x, 0x%x, 0x%x, 0x%x, 0x%x(only print two registers).\n", __func__, i,
+	for (i = 0; i < param_num_need_ops; i++) {
+		hwlog_info("%s: reg[%d]=0x%x, 0x%x, 0x%x, 0x%x, 0x%x.\n", __func__, i,
 			node[i].index, node[i].mask, node[i].value, node[i].delay, node[i].reserved);
 	}
-	hwlog_debug("%s: enter end, success.\n", __func__);
+	hwlog_info("%s: enter end, success.\n", __func__);
 	return 0;
 
 err_out:
@@ -392,7 +308,7 @@ err_out:
 		node = NULL;
 	}
 
-	hwlog_debug("%s: error end, ret=%d.\n", __func__, ret);
+	hwlog_info("%s: enter end, ret=%d.\n", __func__, ret);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(smartpakit_parse_params);
@@ -435,15 +351,13 @@ int smartpakit_set_poweron_regs(smartpakit_priv_t *pakit_priv, smartpakit_pa_ctl
 			poweron->pa_ctl_num 	  = 1;
 			poweron->pa_ctl_index_max = sequence->pa_ctl_index[i];
 			poweron->pa_ctl_index[0]  = sequence->pa_ctl_index[i];
-#ifndef CONFIG_FINAL_RELEASE
 			hwlog_info("%s: on 0x%x, %d, %d\n", __func__, poweron->pa_ctl_mask,
 				poweron->pa_ctl_index_max, poweron->pa_ctl_index[0]);
-#endif
 
 			poweron->param_num = sequence->param_num_of_one_pa;
 			poweron->node = (smartpakit_param_node_t *)kzalloc(sizeof(smartpakit_param_node_t) * poweron->param_num, GFP_KERNEL);
 			if (NULL == poweron->node) {
-				hwlog_err("%s: poweron->node kzalloc failed!!!\n", __func__);
+				hwlog_err("%s: poweron->node kzalloc failed!!!", __func__);
 				return -ENOMEM;
 			}
 
@@ -457,35 +371,6 @@ int smartpakit_set_poweron_regs(smartpakit_priv_t *pakit_priv, smartpakit_pa_ctl
 	return 0;
 }
 EXPORT_SYMBOL_GPL(smartpakit_set_poweron_regs);
-
-bool smartpakit_is_gpio_request(int gpio, bool is_irq)
-{
-	bool request = false;
-	int i = 0;
-
-	if (smartpakit_priv == NULL) {
-		hwlog_err("%s: smartpakit_priv is NULL!!!\n", __func__);
-		return request;
-	}
-
-	for (i = 0; i < smartpakit_priv->pa_num; i++) {
-		if (is_irq) { // for irq
-			if (smartpakit_priv->gpio_of_irq[i] == gpio) {
-				request = true;
-				break;
-			}
-		} else { // for hw_reset
-			if (smartpakit_priv->gpio_of_hw_reset[i] == gpio) {
-				request = true;
-				break;
-			}
-		}
-	}
-
-	return request;
-}
-
-EXPORT_SYMBOL_GPL(smartpakit_is_gpio_request);
 
 static int smartpakit_ctrl_open(struct inode *inode, struct file *filp)
 {
@@ -524,25 +409,19 @@ static int smartpakit_ctrl_get_current_i2c_client(smartpakit_priv_t *pakit_priv,
 		return -EINVAL;
 	}
 
-	mutex_lock(&pakit_priv->i2c_ops_lock);
-
 	pakit_priv->current_i2c_client = NULL;
 	if (addr >= SMARTPAKIT_I2C_ADDR_ARRAY_MAX) {
 		hwlog_err("%s: invalid i2c slave addr 0x%x!!!\n", __func__, addr);
-		goto ERR;
+		return -EINVAL;
 	}
 
 	if (pakit_priv->i2c_addr_to_pa_index[addr] == SMARTPAKIT_INVALID_PA_INDEX) {
 		hwlog_err("%s: i2c slave addr 0x%x not registered!!!\n", __func__, addr);
-		goto ERR;
+		return -EINVAL;
 	}
 
 	pakit_priv->current_i2c_client = pakit_priv->i2c_priv[smartpakit_priv->i2c_addr_to_pa_index[addr]]->i2c;
-	mutex_unlock(&pakit_priv->i2c_ops_lock);
 	return 0;
-ERR:
-	mutex_unlock(&pakit_priv->i2c_ops_lock);
-	return -EINVAL;
 }
 
 static ssize_t smartpakit_ctrl_read(struct file *file, char __user *buf,
@@ -564,45 +443,31 @@ static ssize_t smartpakit_ctrl_read(struct file *file, char __user *buf,
 		return -EFAULT;
 	}
 
-	mutex_lock(&pakit_priv->i2c_ops_lock);
-
-	if ((0 == nbytes) || (nbytes > SMARTPAKIT_RW_PARAMS_NUM_MAX)) {
-		hwlog_err("%s: nbytes %d is 0 or >%d bytes, error!\n", __func__, (int)nbytes, SMARTPAKIT_RW_PARAMS_NUM_MAX);
-		ret = -EINVAL;
-		goto ERR;
-	}
-
 	kern_buf = kmalloc(nbytes, GFP_KERNEL);
 	if (!kern_buf) {
 		hwlog_err("Failed to allocate buffer\n");
-		ret = -ENOMEM;
-		goto ERR;
+		return -ENOMEM;
 	}
 
+	mutex_lock(&pakit_priv->i2c_ops_lock);
 	if ((pakit_priv->ioctl_ops != NULL) && (pakit_priv->ioctl_ops->i2c_read != NULL)) {
 		ret = pakit_priv->ioctl_ops->i2c_read(pakit_priv->current_i2c_client, (char *)kern_buf, (int)nbytes);
 	}
+	mutex_unlock(&pakit_priv->i2c_ops_lock);
 
 	if (0 > ret) {
 		hwlog_err("%s: i2c read error %d", __func__, ret);
-		goto ERR;
+		kfree(kern_buf);
+		return ret;
 	}
 
 	if (copy_to_user((void  __user *)buf, kern_buf,  nbytes)) {
-		ret = -EFAULT;
-		goto ERR;
+		kfree(kern_buf);
+		return -EFAULT;
 	}
 
-	mutex_unlock(&pakit_priv->i2c_ops_lock);
 	kfree(kern_buf);
 	return (ssize_t)nbytes;
-ERR:
-	mutex_unlock(&pakit_priv->i2c_ops_lock);
-	if (kern_buf) {
-		kfree(kern_buf);
-		kern_buf = NULL;
-	}
-	return ret;
 }
 
 static ssize_t smartpakit_ctrl_write(struct file *file,
@@ -624,106 +489,40 @@ static ssize_t smartpakit_ctrl_write(struct file *file,
 		return -EFAULT;
 	}
 
-	mutex_lock(&pakit_priv->i2c_ops_lock);
-
-	if ((0 == nbytes) || (nbytes > SMARTPAKIT_RW_PARAMS_NUM_MAX)) {
-		hwlog_err("%s: nbytes %d is 0 or > %d bytes, error!\n", __func__, (int)nbytes, SMARTPAKIT_RW_PARAMS_NUM_MAX);
-		ret = -EINVAL;
-		goto ERR;
-	}
-
 	kern_buf = kmalloc(nbytes, GFP_KERNEL);
 	if (!kern_buf) {
 		hwlog_err("Failed to allocate buffer\n");
-		ret = -ENOMEM;
-		goto ERR;
+		return -ENOMEM;
 	}
 
 	if (copy_from_user(kern_buf, (void  __user *)buf, nbytes)) {
-		ret = -EFAULT;
-		goto ERR;
-	}
-
-	if ((pakit_priv->ioctl_ops != NULL) && (pakit_priv->ioctl_ops->i2c_write != NULL)) {
-		ret = pakit_priv->ioctl_ops->i2c_write(pakit_priv->current_i2c_client, (char *)kern_buf, (int)nbytes);
-	}
-
-	if (0 > ret) {
-		hwlog_err("%s: i2c write error %d", __func__, ret);
-		goto ERR;
-	}
-	mutex_unlock(&pakit_priv->i2c_ops_lock);
-
-	kfree(kern_buf);
-	return (ssize_t)nbytes;
-ERR:
-	mutex_unlock(&pakit_priv->i2c_ops_lock);
-	if (kern_buf) {
 		kfree(kern_buf);
-		kern_buf = NULL;
-	}
-	return ret;
-}
-
-void smartpakit_ctrl_get_model(char *dst, smartpakit_priv_t *pakit_priv)
-{
-	char report_tmp[SMARTPAKIT_NAME_MAX] = { 0 };
-	size_t model_len = 0;
-	int i = 0;
-
-	if ((NULL == dst) || (NULL == pakit_priv)) {
-		hwlog_info("%s: invalid argument!!!\n", __func__);
-		return;
-	}
-
-	for (i = 0; i < pakit_priv->pa_num; i++) {
-		if (i < (pakit_priv->pa_num - 1)) {
-			snprintf(report_tmp, (unsigned long)SMARTPAKIT_NAME_MAX, "%s_", pakit_priv->chip_model_list[i]);
-		} else {
-			snprintf(report_tmp, (unsigned long)SMARTPAKIT_NAME_MAX, "%s", pakit_priv->chip_model_list[i]);
-		}
-		model_len = SMARTPAKIT_NAME_MAX - (strlen(dst) + 1);
-		model_len = (strlen(report_tmp) < model_len) ? strlen(report_tmp) : model_len;
-		strncat(dst, report_tmp, model_len);
-	}
-}
-
-EXPORT_SYMBOL_GPL(smartpakit_ctrl_get_model);
-
-// only for with dsp and only one vendor smarpa scence to set pa vendor info
-int smartpakit_set_info(struct smartpa_vendor_info *vendor_info)
-{
-	if (smartpakit_priv == NULL) {
-		hwlog_err("%s: smartpakit_priv is null", __func__);
 		return -EFAULT;
 	}
 
-	if ((vendor_info == NULL) ||
-	    (vendor_info->vendor >= SMARTPAKIT_CHIP_VENDOR_MAX) ||
-	    (vendor_info->chip_model == NULL)) {
-		hwlog_err("%s: vendor_info %pK error", __func__, vendor_info);
-		return -EINVAL;
+	mutex_lock(&pakit_priv->i2c_ops_lock);
+	if ((pakit_priv->ioctl_ops != NULL) && (pakit_priv->ioctl_ops->i2c_write != NULL)) {
+		ret = pakit_priv->ioctl_ops->i2c_write(pakit_priv->current_i2c_client, (char *)kern_buf, (int)nbytes);
 	}
-	hwlog_info("%s: vendor %d,chip_model %s", __func__, vendor_info->vendor,
-		vendor_info->chip_model);
-	smartpakit_priv->chip_vendor = vendor_info->vendor;
-	smartpakit_priv->chip_model = vendor_info->chip_model;
+	mutex_unlock(&pakit_priv->i2c_ops_lock);
 
-	return 0;
+	if (0 > ret) {
+		hwlog_err("%s: i2c write error %d", __func__, ret);
+		kfree(kern_buf);
+		return ret;
+	}
+
+	kfree(kern_buf);
+	return (ssize_t)nbytes;
 }
-EXPORT_SYMBOL_GPL(smartpakit_set_info);
 
 static int smartpakit_ctrl_get_info(smartpakit_priv_t *pakit_priv, void __user *arg)
 {
 	smartpakit_i2c_priv_t *i2c_priv = NULL;
 	smartpakit_info_t info;
 	size_t model_len = 0;
-	size_t special_name_len = 0;
-	char report_tmp[SMARTPAKIT_NAME_MAX] = { 0 };
 
-#ifndef CONFIG_FINAL_RELEASE
 	hwlog_info("%s: enter ...\n", __func__);
-#endif
 	if ((NULL == pakit_priv) || (NULL == arg)) {
 		hwlog_err("%s: invalid argument!!!\n", __func__);
 		return -EINVAL;
@@ -734,6 +533,7 @@ static int smartpakit_ctrl_get_info(smartpakit_priv_t *pakit_priv, void __user *
 	info.soc_platform    = pakit_priv->soc_platform;
 	info.algo_in	     = pakit_priv->algo_in;
 	info.out_device      = pakit_priv->out_device;
+	info.pa_num 	     = pakit_priv->pa_num;
 	info.algo_delay_time = pakit_priv->algo_delay_time;
 
 	if ((pakit_priv->algo_in != SMARTPAKIT_ALGO_IN_SIMPLE)
@@ -744,7 +544,6 @@ static int smartpakit_ctrl_get_info(smartpakit_priv_t *pakit_priv, void __user *
 			hwlog_info("%s: init not completed!!!\n", __func__);
 			return -EAGAIN;
 		}
-		info.pa_num = pakit_priv->i2c_num;
 
 		// set info
 		i2c_priv = pakit_priv->i2c_priv[0];
@@ -755,18 +554,12 @@ static int smartpakit_ctrl_get_info(smartpakit_priv_t *pakit_priv, void __user *
 
 		// smartpa chip info
 		info.chip_vendor = i2c_priv->chip_vendor;
-		if (SMARTPAKIT_ALGO_IN_WITH_DSP == pakit_priv->algo_in) {
-			if (i2c_priv->chip_model != NULL) {
-				model_len = strlen(i2c_priv->chip_model);
-				model_len = (model_len < SMARTPAKIT_NAME_MAX) ? model_len : (SMARTPAKIT_NAME_MAX - 1);
-				strncpy(info.chip_model, i2c_priv->chip_model, model_len);
-			}
-		} else {
-			smartpakit_ctrl_get_model(report_tmp, pakit_priv);
-			snprintf(info.chip_model, (unsigned long)SMARTPAKIT_NAME_MAX, "%s", report_tmp);
+		if (i2c_priv->chip_model != NULL) {
+			model_len = strlen(i2c_priv->chip_model);
+			model_len = (model_len < SMARTPAKIT_NAME_MAX) ? model_len : (SMARTPAKIT_NAME_MAX - 1);
+			strncpy(info.chip_model, i2c_priv->chip_model, model_len);
 		}
 	} else { // simple pa(not smartpa) or smartpa with dsp + plugin
-		info.pa_num = pakit_priv->pa_num;
 		if (SMARTPAKIT_ALGO_IN_WITH_DSP_PLUGIN == pakit_priv->algo_in) {
 			info.chip_vendor = pakit_priv->chip_vendor;
 		} else {
@@ -774,6 +567,7 @@ static int smartpakit_ctrl_get_info(smartpakit_priv_t *pakit_priv, void __user *
 				hwlog_info("%s: pakit_priv->switch_ctl == NULL!!!\n", __func__);
 				return -EAGAIN;
 			}
+
 			info.chip_vendor = SMARTPAKIT_CHIP_VENDOR_OTHER;
 		}
 
@@ -783,18 +577,8 @@ static int smartpakit_ctrl_get_info(smartpakit_priv_t *pakit_priv, void __user *
 			strncpy(info.chip_model, pakit_priv->chip_model, model_len);
 		}
 	}
-
-	if (pakit_priv->special_name_config != NULL) {
-		special_name_len = strlen(pakit_priv->special_name_config);
-		special_name_len = (special_name_len < SMARTPAKIT_NAME_MAX) ? special_name_len : (SMARTPAKIT_NAME_MAX - 1);
-		strncpy(info.special_name_config, pakit_priv->special_name_config, special_name_len);
-	}
-
-	hwlog_info("%s: soc_platform=%d, algo_in=%d, out_device=0x%08x, pa_num=%d, algo_delay_time=%d, chip_vendor=%d, chip_model=%s, special_name_config=%s.\n", __func__,
-					info.soc_platform, info.algo_in, info.out_device, info.pa_num, info.algo_delay_time, info.chip_vendor, info.chip_model, info.special_name_config);
-	if (info.pa_num != pakit_priv->pa_num) {
-		hwlog_info("%s: <***** NOTICE: I2C Number not equal PA Number,*******>, i2c_num = %d, pa_num = %d.\n", __func__, info.pa_num, pakit_priv->pa_num);
-	}
+	hwlog_info("%s: %d, %d, 0x%08x, %d, %d, %d, %s.\n", __func__,
+		info.soc_platform, info.algo_in, info.out_device, info.pa_num, info.algo_delay_time, info.chip_vendor, info.chip_model);
 
 	if (copy_to_user((void *)arg, &info, sizeof(smartpakit_info_t))) {
 		hwlog_err("%s: send smartpakit info to user failed!!!", __func__);
@@ -802,9 +586,7 @@ static int smartpakit_ctrl_get_info(smartpakit_priv_t *pakit_priv, void __user *
 	}
 
 	pakit_priv->resume_sequence_permission_enable = true;
-#ifndef CONFIG_FINAL_RELEASE
 	hwlog_info("%s: enter end.\n", __func__);
-#endif
 	return 0;
 }
 
@@ -823,10 +605,8 @@ static int smartpakit_ctrl_unprepare(smartpakit_priv_t *pakit_priv)
 static int smartpakit_ctrl_set_resume_regs(smartpakit_priv_t *pakit_priv, void __user *arg, int compat_mode)
 {
 	int ret = 0;
-	int i;
-#ifndef CONFIG_FINAL_RELEASE
+
 	hwlog_info("%s: enter ...\n", __func__);
-#endif
 	if ((NULL == pakit_priv) || (NULL == arg)) {
 		hwlog_err("%s: invalid argument!!!\n", __func__);
 		return -EINVAL;
@@ -837,10 +617,6 @@ static int smartpakit_ctrl_set_resume_regs(smartpakit_priv_t *pakit_priv, void _
 		return -EINVAL;
 	}
 	pakit_priv->resume_sequence_permission_enable = false;
-
-	// clear poweron sequence to avoid audio server died
-	for (i = 0; i < SMARTPAKIT_PA_ID_MAX; i++)
-		smartpakit_reset_poweron_regs(&pakit_priv->poweron_sequence[i]);
 
 	memset(&pakit_priv->resume_sequence, 0, sizeof(smartpakit_pa_ctl_sequence_t));
 	ret = smartpakit_parse_params(&pakit_priv->resume_sequence, arg, compat_mode);
@@ -905,7 +681,7 @@ static int smartpakit_ctrl_write_regs(smartpakit_priv_t *pakit_priv, void __user
 	smartpakit_i2c_priv_t *i2c_priv = NULL;
 	int ret = 0;
 
-	hwlog_debug("%s: enter id=0x%x...\n", __func__, id);
+	hwlog_info("%s: enter id=0x%x...\n", __func__, id);
 	if ((NULL == pakit_priv) || (NULL == arg)) {
 		hwlog_err("%s: invalid argument!!!\n", __func__);
 		return -EINVAL;
@@ -935,7 +711,7 @@ static int smartpakit_ctrl_write_regs(smartpakit_priv_t *pakit_priv, void __user
 	}
 	mutex_unlock(&pakit_priv->i2c_ops_lock);
 
-	hwlog_debug("%s: enter end, ret=%d.\n", __func__, ret);
+	hwlog_info("%s: enter end, ret=%d.\n", __func__, ret);
 	return ret;
 }
 
@@ -1009,7 +785,7 @@ static int smartpakit_ctrl_do_ioctl(struct file *file, unsigned int cmd, void __
 	int ret = 0;
 
 	if ((cmd != I2C_SLAVE) && (cmd != I2C_SLAVE_FORCE)) {
-		hwlog_debug("%s: enter, cmd:0x%x compat_mode=%d...\n", __func__, cmd, compat_mode);
+		hwlog_info("%s: enter, cmd:0x%x compat_mode=%d...\n", __func__, cmd, compat_mode);
 	}
 	if ((NULL == file) || (NULL == file->private_data)) {
 		hwlog_err("%s: invalid argument!!!\n", __func__);
@@ -1114,8 +890,7 @@ static int smartpakit_ctrl_do_ioctl(struct file *file, unsigned int cmd, void __
 			break;
 
 		default:
-			hwlog_err("%s: not support cmd 0x%x, compat_mode=%d\n",
-					__func__, cmd, compat_mode);
+			hwlog_err("%s: not support cmd(0x%x)!!!\n", __func__, cmd);
 			ret = -EIO;
 			break;
 	}
@@ -1202,7 +977,7 @@ static int smartpakit_parse_dt_switch_ctl(struct platform_device *pdev, smartpak
 
 	node = of_get_child_by_name(dev->of_node, switch_ctl_str);
 	if (NULL == node) {
-		hwlog_debug("%s: switch_ctl device_node not existed, skip!!!\n", __func__);
+		hwlog_info("%s: switch_ctl device_node not existed, skip!!!\n", __func__);
 		return 0;
 	}
 
@@ -1287,11 +1062,6 @@ static int smartpakit_parse_dt_switch_ctl(struct platform_device *pdev, smartpak
 
 	for (i = 0; i < (int)pakit_priv->switch_num; i++) {
 		hwlog_info("%s: gpio(%d/%d), state(%d)\n", __func__, i, ctl[i].gpio, ctl[i].state);
-		if (ctl[i].gpio == 0) {
-			hwlog_err("%s: switch_ctl gpio[%d] == 0, just return.\n", __func__, i);
-			ret = 0;
-			goto err_out;
-		}
 		if (gpio_request((unsigned)ctl[i].gpio, ctl[i].name) < 0) {
 			hwlog_err("%s: gpio_request switch_ctl[%d].gpio=%d failed!!!\n", __func__, i, ctl[i].gpio);
 			ctl[i].gpio = 0;
@@ -1363,8 +1133,6 @@ static int smartpakit_parse_dt_info(struct platform_device *pdev, smartpakit_pri
 	const char *out_device_str   = "out_device";
 	const char *chip_vendor_str  = "chip_vendor";
 	const char *chip_model_str   = "chip_model";
-	const char *special_name_config_str  = "special_name_config";
-
 	struct device *dev = NULL;
 	u32 out_device[SMARTPAKIT_PA_ID_MAX] = { 0 };
 	int count = 0;
@@ -1400,7 +1168,7 @@ static int smartpakit_parse_dt_info(struct platform_device *pdev, smartpakit_pri
 			goto err_out;
 		}
 	} else {
-		hwlog_debug("%s: algo_delay prop not existed, skip!!!\n", __func__);
+		hwlog_info("%s: algo_delay prop not existed, skip!!!\n", __func__);
 		pakit_priv->algo_delay_time = 0;
 	}
 
@@ -1412,14 +1180,12 @@ static int smartpakit_parse_dt_info(struct platform_device *pdev, smartpakit_pri
 			ret = -EFAULT;
 			goto err_out;
 		}
-#ifndef CONFIG_FINAL_RELEASE
 		hwlog_info("%s: chip_vendor=%d\n", __func__, pakit_priv->chip_vendor);
-#endif
 	} else {
-		hwlog_debug("%s: chip_vendor prop not existed, skip!!!\n", __func__);
+		hwlog_info("%s: chip_vendor prop not existed, skip!!!\n", __func__);
 	}
 
-		// model: for simple pa or smartpa with dsp + plugin
+	// model: for simple pa or smartpa with dsp + plugin
 	if (of_property_read_bool(dev->of_node, chip_model_str)) {
 		ret = of_property_read_string(dev->of_node, chip_model_str, &pakit_priv->chip_model);
 		if (ret < 0) {
@@ -1427,25 +1193,9 @@ static int smartpakit_parse_dt_info(struct platform_device *pdev, smartpakit_pri
 			ret = -EFAULT;
 			goto err_out;
 		}
-#ifndef CONFIG_FINAL_RELEASE
 		hwlog_info("%s: chip_model=%s\n", __func__, pakit_priv->chip_model);
-#endif
 	} else {
-		hwlog_debug("%s: chip_model prop not existed, skip!!!\n", __func__);
-	}
-
-	if (of_property_read_bool(dev->of_node, special_name_config_str)) {
-		ret = of_property_read_string(dev->of_node, special_name_config_str, &pakit_priv->special_name_config);
-		if (ret < 0) {
-			hwlog_err("%s: get special_name_config from dts failed %d!!!\n", __func__, ret);
-			ret = -EFAULT;
-			goto err_out;
-		}
-#ifndef CONFIG_FINAL_RELEASE
-		hwlog_info("%s: special_name_config=%s\n", __func__, pakit_priv->special_name_config);
-#endif
-	} else {
-		hwlog_debug("%s: special_name_config prop not existed, skip!!!\n", __func__);
+		hwlog_info("%s: chip_model prop not existed, skip!!!\n", __func__);
 	}
 
 	// rec or spk device
@@ -1474,9 +1224,8 @@ static int smartpakit_parse_dt_info(struct platform_device *pdev, smartpakit_pri
 
 		pakit_priv->out_device |= out_device[i] << (i * SMARTPAKIT_PA_OUT_DEVICE_SHIFT);
 	}
-#ifndef CONFIG_FINAL_RELEASE
+
 	hwlog_info("%s: pa_num(%d), out_device(0x%04x).\n", __func__, pakit_priv->pa_num, pakit_priv->out_device);
-#endif
 	return 0;
 
 err_out:
@@ -1499,7 +1248,7 @@ static int smartpakit_parse_dt_misc_rw_permission(struct platform_device *pdev, 
 		pakit_priv->misc_rw_permission_enable = true;
 		hwlog_info("%s: misc_rw_permission_enable prop existed!\n", __func__);
 	} else {
-		hwlog_debug("%s: misc_rw_permission_enable prop not existed!\n", __func__);
+		hwlog_info("%s: misc_rw_permission_enable prop not existed!\n", __func__);
 	}
 
 #ifdef SMARTPAKIT_MISC_RW_PERMISSION_ENABLE
@@ -1511,19 +1260,89 @@ static int smartpakit_parse_dt_misc_rw_permission(struct platform_device *pdev, 
 		pakit_priv->misc_i2c_use_pseudo_addr = true;
 		hwlog_info("%s: misc_i2c_use_pseudo_addr prop existed!\n", __func__);
 	} else {
-		hwlog_debug("%s: misc_i2c_use_pseudo_addr prop not existed!\n", __func__);
+		hwlog_info("%s: misc_i2c_use_pseudo_addr prop not existed!\n", __func__);
 	}
 
 	return 0;
 }
 
-static void smartpakit_free(smartpakit_priv_t *pakit_priv)
+static int smartpakit_probe(struct platform_device *pdev)
 {
+	int ret = 0;
 	int i = 0;
 
-	if (pakit_priv == NULL) {
+	hwlog_info("%s: enter ...\n", __func__);
+	if (NULL == pdev) {
 		hwlog_err("%s: invalid argument!!!\n", __func__);
-		return;
+		return -EINVAL;
+	}
+
+	smartpakit_priv = kzalloc(sizeof(smartpakit_priv_t), GFP_KERNEL);
+	if (NULL == smartpakit_priv) {
+		hwlog_err("%s: kzalloc smartpakit_priv failed!!!\n", __func__);
+		return -ENOMEM;
+	}
+
+	smartpakit_priv->chip_vendor = 0;
+	smartpakit_priv->resume_sequence_permission_enable = false;
+	smartpakit_priv->misc_rw_permission_enable = false;
+	smartpakit_priv->misc_i2c_use_pseudo_addr = false;
+	smartpakit_priv->current_i2c_client = NULL;
+	memset(smartpakit_priv->i2c_addr_to_pa_index, SMARTPAKIT_INVALID_PA_INDEX,
+		sizeof(unsigned char) * SMARTPAKIT_I2C_ADDR_ARRAY_MAX);
+	platform_set_drvdata(pdev, smartpakit_priv);
+
+	ret  = smartpakit_parse_dt_info(pdev, smartpakit_priv);
+	ret += smartpakit_parse_dt_switch_ctl(pdev, smartpakit_priv);
+	ret += smartpakit_parse_dt_misc_rw_permission(pdev, smartpakit_priv);
+	if (ret < 0) {
+		hwlog_err("%s: parse dt_info or switch_ctl failed(%d)!!!\n", __func__, ret);
+		goto err_out;
+	}
+
+	// init ops lock
+	mutex_init(&smartpakit_priv->irq_handler_lock);
+	mutex_init(&smartpakit_priv->hw_reset_lock);
+	mutex_init(&smartpakit_priv->dump_regs_lock);
+	mutex_init(&smartpakit_priv->i2c_ops_lock);
+
+	ret = misc_register(&smartpakit_ctrl_miscdev);
+	if (0 != ret) {
+		hwlog_err("%s: register miscdev failed(%d)!!!\n", __func__, ret);
+		goto err_out;
+	}
+
+	for (i = 0; i < SMARTPAKIT_CHIP_VENDOR_MAX; i++) {
+		smartpakit_i2c_probe_skip[i] = 0;
+	}
+	smartpakit_init_flag = 1;
+	hwlog_info("%s: end sucess!!!\n", __func__);
+	return 0;
+
+err_out:
+	if (smartpakit_priv != NULL) {
+		kfree(smartpakit_priv);
+		smartpakit_priv = NULL;
+	}
+
+	return ret;
+}
+
+static int smartpakit_remove(struct platform_device *pdev)
+{
+	smartpakit_priv_t *pakit_priv = NULL;
+	//int ret = 0;
+	int i = 0;
+
+	if (NULL == pdev) {
+		hwlog_err("%s: invalid argument!!!\n", __func__);
+		return -EINVAL;
+	}
+
+	pakit_priv = (smartpakit_priv_t *)platform_get_drvdata(pdev);
+	if (NULL == pakit_priv) {
+		hwlog_err("%s: pakit_priv invalid argument!!!\n", __func__);
+		return -EINVAL;
 	}
 
 	if (pakit_priv->switch_ctl != NULL) {
@@ -1538,106 +1357,17 @@ static void smartpakit_free(smartpakit_priv_t *pakit_priv)
 		pakit_priv->switch_ctl = NULL;
 	}
 
-	kfree(pakit_priv);
-}
-
-static int smartpakit_probe(struct platform_device *pdev)
-{
-	smartpakit_priv_t *pakit_priv = NULL;
-	int ret = 0;
-	int i = 0;
-	int len = 0;
-
-#ifndef CONFIG_FINAL_RELEASE
-	hwlog_info("%s: enter ...\n", __func__);
-#endif
-
-	if (NULL == pdev) {
-		hwlog_err("%s: invalid argument!!!\n", __func__);
-		return -EINVAL;
-	}
-
-	pakit_priv = kzalloc(sizeof(smartpakit_priv_t), GFP_KERNEL);
-	if (NULL == pakit_priv) {
-		hwlog_err("%s: kzalloc smartpakit_priv failed!!!\n", __func__);
-		return -ENOMEM;
-	}
-	platform_set_drvdata(pdev, pakit_priv);
-
-	pakit_priv->chip_vendor = 0;
-	pakit_priv->resume_sequence_permission_enable = false;
-	pakit_priv->misc_rw_permission_enable = false;
-	pakit_priv->misc_i2c_use_pseudo_addr = false;
-	pakit_priv->current_i2c_client = NULL;
-	pakit_priv->force_refresh_chip = false;
-
-	memset(pakit_priv->i2c_addr_to_pa_index, SMARTPAKIT_INVALID_PA_INDEX,
-		sizeof(unsigned char) * SMARTPAKIT_I2C_ADDR_ARRAY_MAX);
-	for (i = 0; i < SMARTPAKIT_PA_ID_MAX; i++) {
-		len = (strlen(SMARTPAKIT_NAME_INVALID) < SMARTPAKIT_NAME_MAX) ? strlen(SMARTPAKIT_NAME_INVALID) : (SMARTPAKIT_NAME_MAX - 1);
-		(void)strncpy(pakit_priv->chip_model_list[i], SMARTPAKIT_NAME_INVALID, len);
-		pakit_priv->chip_model_list[i][len] = '\0';
-	}
-
-	ret  = smartpakit_parse_dt_info(pdev, pakit_priv);
-	ret += smartpakit_parse_dt_switch_ctl(pdev, pakit_priv);
-	ret += smartpakit_parse_dt_misc_rw_permission(pdev, pakit_priv);
-	if (ret < 0) {
-		hwlog_err("%s: parse dt_info or switch_ctl failed(%d)!!!\n", __func__, ret);
-		goto err_out;
-	}
-
-	// init ops lock
-	mutex_init(&pakit_priv->irq_handler_lock);
-	mutex_init(&pakit_priv->hw_reset_lock);
-	mutex_init(&pakit_priv->dump_regs_lock);
-	mutex_init(&pakit_priv->i2c_ops_lock);
-
-	ret = misc_register(&smartpakit_ctrl_miscdev);
-	if (0 != ret) {
-		hwlog_err("%s: register miscdev failed(%d)!!!\n", __func__, ret);
-		goto err_out;
-	}
-
-	smartpakit_priv = pakit_priv;
-	smartpakit_init_flag = 1;
-	hwlog_info("%s: end sucess!!!\n", __func__);
-	return 0;
-
-err_out:
-	if (pakit_priv != NULL) {
-		smartpakit_free(pakit_priv);
-		platform_set_drvdata(pdev, NULL);
-	}
-
-	return ret;
-}
-
-static int smartpakit_remove(struct platform_device *pdev)
-{
-	smartpakit_priv_t *pakit_priv = NULL;
-	int i = 0;
-
-	if (NULL == pdev) {
-		hwlog_err("%s: invalid argument!!!\n", __func__);
-		return -EINVAL;
-	}
-
-	pakit_priv = (smartpakit_priv_t *)platform_get_drvdata(pdev);
-	if (NULL == pakit_priv) {
-		hwlog_err("%s: pakit_priv invalid argument!!!\n", __func__);
-		return -EINVAL;
-	}
-	platform_set_drvdata(pdev, NULL);
-
 	SMARTPAKIT_KFREE_OPS(pakit_priv->resume_sequence.node);
 	for (i = 0; i < SMARTPAKIT_PA_ID_MAX; i++) {
 		smartpakit_reset_poweron_regs(&pakit_priv->poweron_sequence[i]);
 	}
 
-	smartpakit_free(pakit_priv);
+	kfree(pakit_priv);
+	pakit_priv = NULL;
 	smartpakit_priv = NULL;
 
+	//ret = misc_deregister(&smartpakit_ctrl_miscdev);
+	//return ret;
 	misc_deregister(&smartpakit_ctrl_miscdev);
 	return 0;
 }

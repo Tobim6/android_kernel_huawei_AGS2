@@ -20,6 +20,7 @@
 #define pr_fmt(fmt) "logger: " fmt
 
 #include <linux/version.h>
+#include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
@@ -30,9 +31,6 @@
 #include <linux/vmalloc.h>
 #include <linux/aio.h>
 #include <linux/ratelimit.h>
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-#include <linux/sched/signal.h>
-#endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0))
 #include <linux/uio.h>
 #endif
@@ -42,12 +40,7 @@
 #ifdef CONFIG_HW_ZEROHUNG
 #include <chipset_common/hwzrhung/zrhung.h>
 #endif
-#ifdef CONFIG_HW_FDLEAK
-#include <chipset_common/hwfdleak/fdleak.h>
-#endif
-#ifdef CONFIG_HW_ERECOVERY
-#include <chipset_common/hwerecovery/erecovery.h>
-#endif
+
 #include <asm/ioctls.h>
 #include <huawei_platform/log/log_switch.h>
 
@@ -70,7 +63,7 @@ struct logger_log_tag {
 
 static struct logger_log_tag *log_tag;
 
-static int calc_iovc_ki_left(const struct iovec *iov, int nr_segs);
+static int calc_iovc_ki_left(struct iovec *iov, int nr_segs);
 
 typedef enum android_LogPriority {
 	ANDROID_LOG_UNKNOWN = 0,
@@ -311,21 +304,6 @@ static size_t get_next_entry_by_uid(struct logger_log *log,
 	return off;
 }
 
-static inline int is_between_revers(size_t a, size_t b, size_t c)
-{
-	if (a < b) {
-		/* is c between a and b? */
-		if (a <= c && c < b)
-			return 1;
-	} else {
-		/* is c outside of b through a? */
-		if (c < b || a <= c)
-			return 1;
-	}
-
-	return 0;
-}
-
 /*
  * logger_read - our log's read() method
  *
@@ -343,7 +321,6 @@ static ssize_t logger_read(struct file *file, char __user *buf,
 {
 	struct logger_reader *reader = file->private_data;
 	struct logger_log *log = reader->log;
-	struct logger_reader *other_reader;
 	ssize_t ret;
 	DEFINE_WAIT(wait);
 
@@ -396,12 +373,6 @@ start:
 
 	/* get exactly one entry from the log */
 	ret = do_read_log_to_user(log, reader, buf, ret);
-	if (file->f_flags & O_HWLOGGER_RDDEL) {
-		list_for_each_entry(other_reader, &log->readers, list)
-			if (is_between_revers(log->head, reader->r_off, other_reader->r_off))
-				other_reader->r_off = reader->r_off;
-		log->head = reader->r_off;
-	}
 
 out:
 	mutex_unlock(&log->mutex);
@@ -540,29 +511,7 @@ static ssize_t hw_logger_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	struct timespec now;
 	ssize_t ret = 0;
 	unsigned long nr_segs = from->nr_segs;
-	const struct iovec *iov  = from->iov;
-	int	invaliddata = 0;
-
-	if (unlikely(nr_segs < 1)) {
-		invaliddata = EVecSeg;
-	} else if (unlikely(iov[0].iov_len != sizeof(int))) {
-		invaliddata = EVecLen;
-	} else {
-		int  code = 0;
-		if (copy_from_user(&code, iov[0].iov_base, sizeof(int))) {
-			invaliddata = EVecCopy;
-		}else if (unlikely(code != CHECK_CODE)) {
-			invaliddata = EVecCode;
-		} else {
-			nr_segs--;
-			iov++;
-		}
-	}
-
-	if (unlikely(invaliddata)) {
-		pr_err_ratelimited("%s: invalid log data, error code is %d\n", log->misc.name, invaliddata);
-		return -EINVAL;
-	}
+	struct iovec *iov  = from->iov;
 
 	now = current_kernel_time();
 
@@ -632,28 +581,6 @@ static ssize_t hw_logger_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	struct logger_entry header;
 	struct timespec now;
 	ssize_t ret = 0;
-	int	invaliddata = 0;
-
-	if (unlikely(nr_segs < 1)) {
-		invaliddata = EVecSeg;
-	} else if (unlikely(iov[0].iov_len != sizeof(int))) {
-		invaliddata = EVecLen;
-	} else {
-		int  code = 0;
-		if (copy_from_user(&code, iov[0].iov_base, sizeof(int))) {
-			invaliddata = EVecCopy;
-		} else if (unlikely(code != CHECK_CODE)) {
-			invaliddata = EVecCode;
-		} else {
-			nr_segs--;
-			iov++;
-		}
-	}
-
-	if (unlikely(invaliddata)) {
-		pr_err_ratelimited("%s: invalid log data, error code is %d\n", log->misc.name, invaliddata);
-		return -EINVAL;
-	}
 
 	now = current_kernel_time();
 
@@ -832,18 +759,7 @@ static long logger_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		return ret;
 	}
 #endif
-#ifdef CONFIG_HW_FDLEAK
-	ret = fdleak_ioctl(file, cmd, arg);
-	if(ret != FDLEAK_CMD_INVALID) {
-		return ret;
-	}
-#endif
-#ifdef CONFIG_HW_ERECOVERY
-        ret = erecovery_ioctl(file, cmd, arg);
-        if(ret != ERECOVERY_CMD_INVALID) {
-                return ret;
-        }
-#endif
+
 	mutex_lock(&log->mutex);
 
 	switch (cmd) {
@@ -892,22 +808,6 @@ static long logger_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		log->head = log->w_off;
 		ret = 0;
 		break;
-	case LOGGER_SET_RDDEL:
-		if (!(file->f_mode & FMODE_READ)) {
-			ret = -EBADF;
-			break;
-		}
-		file->f_flags |= O_HWLOGGER_RDDEL;
-		ret = 0;
-		break;
-	case LOGGER_RESET_RDDEL:
-		if (!(file->f_mode & FMODE_READ)) {
-			ret = -EBADF;
-			break;
-		}
-		file->f_flags &= (~O_HWLOGGER_RDDEL);
-		ret = 0;
-		break;
 	case FIONREAD:
 		if (!strncmp(log->misc.name, LOGGER_LOG_JANK, strlen(LOGGER_LOG_JANK)) ||
 			!strncmp(log->misc.name, LOGGER_LOG_DUBAI, strlen(LOGGER_LOG_DUBAI))) {
@@ -931,9 +831,7 @@ static const struct file_operations logger_fops = {
 #endif
 	.poll = logger_poll,
 	.unlocked_ioctl = logger_ioctl,
-#ifdef CONFIG_COMPAT
 	.compat_ioctl = logger_ioctl,
-#endif
 	.open = logger_open,
 	.release = logger_release,
 };
@@ -1174,7 +1072,7 @@ static int __init logger_init(void)
 {
 	int ret;
 
-	ret = create_log(LOGGER_LOG_EXCEPTION, 128 * 1024);	/*must modified with EXCEPTION_LOG_BUF_LEN*/
+	ret = create_log(LOGGER_LOG_EXCEPTION, 16 * 1024);	/*must modified with EXCEPTION_LOG_BUF_LEN*/
 	if (unlikely(ret))
 		goto out;
 #if defined (CONFIG_HWLOG_KERNEL)
@@ -1247,7 +1145,7 @@ static struct logger_log *get_log_from_name(const char *name)
 	return NULL;
 }
 
-static int calc_iovc_ki_left(const struct iovec *iov, int nr_segs)
+static int calc_iovc_ki_left(struct iovec *iov, int nr_segs)
 {
 	int ret = 0;
 	int seg;

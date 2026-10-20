@@ -26,8 +26,6 @@
 #include <linux/power/hisi/coul/hisi_coul_drv.h>
 #include <hisi_scharger_v300.h>
 #include <linux/raid/pq.h>
-#include <linux/mfd/hisi_pmic.h>
-#include <pmic_interface.h>
 #ifdef CONFIG_HUAWEI_HW_DEV_DCT
 #include <huawei_platform/devdetect/hw_dev_dec.h>
 #endif
@@ -43,13 +41,10 @@
 #include <linux/power/hisi/charger/hisi_charger.h>
 #endif
 #include <linux/hisi/hisi_adc.h>
-#ifdef CONFIG_SWITCH_FSA9685
-#include <huawei_platform/usb/switch/switch_fsa9685.h>
+
+#ifdef CONFIG_TCPC_CLASS
+#include <huawei_platform/usb/hw_pd_dev.h>
 #endif
-#ifdef CONFIG_BOOST_5V
-#include <huawei_platform/power/boost_5v.h>
-#endif
-#include "securec.h"
 
 #define MAX_RBOOST_CNT	(300)
 #define ILIMIT_RBOOST_CNT	(15)
@@ -72,17 +67,16 @@ static int g_rboost_cnt;
 static int I_bias_all = 0;
 static int dm_array_len = 0;
 static int dp_array_len = 0;
-#ifdef CONFIG_DIRECT_CHARGER
+#if CONFIG_DIRECT_CHARGER
 static u32 scp_error_flag = 0;
 #endif
 static unsigned int single_phase_buck;
 
+static int weak_source_recovery_en = FALSE;
+
 static int hi6523_get_vbus_mv(unsigned int *vbus_mv);
 static int hi6523_get_charge_state(unsigned int *state);
 static int hi6523_set_charge_enable(int enable);
-static int hi6523_fcp_adapter_reg_read(u8 * val, u8 reg);
-static int hi6523_fcp_adapter_reg_write(u8 val, u8 reg);
-
 #ifdef CONFIG_DIRECT_CHARGER
 static int hi6523_is_support_scp(void);
 #endif
@@ -96,42 +90,47 @@ static int charger_is_fcp = FCP_FALSE;
 static int first_insert_flag = FIRST_INSERT_TRUE;
 static int is_weaksource = WEAKSOURCE_FALSE;
 static int Gain_cal = 0;
-static int iin_set = CHG_ILIMIT_100;
 
-#ifdef CONFIG_DIRECT_CHARGER
-static int g_direct_charge_mode = 0;
-static void scp_set_direct_charge_mode(int mode)
+static int set_5v_boost_enable(int enable)
 {
-	g_direct_charge_mode = mode;
-	SCHARGER_INF("%s : g_direct_charge_mode = %d \n",__func__, g_direct_charge_mode);
-}
-static int scp_get_direct_charge_mode(void)
-{
-	SCHARGER_INF("%s : g_direct_charge_mode = %d \n",__func__, g_direct_charge_mode);
-	return g_direct_charge_mode;
-}
-#endif
+	int ret = SUCC;
+	struct hi6523_device_info *di = g_hi6523_dev;
+	if (NULL == di)
+	{
+		SCHARGER_INF("%s:NULL POINTOR!\n",__func__);
+		return FAIL;
+	}
 
-static void set_boot_weaksource_flag(void)
-{
-#ifdef CONFIG_HISI_COUL_HI6421V700
-    unsigned int reg_val = 0;
-    reg_val = hisi_pmic_reg_read(WEAKSOURCE_FLAG_REG);
-    reg_val |= WAEKSOURCE_FLAG;
-    hisi_pmic_reg_write(WEAKSOURCE_FLAG_REG, reg_val);
+	SCHARGER_INF("%s++\n",__func__);
+	if(di->scp_need_extra_power)
+	{
+		if (di->boost_5v_use_common_gpio)
+		{
+#ifdef CONFIG_TCPC_CLASS
+			ret = pd_dpm_vboost_enable(enable,PD_DPM_VBOOST_CONTROL_DC);
 #endif
-    return;
-}
-
-static void clr_boot_weaksource_flag(void)
-{
-#ifdef CONFIG_HISI_COUL_HI6421V700
-    unsigned int reg_val = 0;
-    reg_val = hisi_pmic_reg_read(WEAKSOURCE_FLAG_REG);
-    reg_val &= (~WAEKSOURCE_FLAG);
-    hisi_pmic_reg_write(WEAKSOURCE_FLAG_REG, reg_val);
+		}else
+		{
+			ret = gpio_direction_output(di->scp_power_en, enable);
+		}
+		if (di->is_need_bst_ctrl)
+		{
+			if (!di->bst_ctrl_use_common_gpio)
+			{
+				ret |= gpio_direction_output(di->bst_ctrl, enable);
+			}else
+			{
+#ifdef CONFIG_USB_AUDIO_POWER
+				ret |= bst_ctrl_enable(enable, VBOOST_CONTROL_PM);
 #endif
-    return;
+			}
+		}
+		if (ret)
+			ret = FAIL;
+		else
+			ret = SUCC;
+	}
+	return ret;
 }
 /**********************************************************
 *  Function:       is_hi6523_cv_limit
@@ -345,6 +344,7 @@ static int hi6523_read_mask(u8 reg, u8 MASK, u8 SHIFT, u8 * value)
  * Provide sysfs access to them so they can be examined and possibly modified
  * on the fly.
  */
+
 #define HI6523_SYSFS_FIELD(_name, r, f, m, store)                  \
 {                                                   \
     .attr = __ATTR(_name, m, hi6523_sysfs_show, store),    \
@@ -376,8 +376,6 @@ static struct hi6523_sysfs_field_info hi6523_sysfs_field_tbl[] = {
 	HI6523_SYSFS_FIELD_RW(iinlim, INPUT_SOURCE, ILIMIT),
 	HI6523_SYSFS_FIELD_RW(reg_addr, NONE, NONE),
 	HI6523_SYSFS_FIELD_RW(reg_value, NONE, NONE),
-	HI6523_SYSFS_FIELD_RW(adapter_reg, NONE, NONE),
-	HI6523_SYSFS_FIELD_RW(adapter_val, NONE, NONE),
 };
 
 static struct attribute *hi6523_sysfs_attrs[ARRAY_SIZE(hi6523_sysfs_field_tbl) +
@@ -441,11 +439,6 @@ static ssize_t hi6523_sysfs_show(struct device *dev,
 	int ret;
 #endif
 	u8 v;
-	struct hi6523_device_info *di = g_hi6523_dev;
-	if (NULL == di) {
-		SCHARGER_ERR("%s hi6523_device_info is NULL!\n", __func__);
-		return -ENOMEM;
-	}
 
 	info = hi6523_sysfs_field_lookup(attr->attr.name);
 	if (!info)
@@ -462,27 +455,10 @@ static ssize_t hi6523_sysfs_show(struct device *dev,
 		info->reg = info2->reg;
 	}
 
-	if (!strncmp("adapter_reg", attr->attr.name, strlen("adapter_reg"))) {
-		return scnprintf(buf, PAGE_SIZE, "0x%x\n", di->sysfs_fcp_reg_addr);
-	}
-	if (!strncmp("adapter_val", attr->attr.name, strlen("adapter_val"))) {
-#ifdef CONFIG_HISI_DEBUG_FS
-                ret = hi6523_fcp_adapter_reg_read(&v, di->sysfs_fcp_reg_addr);
-                SCHARGER_INF(" sys read fcp adapter reg 0x%x , v 0x%x \n", di->sysfs_fcp_reg_addr, v);
-                if (ret)
-                        return ret;
-#else
-                v = 0;
-#endif
-                return scnprintf(buf, PAGE_SIZE, "0x%x\n", v);
-        }
-
 #ifdef CONFIG_HISI_DEBUG_FS
 	ret = hi6523_read_mask(info->reg, info->mask, info->shift, &v);
 	if (ret)
 		return ret;
-#else
-    v = 0;
 #endif
 
 	return scnprintf(buf, PAGE_SIZE, "0x%hhx\n", v);
@@ -505,11 +481,6 @@ static ssize_t hi6523_sysfs_store(struct device *dev,
 	struct hi6523_sysfs_field_info *info2;
 	int ret;
 	u8 v;
-	struct hi6523_device_info *di = g_hi6523_dev;
-	if (NULL == di) {
-		SCHARGER_ERR("%s hi6523_device_info is NULL!\n", __func__);
-		return -ENOMEM;
-	}
 
 	info = hi6523_sysfs_field_lookup(attr->attr.name);
 	if (!info)
@@ -533,25 +504,6 @@ static ssize_t hi6523_sysfs_store(struct device *dev,
 			return -EINVAL;
 		}
 	}
-
-	if (!strncmp(("adapter_reg"), attr->attr.name, strlen("adapter_reg"))) {
-                        di->sysfs_fcp_reg_addr = (u8)v;
-                        return count;
-	}
-	if (!strncmp(("adapter_val"), attr->attr.name, strlen("adapter_val"))) {
-                        di->sysfs_fcp_reg_val = (u8)v;
-#ifdef CONFIG_HISI_DEBUG_FS
-                        ret = hi6523_fcp_adapter_reg_write(di->sysfs_fcp_reg_val,
-                                                                di->sysfs_fcp_reg_addr);
-                        SCHARGER_INF(" sys write fcp adapter reg 0x%x , v 0x%x \n",
-                                                      di->sysfs_fcp_reg_addr, di->sysfs_fcp_reg_val);
-
-                        if (ret)
-                                return ret;
-#endif
-                        return count;
-        }
-
 #ifdef CONFIG_HISI_DEBUG_FS
 	ret = hi6523_write_mask(info->reg, info->mask, info->shift, v);
 	if (ret)
@@ -730,7 +682,6 @@ static int hi6523_get_adc_conv_status(u8 * value)
 static int hi6523_get_adc_value(u32 chan, u32 * data)
 {
 	int ret = 0;
-        int ret0, ret1, ret2;
 	u8 reg = 0;
 	int i = 0;
 	u8 adc_data[2] = { 0 };
@@ -741,11 +692,11 @@ static int hi6523_get_adc_value(u32 chan, u32 * data)
 	}
 
 	mutex_lock(&hi6523_adc_conv_lock);
-	ret0 = hi6523_set_adc_channel(chan);
-	ret1 = hi6523_adc_enable(CHG_ADC_EN);
-	ret2 = hi6523_write_mask(CHG_ADC_START_REG, CHG_ADC_START_MSK,
+	ret |= hi6523_set_adc_channel(chan);
+	ret |= hi6523_adc_enable(CHG_ADC_EN);
+	ret |=
+	    hi6523_write_mask(CHG_ADC_START_REG, CHG_ADC_START_MSK,
 			      CHG_ADC_START_SHIFT, TRUE);
-        ret = (ret0||ret1||ret2);
 	if (ret) {
 		SCHARGER_ERR("set covn fail! ret =%d \n", ret);
 		hi6523_adc_enable(CHG_ADC_DIS);
@@ -772,9 +723,8 @@ static int hi6523_get_adc_value(u32 chan, u32 * data)
 		mutex_unlock(&hi6523_adc_conv_lock);
 		return -1;
 	}
-	ret0 = hi6523_read_block(di, adc_data, CHG_ADC_DATA_REG, 2);
-	ret1 = hi6523_adc_enable(CHG_ADC_DIS);
-        ret = (ret0||ret1);
+	ret |= hi6523_read_block(di, adc_data, CHG_ADC_DATA_REG, 2);
+	ret |= hi6523_adc_enable(CHG_ADC_DIS);
 	if (ret) {
 		SCHARGER_ERR("[%s]get ibus_ref_data fail,ret:%d\n", __func__,
 			     ret);
@@ -886,7 +836,7 @@ static bool hi6523_get_charge_enable(void)
 /**********************************************************
 *  Function:     hi6523_vbus_init_set()
 *  Description:  set vbus voltage init para
-*  Parameters:   vbus_vol:VBUS_VSET_5V&VBUS_VSET_9V&VBUS_VSET_12V
+*  Parameters:   vbus_vol:VBUS_VSET_5V&VBUS_VSET_9V
 *				charge_stop_flag:1 stop charge; 0 charge
 *  return value:
 *                 void
@@ -913,16 +863,6 @@ static void hi6523_vbus_init_set(int vbus_vol)
 			hi6523_write_mask(0x95, 0x07, 0x00, 0x00);
 	} else if (VBUS_VSET_9V == vbus_vol) {
 		hi6523_write_mask(0xa0, VBUS_VSET_MSK, VBUS_VSET_SHIFT, 0x01);
-		hi6523_write_byte(0x62, 0x2C);
-		hi6523_write_byte(0x64, 0x40);
-		hi6523_write_byte(0x71, 0x55);
-		if ((CHG_VERSION_V300 == hi6523_version)
-			|| (CHG_VERSION_V310 == hi6523_version))
-			hi6523_write_byte(0x95, 0x07);
-		else
-			hi6523_write_mask(0x95, 0x07, 0x00, 0x03);
-	} else if (VBUS_VSET_12V == vbus_vol) {
-		hi6523_write_mask(0xa0, VBUS_VSET_MSK, VBUS_VSET_SHIFT, 0x10);
 		hi6523_write_byte(0x62, 0x2C);
 		hi6523_write_byte(0x64, 0x40);
 		hi6523_write_byte(0x71, 0x55);
@@ -1035,7 +975,7 @@ static int hi6523_config_opt_param(int vbus_vol)
 		hi6523_write_byte(0x95, 0x07);
 		hi6523_write_byte(0xA3, 0x04);
 	}
-	else if (CHG_VERSION_V320 == hi6523_version || CHG_VERSION_V200 <= hi6523_version) {
+	else if (CHG_VERSION_V320 == hi6523_version || CHG_VERSION_V200 == hi6523_version) {
 		hi6523_write_byte(0x78, 0x0);
 		hi6523_write_byte(0x8e, 0x48);
 		hi6523_write_byte(0x62, 0x24);
@@ -1087,62 +1027,60 @@ static int hi6523_set_input_current(int cin_limit)
 
 	if (cin_limit <= CHG_ILIMIT_100)
 		Iin_limit = 0;
-	else if (cin_limit <= CHG_ILIMIT_130)
+	else if (cin_limit > CHG_ILIMIT_100 && cin_limit <= CHG_ILIMIT_130)
 		Iin_limit = 1;
-	else if (cin_limit <= CHG_ILIMIT_699)
+	else if (cin_limit > CHG_ILIMIT_130 && cin_limit <= CHG_ILIMIT_699)
 		Iin_limit = 2;
-	else if (cin_limit <= CHG_ILIMIT_900)
+	else if (cin_limit > CHG_ILIMIT_699 && cin_limit <= CHG_ILIMIT_900)
 		Iin_limit = 3;
-	else if (cin_limit <= CHG_ILIMIT_1000)
+	else if (cin_limit > CHG_ILIMIT_900 && cin_limit <= CHG_ILIMIT_1000)
 		Iin_limit = 4;
-	else if (cin_limit <= CHG_ILIMIT_1080)
+	else if (cin_limit > CHG_ILIMIT_1000 && cin_limit <= CHG_ILIMIT_1080)
 		Iin_limit = 5;
-	else if (cin_limit <= CHG_ILIMIT_1200)
+	else if (cin_limit > CHG_ILIMIT_1080 && cin_limit <= CHG_ILIMIT_1200)
 		Iin_limit = 6;
-	else if (cin_limit <= CHG_ILIMIT_1300)
+	else if (cin_limit > CHG_ILIMIT_1200 && cin_limit <= CHG_ILIMIT_1300)
 		Iin_limit = 7;
-	else if (cin_limit <= CHG_ILIMIT_1400)
+	else if (cin_limit > CHG_ILIMIT_1300 && cin_limit <= CHG_ILIMIT_1400)
 		Iin_limit = 8;
-	else if (cin_limit <= CHG_ILIMIT_1500)
+	else if (cin_limit > CHG_ILIMIT_1400 && cin_limit <= CHG_ILIMIT_1500)
 		Iin_limit = 9;
-	else if (cin_limit <= CHG_ILIMIT_1600)
+	else if (cin_limit > CHG_ILIMIT_1500 && cin_limit <= CHG_ILIMIT_1600)
 		Iin_limit = 10;
-	else if (cin_limit <= CHG_ILIMIT_1700)
+	else if (cin_limit > CHG_ILIMIT_1600 && cin_limit <= CHG_ILIMIT_1700)
 		Iin_limit = 11;
-	else if (cin_limit <= CHG_ILIMIT_1800)
+	else if (cin_limit > CHG_ILIMIT_1700 && cin_limit <= CHG_ILIMIT_1800)
 		Iin_limit = 12;
-	else if (cin_limit <= CHG_ILIMIT_1900)
+	else if (cin_limit > CHG_ILIMIT_1800 && cin_limit <= CHG_ILIMIT_1900)
 		Iin_limit = 13;
-	else if (cin_limit <= CHG_ILIMIT_2000)
+	else if (cin_limit > CHG_ILIMIT_1900 && cin_limit <= CHG_ILIMIT_2000)
 		Iin_limit = 14;
-	else if (cin_limit <= CHG_ILIMIT_2100)
+	else if (cin_limit > CHG_ILIMIT_2000 && cin_limit <= CHG_ILIMIT_2100)
 		Iin_limit = 15;
-	else if (cin_limit <= CHG_ILIMIT_2200)
+	else if (cin_limit > CHG_ILIMIT_2100 && cin_limit <= CHG_ILIMIT_2200)
 		Iin_limit = 16;
-	else if (cin_limit <= CHG_ILIMIT_2280)
+	else if (cin_limit > CHG_ILIMIT_2200 && cin_limit <= CHG_ILIMIT_2280)
 		Iin_limit = 17;
-	else if (cin_limit <= CHG_ILIMIT_2400)
+	else if (cin_limit > CHG_ILIMIT_2280 && cin_limit <= CHG_ILIMIT_2400)
 		Iin_limit = 18;
-	else if (cin_limit <= CHG_ILIMIT_2480)
+	else if (cin_limit > CHG_ILIMIT_2400 && cin_limit <= CHG_ILIMIT_2480)
 		Iin_limit = 19;
-	else if (cin_limit <= CHG_ILIMIT_2600)
+	else if (cin_limit > CHG_ILIMIT_2480 && cin_limit <= CHG_ILIMIT_2600)
 		Iin_limit = 20;
-	else if (cin_limit <= CHG_ILIMIT_2680)
+	else if (cin_limit > CHG_ILIMIT_2600 && cin_limit <= CHG_ILIMIT_2680)
 		Iin_limit = 21;
-	else if (cin_limit <= CHG_ILIMIT_2800)
+	else if (cin_limit > CHG_ILIMIT_2680 && cin_limit <= CHG_ILIMIT_2800)
 		Iin_limit = 22;
-	else if (cin_limit <= CHG_ILIMIT_2880)
+	else if (cin_limit > CHG_ILIMIT_2800 && cin_limit <= CHG_ILIMIT_2880)
 		Iin_limit = 23;
-	else if (cin_limit <= CHG_ILIMIT_3000)
+	else if (cin_limit > CHG_ILIMIT_2880 && cin_limit <= CHG_ILIMIT_3000)
 		Iin_limit = 24;
-	else if (cin_limit <= CHG_ILIMIT_3080)
+	else if (cin_limit > CHG_ILIMIT_3000 && cin_limit <= CHG_ILIMIT_3080)
 		Iin_limit = 25;
-	else if (cin_limit <= CHG_ILIMIT_3200)
+	else if (cin_limit > CHG_ILIMIT_3080 && cin_limit <= CHG_ILIMIT_3200)
 		Iin_limit = 26;
 	else
 		Iin_limit = 26;
-
-	iin_set = cin_limit;
 
 	SCHARGER_INF("input current reg is set 0x%x\n", Iin_limit);
 	return hi6523_write_mask(CHG_INPUT_SOURCE_REG, CHG_ILIMIT_MSK,
@@ -1248,11 +1186,6 @@ static int hi6523_get_input_current(void)
 		break;
 	}
 	return ret;
-}
-
-static int hi6523_get_input_current_set(void)
-{
-	return iin_set;
 }
 
 /**********************************************************
@@ -1472,34 +1405,8 @@ static int hi6523_check_input_dpm_state(void)
 		return ret;
 	}
 
-	if (CHG_IN_DPM_STATE == (reg & CHG_IN_DPM_STATE)){
-		SCHARGER_INF("CHG_STATUS0_REG:0x%2x in dpm state.\n",reg);
+	if (CHG_IN_DPM_STATE == (reg & CHG_IN_DPM_STATE))
 		return TRUE;
-	}
-	return FALSE;
-}
-
-/**********************************************************
-*  Function:       hi6523_check_input_iacl_state
-*  Description:    check whether ACL
-*  Parameters:     NULL
-*  return value:   TRUE means ACL
-*                  FALSE means NoT ACL
-**********************************************************/
-static int hi6523_check_input_acl_state(void)
-{
-	u8 reg = 0;
-	int ret;
-
-	ret = hi6523_read_byte(CHG_STATUS0_REG, &reg);
-	if (ret < 0) {
-		SCHARGER_ERR("hi6523_check_input_acl_state err\n");
-		return ret;
-	}
-	if (CHG_IN_ACL_STATE == (reg & CHG_IN_ACL_STATE)){
-		SCHARGER_INF("CHG_STATUS0_REG:0x%2x in acl state.\n",reg);
-		return TRUE;
-	}
 	return FALSE;
 }
 
@@ -1512,13 +1419,13 @@ static int hi6523_check_input_acl_state(void)
 static int hi6523_get_charge_state(unsigned int *state)
 {
 	u8 reg1 = 0, reg2 = 0;
-	int ret0 = 0, ret1 = 0;
+	int ret = 0;
 
-	ret0 = hi6523_read_byte(CHG_STATUS0_REG, &reg1);
-	ret1 = hi6523_read_byte(CHG_STATUS1_REG, &reg2);
-	if (ret0 || ret1) {
-		SCHARGER_ERR("[%s]read charge status reg fail\n",
-			     __func__);
+	ret |= hi6523_read_byte(CHG_STATUS0_REG, &reg1);
+	ret |= hi6523_read_byte(CHG_STATUS1_REG, &reg2);
+	if (ret) {
+		SCHARGER_ERR("[%s]read charge status reg fail,ret:%d\n",
+			     __func__, ret);
 		return -1;
 	}
 
@@ -1528,7 +1435,7 @@ static int hi6523_get_charge_state(unsigned int *state)
 		*state |= CHAGRE_STATE_CHRG_DONE;
 	if (HI6523_WATCHDOG_OK != (reg2 & HI6523_WATCHDOG_OK))
 		*state |= CHAGRE_STATE_WDT_FAULT;
-	return 0;
+	return ret;
 }
 
 /**********************************************************
@@ -1788,24 +1695,22 @@ static int hi6523_set_charge_enable(int enable)
 static int hi6523_config_otg_opt_param(void)
 {
 	int ret = 0;
-        int ret0 = 0, ret1 = 0, ret2 = 0, ret3 = 0, ret4 = 0, ret5 = 0 ;
 	u8 otg_lim_set = 0;
 	hi6523_read_mask(CHG_OTG_REG0, CHG_OTG_LIM_MSK, CHG_OTG_LIM_SHIFT,
 			 &otg_lim_set);
-	ret0 = hi6523_write_byte(0x6a, 0x3f);
-	ret1 = hi6523_write_byte(0x6b, 0x5c);
-	ret2 = hi6523_write_byte(0x81, 0x5c);
-	ret3 = hi6523_write_byte(0x86, 0x39);
+	ret |= hi6523_write_byte(0x6a, 0x3f);
+	ret |= hi6523_write_byte(0x6b, 0x5c);
+	ret |= hi6523_write_byte(0x81, 0x5c);
+	ret |= hi6523_write_byte(0x86, 0x39);
 	/*need to config regs according to otg current */
 	if (3 != otg_lim_set) {
-		ret4 = hi6523_write_byte(0x8a, 0x10);
-		ret5 = hi6523_write_byte(0x88, 0xbf);
+		ret |= hi6523_write_byte(0x8a, 0x10);
+		ret |= hi6523_write_byte(0x88, 0xbf);
 	} else {
-		ret4 = hi6523_write_byte(0x8a, 0x18);
-		ret5= hi6523_write_byte(0x88, 0x9f);
+		ret |= hi6523_write_byte(0x8a, 0x18);
+		ret |= hi6523_write_byte(0x88, 0x9f);
 	}
-        ret = (ret0 || ret1 || ret2 || ret3 ||ret4 || ret5);
-        return ret;
+	return ret;
 }
 
 /**********************************************************
@@ -2093,7 +1998,7 @@ static int hi6523_get_ibus_ma(void)
 	u32 ibus = 0;
 	u32 state = 0;
 
-	ret = hi6523_get_charge_state(&state);
+	ret |= hi6523_get_charge_state(&state);
 	if (ret) {
 		SCHARGER_ERR("[%s] get_charge_state fail,ret:%d\n", __func__,
 			     ret);
@@ -2105,14 +2010,14 @@ static int hi6523_get_ibus_ma(void)
 			     state);*/
 		return 0;
 	}
-	ret = hi6523_get_adc_value(CHG_ADC_CH_IBUS_REF, &ibus_ref_data);
+	ret |= hi6523_get_adc_value(CHG_ADC_CH_IBUS_REF, &ibus_ref_data);
 	if (ret) {
 		SCHARGER_ERR("[%s]get ibus_ref_data fail,ret:%d\n", __func__,
 			     ret);
 		return -1;
 	}
 
-	ret = hi6523_get_adc_value(CHG_ADC_CH_IBUS, &ibus_data);
+	ret |= hi6523_get_adc_value(CHG_ADC_CH_IBUS, &ibus_data);
 	if (ret) {
 		SCHARGER_ERR("[%s]get ibus_data fail,ret:%d\n", __func__, ret);
 		return -1;
@@ -2471,7 +2376,6 @@ static int hi6523_rboost_buck_limit(void)
 {
 	if (ILIMIT_RBOOST_CNT < g_rboost_cnt) {
 		SCHARGER_INF("%s:rboost cnt:%d\n", __func__, g_rboost_cnt);
-        set_boot_weaksource_flag();
 		return 1;
 	}
 	else {
@@ -2479,65 +2383,79 @@ static int hi6523_rboost_buck_limit(void)
 	}
 	return 0;
 }
+
 /**********************************************************
 *  Function:     hi6523_chip_init()
 *  Description:  chip init for hi6523
-*  Parameters:   chip_init_crit
+*  Parameters:   NULL
 *  return value:
 *                 0-success or others-fail
 **********************************************************/
-static int hi6523_chip_init(struct chip_init_crit* init_crit)
+static int hi6523_chip_init(void)
 {
-        #define RET_SIZE (16)
-        int ret[RET_SIZE] = {0};
-        int i;
+	int ret = 0;
 	struct hi6523_device_info *di = g_hi6523_dev;
-	if (NULL == di || NULL == init_crit) {
-		SCHARGER_ERR("%s hi6523_device_info or init_crit is NULL!\n", __func__);
+	if (NULL == di) {
+		SCHARGER_ERR("%s hi6523_device_info is NULL!\n", __func__);
 		return -ENOMEM;
 	}
 
-	switch(init_crit->vbus) {
-		case ADAPTER_5V:
-			ret[0] = hi6523_config_opt_param(VBUS_VSET_5V);
-			ret[1] = hi6523_set_vbus_vset(VBUS_VSET_5V);
-			charger_is_fcp = FCP_FALSE;
-			first_insert_flag = FIRST_INSERT_TRUE;
-			break;
-		case ADAPTER_9V:
-			ret[0] = hi6523_config_opt_param(VBUS_VSET_9V);
-			ret[1] = hi6523_set_vclamp(di->param_dts.vclamp);
-			break;
-		case ADAPTER_12V:
-			ret[0] = hi6523_config_opt_param(VBUS_VSET_12V);
-			ret[1] = hi6523_set_vclamp(di->param_dts.vclamp);
-			break;
-		default:
-			SCHARGER_ERR("%s: init mode err\n", __func__);
-			return -EINVAL;
+	ret |= hi6523_set_charge_enable(CHG_DISABLE);
+	ret |= hi6523_config_opt_param(VBUS_VSET_5V);
+	ret |= hi6523_set_fast_safe_timer(CHG_FASTCHG_TIMER_20H);
+	ret |= hi6523_set_term_enable(CHG_TERM_DIS);
+	ret |= hi6523_set_input_current(CHG_ILIMIT_470);
+	ret |= hi6523_set_charge_current(CHG_FAST_ICHG_500MA);
+	ret |= hi6523_set_terminal_voltage(CHG_FAST_VCHG_4400);
+	ret |= hi6523_set_terminal_current(CHG_TERM_ICHG_150MA);
+	ret |= hi6523_set_watchdog_timer(WATCHDOG_TIMER_40_S);
+	ret |= hi6523_set_precharge_current(CHG_PRG_ICHG_200MA);
+	ret |= hi6523_set_precharge_voltage(CHG_PRG_VCHG_2800);
+	ret |= hi6523_set_batfet_ctrl(CHG_BATFET_EN);
+	/*IR compensation voatge clamp ,IR compensation resistor setting */
+	ret |= hi6523_set_bat_comp(di->param_dts.bat_comp);
+	ret |= hi6523_set_vbus_vset(VBUS_VSET_5V);
+	ret |= hi6523_set_otg_current(BOOST_LIM_1000);
+	ret |= hi6523_set_otg_enable(OTG_DISABLE);
+
+	charger_is_fcp = FCP_FALSE;
+	first_insert_flag = FIRST_INSERT_TRUE;
+
+	return ret;
+}
+
+/**********************************************************
+*  Function:       hi6523_fcp_chip_init
+*  Description:    HI6523 chipIC initialization for high voltage adapter
+*  Parameters:   NULL
+*  return value:  0-success or others-fail
+**********************************************************/
+static int hi6523_fcp_chip_init(void)
+{
+	int ret = 0;
+	struct hi6523_device_info *di = g_hi6523_dev;
+	if (NULL == di) {
+		SCHARGER_ERR("%s hi6523_device_info is NULL!\n", __func__);
+		return -ENOMEM;
 	}
+	ret |= hi6523_set_charge_enable(CHG_DISABLE);
+	ret |= hi6523_config_opt_param(VBUS_VSET_9V);
+	ret |= hi6523_set_fast_safe_timer(CHG_FASTCHG_TIMER_20H);
+	ret |= hi6523_set_term_enable(CHG_TERM_DIS);
+	ret |= hi6523_set_input_current(CHG_ILIMIT_2000);
+	ret |= hi6523_set_charge_current(CHG_FAST_ICHG_2000MA);
+	ret |= hi6523_set_terminal_voltage(CHG_FAST_VCHG_4400);
+	ret |= hi6523_set_terminal_current(CHG_TERM_ICHG_150MA);
+	ret |= hi6523_set_watchdog_timer(WATCHDOG_TIMER_40_S);
+	ret |= hi6523_set_precharge_current(CHG_PRG_ICHG_200MA);
+	ret |= hi6523_set_precharge_voltage(CHG_PRG_VCHG_2800);
+	ret |= hi6523_set_batfet_ctrl(CHG_BATFET_EN);
+	ret |= hi6523_set_bat_comp(di->param_dts.bat_comp);
+	ret |= hi6523_set_vclamp(di->param_dts.vclamp);
+	ret |= hi6523_set_otg_current(BOOST_LIM_1000);
+	ret |= hi6523_set_otg_enable(OTG_DISABLE);
 
-	ret[2] = hi6523_set_charge_enable(CHG_DISABLE);
-	ret[3] = hi6523_set_fast_safe_timer(CHG_FASTCHG_TIMER_20H);
-	ret[4] = hi6523_set_term_enable(CHG_TERM_DIS);
-	ret[5] = hi6523_set_input_current(CHG_ILIMIT_470);
-	ret[6] = hi6523_set_charge_current(CHG_FAST_ICHG_500MA);
-	ret[7] = hi6523_set_terminal_voltage(CHG_FAST_VCHG_4400);
-	ret[8] = hi6523_set_terminal_current(CHG_TERM_ICHG_150MA);
-	ret[9] = hi6523_set_watchdog_timer(WATCHDOG_TIMER_40_S);
-	ret[10] = hi6523_set_precharge_current(CHG_PRG_ICHG_200MA);
-	ret[11] = hi6523_set_precharge_voltage(CHG_PRG_VCHG_2800);
-	ret[12] = hi6523_set_batfet_ctrl(CHG_BATFET_EN);
-	ret[13] = hi6523_set_bat_comp(di->param_dts.bat_comp);
-	ret[14] = hi6523_set_otg_current(BOOST_LIM_1000);
-	ret[15] = hi6523_set_otg_enable(OTG_DISABLE);
-
-        for(i = 0; i < RET_SIZE; i++) {
-                if(ret[i])
-                        return -1;
-        }
-
-        return 0;
+	return ret;
 }
 
 /**********************************************************
@@ -2567,15 +2485,13 @@ static int hi6523_fcp_cmd_transfer_check(void)
 	int ret = 0;
 	u8 reg_val3 = 0;
 	u8 reg_val4 = 0;
-        int ret0, ret1, ret2, ret3;
 	/*read accp interrupt registers until value is not zero */
 	do {
 		usleep_range(12000, 13000);
-		ret0 = hi6523_read_byte(CHG_FCP_ISR1_REG, &reg_val1);
-		ret1 = hi6523_read_byte(CHG_FCP_ISR2_REG, &reg_val2);
-		ret2 = hi6523_read_byte(CHG_FCP_IRQ3_REG, &reg_val3);
-		ret3 = hi6523_read_byte(CHG_FCP_IRQ4_REG, &reg_val4);
-		ret = (ret0||ret1||ret2||ret3);
+		ret |= hi6523_read_byte(CHG_FCP_ISR1_REG, &reg_val1);
+		ret |= hi6523_read_byte(CHG_FCP_ISR2_REG, &reg_val2);
+		ret |= hi6523_read_byte(CHG_FCP_IRQ3_REG, &reg_val3);
+		ret |= hi6523_read_byte(CHG_FCP_IRQ4_REG, &reg_val4);
 		if (ret) {
 			SCHARGER_ERR("%s : reg read failed!\n", __func__);
 			break;
@@ -2672,27 +2588,27 @@ static void hi6523_fcp_protocol_restart(void)
 static int hi6523_fcp_adapter_reg_read(u8 * val, u8 reg)
 {
 	int ret = 0;
-        int ret0 = 0, ret1 = 0, ret2 = 0, ret3 = 0, ret4 = 0, ret5 = 0, ret6 = 0;
 	int i = 0;
 	u8 reg_val1 = 0, reg_val2 = 0;
 
 	mutex_lock(&hi6523_accp_adapter_reg_lock);
 	for(i = 0; i < FCP_RETRY_TIME; i++) {
 		/*before send cmd, clear accp interrupt registers */
-		ret0 = hi6523_read_byte(CHG_FCP_ISR1_REG, &reg_val1);
-		ret1 = hi6523_read_byte(CHG_FCP_ISR2_REG, &reg_val2);
+		ret |= hi6523_read_byte(CHG_FCP_ISR1_REG, &reg_val1);
+		ret |= hi6523_read_byte(CHG_FCP_ISR2_REG, &reg_val2);
 		if (reg_val1 != 0) {
-			ret2 = hi6523_write_byte(CHG_FCP_ISR1_REG, reg_val1);
+			ret |= hi6523_write_byte(CHG_FCP_ISR1_REG, reg_val1);
 		}
 		if (reg_val2 != 0) {
-			ret3 = hi6523_write_byte(CHG_FCP_ISR2_REG, reg_val2);
+			ret |= hi6523_write_byte(CHG_FCP_ISR2_REG, reg_val2);
 		}
 
-		ret4 = hi6523_write_byte(CHG_FCP_CMD_REG, CHG_FCP_CMD_SBRRD);
-		ret5 = hi6523_write_byte(CHG_FCP_ADDR_REG, reg);
-		ret6 = hi6523_write_mask(CHG_FCP_CTRL_REG, CHG_FCP_SNDCMD_MSK,
+		ret |= hi6523_write_byte(CHG_FCP_CMD_REG, CHG_FCP_CMD_SBRRD);
+		ret |= hi6523_write_byte(CHG_FCP_ADDR_REG, reg);
+		ret |=
+		    hi6523_write_mask(CHG_FCP_CTRL_REG, CHG_FCP_SNDCMD_MSK,
 				      CHG_FCP_SNDCMD_SHIFT, CHG_FCP_EN);
-                ret = (ret0 || ret1 || ret2 || ret3 || ret4 ||ret5 || ret6);
+
 		if (ret) {
 			SCHARGER_ERR("%s: write error ret is %d \n", __func__, ret);
 			mutex_unlock(&hi6523_accp_adapter_reg_lock);
@@ -2702,7 +2618,7 @@ static int hi6523_fcp_adapter_reg_read(u8 * val, u8 reg)
 		/* check cmd transfer success or fail */
 		if (0 == hi6523_fcp_cmd_transfer_check()) {
 			/* recived data from adapter */
-			ret = hi6523_read_byte(CHG_FCP_RDATA_REG, val);
+			ret |= hi6523_read_byte(CHG_FCP_RDATA_REG, val);
 			break;
 		}
 		hi6523_fcp_protocol_restart();
@@ -2727,36 +2643,33 @@ static int hi6523_fcp_adapter_reg_read(u8 * val, u8 reg)
 ***************************************************************************/
 static int hi6523_fcp_adapter_reg_write(u8 val, u8 reg)
 {
-	int retval = 0;
-        #define RET_SIZE_8      (8)
-        int ret[RET_SIZE_8] = {0};
-	int i = 0, j = 0;
+	int ret = 0;
+	int i = 0;
 	u8 reg_val1 = 0, reg_val2 = 0;
 
 	mutex_lock(&hi6523_accp_adapter_reg_lock);
 	for(i = 0; i < FCP_RETRY_TIME; i++) {
 		/*before send cmd, clear accp interrupt registers */
-		ret[0] = hi6523_read_byte(CHG_FCP_ISR1_REG, &reg_val1);
-		ret[1] = hi6523_read_byte(CHG_FCP_ISR2_REG, &reg_val2);
+		ret |= hi6523_read_byte(CHG_FCP_ISR1_REG, &reg_val1);
+		ret |= hi6523_read_byte(CHG_FCP_ISR2_REG, &reg_val2);
 		if (reg_val1 != 0) {
-			ret[2] = hi6523_write_byte(CHG_FCP_ISR1_REG, reg_val1);
+			ret |= hi6523_write_byte(CHG_FCP_ISR1_REG, reg_val1);
 		}
 		if (reg_val2 != 0) {
-			ret[3] = hi6523_write_byte(CHG_FCP_ISR2_REG, reg_val2);
+			ret |= hi6523_write_byte(CHG_FCP_ISR2_REG, reg_val2);
 		}
-		ret[4] = hi6523_write_byte(CHG_FCP_CMD_REG, CHG_FCP_CMD_SBRWR);
-		ret[5] = hi6523_write_byte(CHG_FCP_ADDR_REG, reg);
-		ret[6] = hi6523_write_byte(CHG_FCP_WDATA_REG, val);
-		ret[7] = hi6523_write_mask(CHG_FCP_CTRL_REG, CHG_FCP_SNDCMD_MSK,
+		ret |= hi6523_write_byte(CHG_FCP_CMD_REG, CHG_FCP_CMD_SBRWR);
+		ret |= hi6523_write_byte(CHG_FCP_ADDR_REG, reg);
+		ret |= hi6523_write_byte(CHG_FCP_WDATA_REG, val);
+		ret |=
+		    hi6523_write_mask(CHG_FCP_CTRL_REG, CHG_FCP_SNDCMD_MSK,
 				      CHG_FCP_SNDCMD_SHIFT, CHG_FCP_EN);
 
-                for(j = 0; j < RET_SIZE_8; j++) {
-                        if(ret[j]) {
-                                SCHARGER_ERR("%s: write error ret is %d \n", __func__, retval);
-                                mutex_unlock(&hi6523_accp_adapter_reg_lock);
-                                return HI6523_FAIL;
-                        }
-                }
+		if (ret) {
+			SCHARGER_ERR("%s: write error ret is %d \n", __func__, ret);
+			mutex_unlock(&hi6523_accp_adapter_reg_lock);
+			return HI6523_FAIL;
+		}
 
 		/* check cmd transfer success or fail */
 		if (0 == hi6523_fcp_cmd_transfer_check()) {
@@ -2767,10 +2680,10 @@ static int hi6523_fcp_adapter_reg_write(u8 val, u8 reg)
 	if(FCP_RETRY_TIME == i)
 	{
 		SCHARGER_ERR("%s : ack error,retry %d times \n",__func__,i);
-		retval = HI6523_FAIL;
+		ret = HI6523_FAIL;
 	}
 	mutex_unlock(&hi6523_accp_adapter_reg_lock);
-	return retval;
+	return ret;
 }
 
 /****************************************************************************
@@ -2788,7 +2701,8 @@ static int hi6523_fcp_get_adapter_output_vol(u8 * vol)
 	int ret = 0;
 
 	/*get adapter vol list number,exclude 5V */
-	ret = hi6523_fcp_adapter_reg_read(&num,
+	ret |=
+	    hi6523_fcp_adapter_reg_read(&num,
 					CHG_FCP_SLAVE_DISCRETE_CAPABILITIES);
 	/*currently,fcp only support three out vol config(5v/9v/12v) */
 	if (ret || num > 2) {
@@ -2798,7 +2712,8 @@ static int hi6523_fcp_get_adapter_output_vol(u8 * vol)
 	}
 
 	/*get max out vol value */
-	ret = hi6523_fcp_adapter_reg_read(&output_vol,
+	ret |=
+	    hi6523_fcp_adapter_reg_read(&output_vol,
 					CHG_FCP_SLAVE_REG_DISCRETE_OUT_V(num));
 	if (ret) {
 		SCHARGER_ERR
@@ -2863,12 +2778,11 @@ static int hi6523_fcp_adapter_vol_check(int adapter_vol_mv)
   Return:        0: success
                 -1: fail
 ***************************************************************************/
-static int hi6523_fcp_set_adapter_output_vol(int output_vol)
+static int hi6523_fcp_set_adapter_output_vol(int *output_vol)
 {
 	u8 val = 0;
 	u8 vol = 0;
 	int ret = 0;
-        int ret0, ret1;
 
 	/*read ID OUTI , for identify huawei adapter */
 	ret = hi6523_fcp_adapter_reg_read(&val, CHG_FCP_SLAVE_ID_OUT0);
@@ -2879,46 +2793,31 @@ static int hi6523_fcp_set_adapter_output_vol(int output_vol)
 	}
 	SCHARGER_INF("%s: id out reg[0x4] = %u.\n", __func__, val);
 
-	switch (output_vol) {
-	case CHG_FCP_OUTPUT_VOL_5V:
-		ret = hi6523_fcp_adapter_reg_read(&vol,
-			CHG_FCP_SLAVE_REG_DISCRETE_OUT_V(0));
-		if (ret) {
-			SCHARGER_ERR("%s get output_vol error\n", __func__);
-			return -1;
-		}
-		break;
-	case CHG_FCP_OUTPUT_VOL_9V:
-		/* get adapter max output vol value */
-		ret = hi6523_fcp_get_adapter_output_vol(&vol);
-		if (ret) {
-			SCHARGER_ERR("%s: fcp get adapter output vol err\n",
-				__func__);
-			return -1;
-		}
-		if (vol > (CHG_FCP_OUTPUT_VOL_9V * CHG_FCP_VOL_STEP)) {
-			vol = CHG_FCP_OUTPUT_VOL_9V * CHG_FCP_VOL_STEP;
-			SCHARGER_INF("limit adap to 9V, while support 12V\n");
-		}
-		break;
-	default:
-		SCHARGER_ERR("input val is invalid\n");
+	/*get adapter max output vol value */
+	ret = hi6523_fcp_get_adapter_output_vol(&vol);
+	if (ret) {
+		SCHARGER_ERR("%s: fcp get adapter output vol err.\n", __func__);
 		return -1;
 	}
 
-	SCHARGER_INF("%s: output_vol=%u\n", __func__, vol);
+	if (vol > CHG_FCP_OUTPUT_VOL_9V * CHG_FCP_VOL_STEP) {
+		vol = CHG_FCP_OUTPUT_VOL_9V * CHG_FCP_VOL_STEP;
+		SCHARGER_INF("fcp limit adapter vol to 9V, while adapter support 12V.\n");
+	}
+	*output_vol = vol / CHG_FCP_VOL_STEP;
 
 	/*retry if write fail */
-	ret0 = hi6523_fcp_adapter_reg_write(vol, CHG_FCP_SLAVE_VOUT_CONFIG);
-	ret1 = hi6523_fcp_adapter_reg_read(&val, CHG_FCP_SLAVE_VOUT_CONFIG);
+	ret |= hi6523_fcp_adapter_reg_write(vol, CHG_FCP_SLAVE_VOUT_CONFIG);
+	ret |= hi6523_fcp_adapter_reg_read(&val, CHG_FCP_SLAVE_VOUT_CONFIG);
 	SCHARGER_INF("%s: vout config reg[0x2c] = %u.\n", __func__, val);
-	if (ret0 || ret1 || val != vol) {
+	if (ret || val != vol) {
 		SCHARGER_ERR("%s:out vol config err, reg[0x2c] = %u,vol :%d.\n",
 			     __func__, val, vol);
 		return -1;
 	}
 
-	ret = hi6523_fcp_adapter_reg_write(CHG_FCP_SLAVE_SET_VOUT,
+	ret |=
+	    hi6523_fcp_adapter_reg_write(CHG_FCP_SLAVE_SET_VOUT,
 					 CHG_FCP_SLAVE_OUTPUT_CONTROL);
 	if (ret) {
 		SCHARGER_ERR("%s : enable adapter output voltage failed \n ",
@@ -2926,7 +2825,7 @@ static int hi6523_fcp_set_adapter_output_vol(int output_vol)
 		return -1;
 	}
 
-	ret = hi6523_fcp_adapter_vol_check(vol / CHG_FCP_VOL_STEP * 1000);
+	ret |= hi6523_fcp_adapter_vol_check(vol / CHG_FCP_VOL_STEP * 1000);
 	if (ret) {
 		SCHARGER_ERR("%s : adc check adapter output voltage failed \n ",
 			     __func__);
@@ -2949,8 +2848,11 @@ static int hi6523_set_uvp_ovp(void)
 {
 	int ret = 0;
 
-	ret = hi6523_write_mask(CHG_UVP_OVP_VOLTAGE_REG, CHG_UVP_OVP_VOLTAGE_MSK,
-			      CHG_UVP_OVP_VOLTAGE_SHIFT, CHG_UVP_OVP_VOLTAGE_MAX);
+	ret |=
+	    hi6523_write_mask(CHG_UVP_OVP_VOLTAGE_REG, CHG_UVP_OVP_VOLTAGE_MSK,
+			      CHG_UVP_OVP_VOLTAGE_SHIFT,
+			      CHG_UVP_OVP_VOLTAGE_MAX);
+
 	if (ret) {
 		SCHARGER_ERR("%s:uvp&ovp voltage set failed, ret = %d.\n",
 			     __func__, ret);
@@ -2972,7 +2874,7 @@ static int hi6523_fcp_switch_to_soc(void)
 {
 	SCHARGER_INF("%s\n", __func__);
 #ifdef CONFIG_SWITCH_FSA9685
-	usbswitch_common_manual_sw(FSA9685_USB1_ID_TO_IDBYPASS);
+	fsa9685_manual_sw(FSA9685_USB1_ID_TO_IDBYPASS);
 #endif
 	return 0;
 }
@@ -2989,7 +2891,7 @@ static int hi6523_fcp_switch_to_master(void)
 {
 	SCHARGER_INF("%s\n", __func__);
 #ifdef CONFIG_SWITCH_FSA9685
-	usbswitch_common_manual_sw(FSA9685_USB2_ID_TO_IDBYPASS);
+	fsa9685_manual_sw(FSA9685_USB2_ID_TO_IDBYPASS);
 #endif
 	return 0;
 }
@@ -3009,10 +2911,9 @@ static int hi6523_fcp_adapter_detect(void)
 	u8 reg_val2 = 0;
 	int i = 0;
 	int ret = 0;
-        int ret0, ret1, ret2, ret3;
 
 	mutex_lock(&hi6523_fcp_detect_lock);
-	ret = hi6523_read_byte(CHG_FCP_STATUS_REG, &reg_val2);
+	ret |= hi6523_read_byte(CHG_FCP_STATUS_REG, &reg_val2);
 	if (ret) {
 		SCHARGER_ERR("%s:read det attach err,ret:%d.\n", __func__, ret);
 		mutex_unlock(&hi6523_fcp_detect_lock);
@@ -3025,14 +2926,14 @@ static int hi6523_fcp_adapter_detect(void)
 		SCHARGER_INF("fcp adapter detect ok.\n");
 		return CHG_FCP_ADAPTER_DETECT_SUCC;
 	}
-	ret0 =
+	ret |=
 	    hi6523_write_mask(CHG_FCP_DET_CTRL_REG, CHG_FCP_DET_EN_MSK,
 			      CHG_FCP_DET_EN_SHIFT, TRUE);
-	ret1 = hi6523_apple_adapter_detect(APPLE_DETECT_DISABLE);
-	ret2 = hi6523_fcp_switch_to_master();
-	ret3 = hi6523_write_mask(CHG_FCP_DET_CTRL_REG, CHG_FCP_CMP_EN_MSK,
+	ret |= hi6523_apple_adapter_detect(APPLE_DETECT_DISABLE);
+	ret |= hi6523_fcp_switch_to_master();
+	ret |=
+	    hi6523_write_mask(CHG_FCP_DET_CTRL_REG, CHG_FCP_CMP_EN_MSK,
 			      CHG_FCP_CMP_EN_SHIFT, TRUE);
-        ret = (ret0||ret1||ret2||ret3);
 	if (ret) {
 		SCHARGER_ERR("%s:FCP enable detect fail,ret:%d.\n", __func__,
 			     ret);
@@ -3172,14 +3073,10 @@ static int hi6523_is_support_fcp(void)
 ***************************************************************************/
 static int hi6523_fcp_master_reset(void)
 {
-	int ret0 = 0, ret1 = 0;
-	ret0 = hi6523_write_byte(CHG_FCP_SOFT_RST_REG, CHG_FCP_SOFT_RST_VAL);
-	ret1 = hi6523_write_byte(CHG_FCP_CTRL_REG, 0);	//clear fcp_en and fcp_master_rst
-        if(ret0 || ret1) {
-                SCHARGER_ERR("%s i2c err\n", __func__);
-                return -1;
-        }
-	return 0;
+	int ret = 0;
+	ret |= hi6523_write_byte(CHG_FCP_SOFT_RST_REG, CHG_FCP_SOFT_RST_VAL);
+	ret |= hi6523_write_byte(CHG_FCP_CTRL_REG, 0);	//clear fcp_en and fcp_master_rst
+	return ret;
 }
 
 /****************************************************************************
@@ -3194,30 +3091,19 @@ static int hi6523_fcp_adapter_reset(void)
 {
 	u8 val = 0;
 	int ret = 0, i = 0;
-	int ret0 = 0, ret1 = 0;
-	u8 output_vol = 0;
-
-	ret0 = hi6523_set_vbus_vset(VBUS_VSET_5V);
-	ret1 = hi6523_fcp_adapter_reg_read((u8*)&output_vol, CHG_FCP_SLAVE_REG_DISCRETE_OUT_V(0));
-	ret = (ret0||ret1);
-	if (ret){
-		SCHARGER_ERR("%s get output_vol error.\n", __func__);
-		return ret;
-	}
-
+	ret |= hi6523_set_vbus_vset(VBUS_VSET_5V);
 
 	/*retry if reset fail*/
 	for (i = 0; i < FCP_RESET_RETRY_TIME; i++) {
-		ret0 = hi6523_fcp_adapter_reg_write(output_vol, CHG_FCP_SLAVE_VOUT_CONFIG);
-		ret1 = hi6523_fcp_adapter_reg_read(&val, CHG_FCP_SLAVE_VOUT_CONFIG);
+		ret |= hi6523_fcp_adapter_reg_write(CHG_FCP_OUTPUT_VOL_5V, CHG_FCP_SLAVE_VOUT_CONFIG);
+		ret |= hi6523_fcp_adapter_reg_read(&val, CHG_FCP_SLAVE_VOUT_CONFIG);
 		SCHARGER_INF("%s: vout config reg[0x2c] = %u.\n", __func__, val);
-		ret = (ret0||ret1);
-		if (ret || val != output_vol) {
+		if (ret || val != CHG_FCP_OUTPUT_VOL_5V) {
 			SCHARGER_ERR("%s: set vout config err, reg[0x2c] = %u.\n", __func__, val);
 			continue;
 		}
 
-		ret = hi6523_fcp_adapter_reg_write(CHG_FCP_SLAVE_SET_VOUT, CHG_FCP_SLAVE_OUTPUT_CONTROL);
+		ret |= hi6523_fcp_adapter_reg_write(CHG_FCP_SLAVE_SET_VOUT, CHG_FCP_SLAVE_OUTPUT_CONTROL);
 		if (ret) {
 			SCHARGER_ERR("%s: enable adapter output voltage failed.\n", __func__);
 			continue;
@@ -3226,26 +3112,23 @@ static int hi6523_fcp_adapter_reset(void)
 		break;
 	}
 
-	ret = hi6523_write_byte(CHG_FCP_CTRL_REG, CHG_FCP_EN_MSK | CHG_FCP_MSTR_RST_MSK);
+	ret |= hi6523_write_byte(CHG_FCP_CTRL_REG, CHG_FCP_EN_MSK | CHG_FCP_MSTR_RST_MSK);
 	if (ret) {
 		SCHARGER_ERR("%s: send rst cmd failed.\n ", __func__);
 		return ret;
 	}
-	/*after reset, v300 need 17ms*/
-	msleep(25);
-	ret = hi6523_fcp_adapter_vol_check(FCP_ADAPTER_RST_VOL);
+
+	ret |= hi6523_fcp_adapter_vol_check(FCP_ADAPTER_RST_VOL);
 	if (ret) {
-		ret0 = hi6523_write_byte(CHG_FCP_CTRL_REG, 0);	//clear fcp_en and fcp_master_rst
+		ret |= hi6523_write_byte(CHG_FCP_CTRL_REG, 0);	//clear fcp_en and fcp_master_rst
 		SCHARGER_ERR("%s: adc check adapter output voltage failed.\n ", __func__);
-		return (ret || ret0);
+		return ret;
 	}
 
-	ret0 = hi6523_write_byte(CHG_FCP_CTRL_REG, 0);	//clear fcp_en and fcp_master_rst
-	ret1 = hi6523_config_opt_param(VBUS_VSET_5V);
+	ret |= hi6523_write_byte(CHG_FCP_CTRL_REG, 0);	//clear fcp_en and fcp_master_rst
+	ret |= hi6523_config_opt_param(VBUS_VSET_5V);
 	SCHARGER_INF("%s: fcp adapter output voltage reset succ.\n", __func__);
-
-	ret = (ret0||ret1);
-        return ret;
+	return ret;
 }
 
 /**********************************************************
@@ -3257,7 +3140,7 @@ static int hi6523_fcp_adapter_reset(void)
 static int hi6523_stop_charge_config(void)
 {
 	int ret = 0;
-	ret = hi6523_set_vbus_vset(VBUS_VSET_5V);
+	ret |= hi6523_set_vbus_vset(VBUS_VSET_5V);
 
 	is_weaksource = WEAKSOURCE_FALSE;
 
@@ -3290,12 +3173,12 @@ static int is_fcp_charger_type(void)
 		SCHARGER_ERR("%s:NOT SUPPORT FCP!\n", __func__);
 		return FALSE;
 	}
-	ret = hi6523_read_byte(FCP_ADAPTER_CNTL_REG, &reg_val);
+	ret |= hi6523_read_byte(FCP_ADAPTER_CNTL_REG, &reg_val);
 	if (ret) {
 		SCHARGER_ERR("%s reg read fail!\n", __func__);
 		return FALSE;
 	}
-	if (HI6523_ACCP_CHARGER_DET == (reg_val & HI6523_ACCP_CHARGER_DET))
+	if (HI6523_ACCP_CHARGER_DET == (reg_val & HI6523_ACCP_CHARGER_DET))/*lint !e587 */
 		return TRUE;
 	return FALSE;
 }
@@ -3387,24 +3270,12 @@ static int scp_adapter_reg_write(u8 val, u8 reg)
 	}
 	return 0;
 }
-
 static int hi6523_scp_adaptor_detect(void)
 {
-	int ret = 0;
-	u8 val = 0;
-	//int max_voltage = 0, min_voltage = 0;
-	struct hi6523_device_info *di = g_hi6523_dev;
+	int ret;
+	u8 val;
 	scp_error_flag = SCP_NO_ERR;
-
-	if (NULL == di) {
-		SCHARGER_ERR("%s hi6523_device_info is NULL!\n", __func__);
-		return -ENOMEM;
-	}
-
-	di->adaptor_support = 0;
-
 	ret = hi6523_fcp_adapter_detect();
-
 	if (CHG_FCP_ADAPTER_DETECT_OTHER == ret)
 	{
 		SCHARGER_INF("scp adapter other detect\n");
@@ -3415,59 +3286,16 @@ static int hi6523_scp_adaptor_detect(void)
 		SCHARGER_INF("scp adapter detect fail\n");
 		return SCP_ADAPTOR_DETECT_FAIL;
 	}
-
-	ret = scp_adapter_reg_read(&val, SCP_ADP_TYPE0);
-	if(ret || !(val & SCP_ADP_TYPE0_B_SC_MASK))
+	ret = scp_adapter_reg_read(&val, SCP_ADP_TYPE);
+	if(ret)
 	{
-		if (ret)
-			SCHARGER_ERR("%s : read SCP_ADP_TYPE_0 fail ,ret = %d \n",__func__,ret);
-
-		/*in case the LVC charger does not have 0x7e reg*/
-		scp_error_flag = SCP_NO_ERR;
-		ret = scp_adapter_reg_read(&val, SCP_ADP_TYPE);
-		if(ret)
-		{
-			SCHARGER_ERR("%s : read SCP_ADP_TYPE fail ,ret = %d \n",__func__,ret);
-			return SCP_ADAPTOR_DETECT_OTHER;
-		}
-		SCHARGER_INF("%s : read SCP_ADP_TYPE val = %d \n",__func__,val);
-		if ((val & SCP_ADP_TYPE_B_MASK) == SCP_ADP_TYPE_B)
-		{
-			SCHARGER_INF("scp type B adapter detect\n ");
-			ret = scp_adapter_reg_read(&val, SCP_B_ADP_TYPE);
-			if (ret)
-			{
-				SCHARGER_ERR("%s : read SCP_B_ADP_TYPE fail ,ret = %d \n",__func__,ret);
-				return SCP_ADAPTOR_DETECT_OTHER;/*not scp adapter*/
-			}
-			SCHARGER_INF("%s : read SCP_B_ADP_TYPE val = %d \n",__func__,val);
-			if (SCP_B_DIRECT_ADP == val)
-			{
-				SCHARGER_INF("scp type B direct charge adapter detect\n ");
-
-				di->adaptor_support |= LVC_MODE;
-
-				return SCP_ADAPTOR_DETECT_SUCC;
-			}
-		}
+		SCHARGER_ERR("%s : read SCP_ADP_TYPE fail ,ret = %d \n",__func__,ret);
 		return SCP_ADAPTOR_DETECT_OTHER;
 	}
-	SCHARGER_INF("%s : read SCP_ADP_TYPE_0 val = %d \n",__func__,val);
-	if (val)
+	SCHARGER_INF("%s : read SCP_ADP_TYPE val = %d \n",__func__,val);
+	if ((val & SCP_ADP_TYPE_B_MASK) == SCP_ADP_TYPE_B)
 	{
-		if(val & SCP_ADP_TYPE0_B_SC_MASK)
-		{
-			SCHARGER_INF("scp type B SC adapter detect\n ");
-			di->adaptor_support |= SC_MODE;
-		}
-
-		if(!(val & SCP_ADP_TYPE0_B_LVC_MASK))
-		{
-			SCHARGER_INF("scp type B lvc adapter detect\n ");
-			di->adaptor_support |= LVC_MODE;
-		}
-
-		SCHARGER_INF("%s : adaptor_support = %d \n",__func__, di->adaptor_support);
+		SCHARGER_INF("scp type B adapter detect\n ");
 		ret = scp_adapter_reg_read(&val, SCP_B_ADP_TYPE);
 		if (ret)
 		{
@@ -3484,19 +3312,6 @@ static int hi6523_scp_adaptor_detect(void)
 
 	return SCP_ADAPTOR_DETECT_OTHER;
 }
-
-static int hi6523_scp_get_adaptor_type(void)
-{
-	struct hi6523_device_info *di = g_hi6523_dev;
-	if (NULL == di) {
-		SCHARGER_ERR("%s hi6523_device_info is NULL!\n", __func__);
-		return -ENOMEM;
-	}
-
-	SCHARGER_INF("%s : adaptor_support = 0x%x \n ",__func__, di->adaptor_support);
-	return (int)di->adaptor_support;
-}
-
 static int hi6523_scp_output_mode_enable(int enable)
 {
 	u8 val;
@@ -3574,11 +3389,10 @@ static int hi6523_adaptor_reset(int enable)
 	}
 	return 0;
 }
-static int hi6523_scp_config_iset_boundary(int iboundary_ma)
+static int hi6523_scp_config_iset_boundary(int iboundary)
 {
 	u8 val;
 	int ret;
-        unsigned int iboundary = (unsigned int)iboundary_ma;
 
 	/*high byte store in low address*/
 	val = (iboundary >> ONE_BYTE_LEN) & ONE_BYTE_MASK;
@@ -3587,18 +3401,17 @@ static int hi6523_scp_config_iset_boundary(int iboundary_ma)
 		return ret;
 	/*low byte store in high address*/
 	val = iboundary & ONE_BYTE_MASK;
-	ret = scp_adapter_reg_write(val, SCP_ISET_BOUNDARY_H);
+	ret |= scp_adapter_reg_write(val, SCP_ISET_BOUNDARY_H);
 	if (ret < 0)
 	{
 		SCHARGER_ERR("%s : failed \n ",__func__);
 	}
 	return ret;
 }
-static int hi6523_scp_config_vset_boundary(int vboundary_mv)
+static int hi6523_scp_config_vset_boundary(int vboundary)
 {
 	u8 val;
 	int ret;
-        unsigned int vboundary = (unsigned int)vboundary_mv;
 
 	/*high byte store in low address*/
 	val = (vboundary >> ONE_BYTE_LEN) & ONE_BYTE_MASK;
@@ -3607,7 +3420,7 @@ static int hi6523_scp_config_vset_boundary(int vboundary_mv)
 		return ret;
 	/*low byte store in high address*/
 	val = vboundary & ONE_BYTE_MASK;
-	ret = scp_adapter_reg_write(val, SCP_VSET_BOUNDARY_H);
+	ret |= scp_adapter_reg_write(val, SCP_VSET_BOUNDARY_H);
 	if(ret < 0)
 	{
 		SCHARGER_ERR("%s : failed \n ",__func__);
@@ -3616,39 +3429,17 @@ static int hi6523_scp_config_vset_boundary(int vboundary_mv)
 }
 static int hi6523_scp_set_adaptor_voltage(int vol)
 {
-	int val = 0;
-	int ret = 0, ret1 = 0;
-	int dc_mode = 0;
-	u8 reg = 0;
+	int val;
+	int ret;
 
-	dc_mode= scp_get_direct_charge_mode();
-
-	if (dc_mode == LVC_MODE)
+	val = vol - VSSET_OFFSET;
+	val = val / VSSET_STEP;
+	ret = scp_adapter_reg_write((u8)val, SCP_VSSET);
+	if(ret < 0)
 	{
-		val = vol - VSSET_OFFSET;
-		val = val / VSSET_STEP;
-		ret = scp_adapter_reg_write((u8)val, SCP_VSSET);
-		if(ret < 0)
-		{
-			SCHARGER_ERR("%s : failed \n ",__func__);
-			return HI6523_FAIL;
-		}
+		SCHARGER_ERR("%s : failed \n ",__func__);
+		return HI6523_FAIL;
 	}
-	else if (dc_mode == SC_MODE)
-	{
-		/*high byte store in low address*/
-		reg = (vol >> ONE_BYTE_LEN) & ONE_BYTE_MASK;
-		ret = scp_adapter_reg_write(reg, SCP_VSET_L);
-		/*low byte store in high address*/
-		reg = ((unsigned int)vol) & ONE_BYTE_MASK;
-		ret1 = scp_adapter_reg_write(reg, SCP_VSET_H);
-		if(ret < 0 || ret1 < 0)
-		{
-			SCHARGER_ERR("%s : failed \n ",__func__);
-			return HI6523_FAIL;
-		}
-	}
-
 	return 0;
 }
 static int hi6523_scp_set_watchdog_timer(int second)
@@ -3744,13 +3535,13 @@ static int hi6523_scp_chip_reset(void)
 }
 static int hi6523_scp_exit(struct direct_charge_device* di)
 {
-        int ret0 = 0, ret1 = 0;
+	int ret;
 
-	ret0 = hi6523_scp_output_mode_enable(OUTPUT_MODE_DISABLE);
+	ret = hi6523_scp_output_mode_enable(OUTPUT_MODE_DISABLE);
 	switch(di->adaptor_vendor_id)
 	{
 		case IWATT_ADAPTER:
-			ret1  = hi6523_adaptor_reset(ADAPTOR_RESET);
+			ret  |= hi6523_adaptor_reset(ADAPTOR_RESET);
 			break;
 		default:
 			SCHARGER_INF("%s:not iWatt\n",__func__);
@@ -3758,49 +3549,23 @@ static int hi6523_scp_exit(struct direct_charge_device* di)
 	msleep(WAIT_FOR_ADAPTOR_RESET);
 	SCHARGER_ERR("%s\n",__func__);
 	scp_error_flag = SCP_NO_ERR;
-
-        if(ret0 || ret1)
-                return -1;
-        return 0;
+	return ret;
 }
 static int hi6523_scp_get_adaptor_voltage(void)
 {
-	u8  reg_val = 0;
-	u8  reg_low = 0;
-	u8  reg_high = 0;
-	int val = 0;
-	int ret= 0, ret1 = 0;
-	int dc_mode = 0;
+	int val;
+	u8  reg_val;
+	int ret;
 
-	dc_mode= scp_get_direct_charge_mode();
-	if (dc_mode == LVC_MODE)
+	ret = scp_adapter_reg_read(&reg_val, SCP_SREAD_VOUT);
+	if(ret)
 	{
-		ret = scp_adapter_reg_read(&reg_val, SCP_SREAD_VOUT);
-		if(ret)
-		{
-			SCHARGER_ERR("%s : read failed ,ret = %d \n",__func__,ret);
-			return HI6523_FAIL;
-		}
-		val = reg_val*SCP_SREAD_VOUT_STEP + SCP_SREAD_VOUT_OFFSET;
-		SCHARGER_INF("[%s]val is %d \n", __func__, val);
-		return val;
+		SCHARGER_ERR("%s : read failed ,ret = %d \n",__func__,ret);
+		return HI6523_FAIL;
 	}
-	else if (dc_mode == SC_MODE)
-	{
-		ret = scp_adapter_reg_read(&reg_low, SCP_READ_VOLT_L);
-		ret1 = scp_adapter_reg_read(&reg_high, SCP_READ_VOLT_H);
-		if(ret || ret1)
-		{
-			SCHARGER_ERR("%s : read failed ,ret = %d \n",__func__,ret);
-			return HI6523_FAIL;
-		}
-		val = reg_low << ONE_BYTE_LEN;
-		val += reg_high;
-
-		SCHARGER_INF("[%s]val is %d \n", __func__, val);
-		return val;
-	}
-        return HI6523_FAIL;
+	val = reg_val*SCP_SREAD_VOUT_STEP + SCP_SREAD_VOUT_OFFSET;
+	SCHARGER_INF("[%s]val is %d \n", __func__, val);
+	return val;
 }
 static int hi6523_scp_set_adaptor_current(int cur)
 {
@@ -4035,7 +3800,6 @@ static int hi6523_scp_get_chip_status(void)
 {
 	return 0;
 }
-
 struct smart_charge_ops scp_hi6523_ops = {
 	.is_support_scp = hi6523_is_support_scp,
 	.scp_init = hi6523_scp_init,
@@ -4047,7 +3811,9 @@ struct smart_charge_ops scp_hi6523_ops = {
 	.scp_get_adaptor_current = hi6523_scp_get_adaptor_current,
 	.scp_get_adaptor_current_set = hi6523_scp_get_adaptor_current_set,
 	.scp_get_adaptor_max_current = hi6523_scp_get_adaptor_max_current,
+	.scp_adaptor_reset = hi6523_scp_adaptor_reset,
 	.scp_adaptor_output_enable = hi6523_scp_adaptor_output_enable,
+	.scp_chip_reset = hi6523_scp_chip_reset,
 	.scp_stop_charge_config = hi6523_scp_stop_charge_config,
 	.is_scp_charger_type = hi6523_is_scp_charger_type,
 	.scp_get_adaptor_status = hi6523_scp_get_adaptor_status,
@@ -4057,8 +3823,7 @@ struct smart_charge_ops scp_hi6523_ops = {
 	.scp_get_adaptor_temp = hi6523_scp_get_adaptor_temp,
 	.scp_get_adapter_vendor_id = hi6523_get_adapter_vendor_id,
 	.scp_get_usb_port_leakage_current_info = hi6523_get_usb_port_leakage_current_info,
-	.scp_set_direct_charge_mode = scp_set_direct_charge_mode,
-	.scp_get_adaptor_type = hi6523_scp_get_adaptor_type,
+	.scp_power_enable = set_5v_boost_enable,
 };
 #endif
 
@@ -4078,6 +3843,7 @@ struct fcp_adapter_device_ops fcp_hi6523_ops = {
 
 struct charge_device_ops hi6523_ops = {
 	.chip_init = hi6523_chip_init,
+	.fcp_chip_init = hi6523_fcp_chip_init,
 	.dev_check = hi6523_device_check,
 	.set_input_current = hi6523_set_input_current,
 	.set_charge_current = hi6523_set_charge_current,
@@ -4098,8 +3864,6 @@ struct charge_device_ops hi6523_ops = {
 	.get_vbat_sys = hi6523_get_vbat_sys,
 	.set_charger_hiz = hi6523_set_charger_hiz,
 	.check_input_dpm_state = hi6523_check_input_dpm_state,
-	.check_input_vdpm_state = hi6523_check_input_dpm_state,
-	.check_input_idpm_state = hi6523_check_input_acl_state,
 	.set_otg_current = hi6523_set_otg_current,
 	.stop_charge_config = hi6523_stop_charge_config,
 	.set_vbus_vset = hi6523_set_vbus_vset,
@@ -4109,59 +3873,11 @@ struct charge_device_ops hi6523_ops = {
 	.soft_vbatt_ovp_protect = hi6523_soft_vbatt_ovp_protect,
 	.rboost_buck_limit = hi6523_rboost_buck_limit,
 	.get_charge_current = hi6523_get_charge_current,
-	.get_iin_set = hi6523_get_input_current_set,
 };
 
 struct  water_detect_ops hi6523_water_detect_ops = {
 	.is_water_intrused = hi6523_is_water_intrused,
 };
-#ifdef CONFIG_DIRECT_CHARGER
-static int hi6523_scp_reg_read_block(int reg, int *val, int num)
-{
-	int ret = 0;
-	int i = 0;
-	u8 data = 0;
-	scp_error_flag = SCP_NO_ERR;
-
-	for (i = 0; i < num; i++) {
-		ret = scp_adapter_reg_read(&data, reg + i);
-		if (ret) {
-			SCHARGER_ERR("error: scp read failed(reg=0x%x)!\n", reg + i);
-			return -1;
-		}
-
-		val[i] = data;
-	}
-
-	return 0;
-}
-
-static int hi6523_scp_reg_write_block(int reg, int *val, int num)
-{
-	int ret = 0;
-	int i = 0;
-	scp_error_flag = SCP_NO_ERR;
-
-	for (i = 0; i < num; i++) {
-		ret = scp_adapter_reg_write(val[i], reg + i);
-		if (ret) {
-			SCHARGER_ERR("error: scp write failed(reg=0x%x)!\n", reg + i);
-			return -1;
-		}
-	}
-
-	return 0;
-}
-
-static struct scp_protocol_ops hi6523_scp_protocol_ops = {
-	.chip_name = "scharger_v300",
-	.reg_read = hi6523_scp_reg_read_block,
-	.reg_write = hi6523_scp_reg_write_block,
-	.detect_adapter = hi6523_fcp_adapter_detect,
-	.soft_reset_master = hi6523_scp_chip_reset,
-	.soft_reset_slave = hi6523_scp_adaptor_reset,
-};
-#endif
 /**********************************************************
 *  Function:       hi6523_plugout_check_process
 *  Description:    schedule or cancel check work based on charger type
@@ -4193,7 +3909,6 @@ static void hi6523_plugout_check_process(enum hisi_charger_type type)
 	    mutex_lock(&hi6523_ibias_calc_lock);
 		I_bias_all = 0;
 	    mutex_unlock(&hi6523_ibias_calc_lock);
-        clr_boot_weaksource_flag();
 		break;
 	default:
 		break;
@@ -4237,6 +3952,8 @@ static void hi6523_plugout_check_work(struct work_struct *work)
 	int ret;
 	unsigned char rboost_irq_reg = 0;
 	struct hi6523_device_info *di = g_hi6523_dev;
+	static int vbatt_full=0;
+	unsigned int status=0;
 
 	if (NULL == di)
 		return;
@@ -4278,12 +3995,34 @@ static void hi6523_plugout_check_work(struct work_struct *work)
 						SCHARGER_ERR("%s:ibus=%dma, vbus=%dmv, vbat=%dmv, r-boost cnt:%d, shutdown buck.\n",
 							__func__, ibus, vbus, vbatt_mv, g_rboost_cnt);
 						hi6523_set_charger_hiz(TRUE);
-                        set_boot_weaksource_flag();
 					}
 				}
 			}
 		}
 	}
+
+	if(TRUE == weak_source_recovery_en){
+		ret = hi6523_get_charge_state(&status);
+		if(ret){
+			SCHARGER_ERR("get hi6253 charge status fail\n");
+		}else{
+			if(status & CHAGRE_STATE_CHRG_DONE) {
+				vbatt_full =  hisi_battery_voltage();
+			}
+
+			if(0 != vbatt_full){
+				if((status & CHAGRE_STATE_NOT_PG) && (MAX_RBOOST_CNT <= g_rboost_cnt) ){
+					if(vbatt_full > (vbatt_mv + RECHARGE_BATT_VOLT_DECREASE)){
+						SCHARGER_INF("weak_source_recovery recharge begin,vbat = %d,vbat_full=%d,rboost_cnt=%d\n",vbatt_mv,vbatt_full,g_rboost_cnt);
+						hi6523_set_charger_hiz(FALSE);
+						g_rboost_cnt = 0;
+						vbatt_full = 0;
+					}
+				}
+			}
+		}
+	}
+
 	queue_delayed_work(system_power_efficient_wq, &di->plugout_check_work,
 			      msecs_to_jiffies(plugout_check_delay_ms));
 }
@@ -4337,7 +4076,7 @@ static void hi6523_init_irq_status(void)
 	hi6523_read_byte(CHG_IRQ1, &reg1);
 	hi6523_read_byte(CHG_IRQ2, &reg2);
 	hi6523_read_byte(CHG_WDT_IRQ, &reg_wdt);
-	SCHARGER_INF("%s : CHG_IRQ0:0x%x,CHG_IRQ1:0x%x,CHG_IRQ2:0x%x,CHG_WDT_IRQ:0x%x\n", __func__,
+	SCHARGER_INF("%s : CHG_IRQ0:0x%x,CHG_IRQ1:0x%x,CHG_IRQ2:0x%x,CHG_WDT_IRQ:0x%x\n", __func__, 
 	                reg0, reg1, reg2, reg_wdt);
 	/*clear irqs on boot after we got them*/
 	hi6523_write_byte(CHG_IRQ0, 0xff);
@@ -4492,6 +4231,13 @@ static void parse_dts(struct device_node *np, struct hi6523_device_info *di)
 	}
 	SCHARGER_INF("prase_dts dpm_en = %d\n", di->param_dts.dpm_en);
 
+	ret =of_property_read_u32(np, "weak_source_recovery_en",(u32 *)&weak_source_recovery_en);
+	if (ret) {
+		SCHARGER_INF("get weak_source_recovery_en failed!\n");
+		weak_source_recovery_en = FALSE;
+	}
+	SCHARGER_INF("prase_dts weak_source_recovery_en = %d\n",weak_source_recovery_en);
+
 	//scharger water check
 	dm_array_len = of_property_count_strings(np, "dm_water_vol");
 	if ((dm_array_len <= 0) || (dm_array_len % WATER_VOLT_PARA != 0)
@@ -4600,7 +4346,57 @@ static void parse_dts(struct device_node *np, struct hi6523_device_info *di)
 		SCHARGER_ERR("get hisi_bci_battery fail!\n");
 		is_board_type = BAT_BOARD_ASIC;
 	}
-
+	ret = of_property_read_u32(np, "scp_need_extra_power", (u32 *)&(di->scp_need_extra_power));
+	if (ret)
+	{
+		SCHARGER_ERR("scp_need_extra_power failed\n");
+		return;
+	}
+	SCHARGER_INF("scp_need_extra_power = %d\n", di->scp_need_extra_power);
+	if (di->scp_need_extra_power)
+	{
+		ret = of_property_read_u32(np, "boost_5v_use_common_gpio", (u32 *)&(di->boost_5v_use_common_gpio));
+		if (ret)
+		{
+			SCHARGER_ERR("boost_5v_use_common_gpio failed\n");
+			return;
+		}
+		SCHARGER_INF("boost_5v_use_common_gpio = %d\n", di->boost_5v_use_common_gpio);
+		ret = of_property_read_u32(np, "is_need_bst_ctrl", (u32 *)&(di->is_need_bst_ctrl));
+		if (ret)
+		{
+			SCHARGER_ERR("is_need_bst_ctrl failed\n");
+			return;
+		}
+		SCHARGER_INF("is_need_bst_ctrl = %d\n", di->is_need_bst_ctrl);
+		ret = of_property_read_u32(np, "bst_ctrl_use_common_gpio", (u32 *)&(di->bst_ctrl_use_common_gpio));
+		if (ret)
+		{
+			SCHARGER_ERR("bst_ctrl_use_common_gpio failed\n");
+			di->bst_ctrl_use_common_gpio = 0;
+		}
+		SCHARGER_INF("bst_ctrl_use_common_gpio = %d\n", di->bst_ctrl_use_common_gpio);
+		if (!di->boost_5v_use_common_gpio)
+		{
+			di->scp_power_en = of_get_named_gpio(np, "scp_power_en", 0);
+			SCHARGER_INF("scp_power_en = %d\n", di->scp_power_en);
+			if (!gpio_is_valid(di->scp_power_en))
+			{
+				SCHARGER_ERR("%s: get scp_power_en fail\n", __func__);
+				return;
+			}
+		}
+		if ((di->is_need_bst_ctrl) && (!di->bst_ctrl_use_common_gpio))
+		{
+			di->bst_ctrl = of_get_named_gpio(np, "bst_ctrl", 0);
+			SCHARGER_INF("bst_ctrl = %d\n", di->bst_ctrl);
+			if (!gpio_is_valid(di->bst_ctrl))
+			{
+				SCHARGER_ERR("%s: get bst_ctrl fail\n", __func__);
+				return;
+			}
+		}
+	}
 	ret = of_property_read_u32(np, "switch_id_change",/*lint !e64*/
 				 &switch_id_flag);
 	if (ret) {
@@ -4634,13 +4430,6 @@ static void hi6523_fcp_scp_ops_register(void)
 		{
 			SCHARGER_INF(" scp adapter ops register success!\n");
 		}
-	}
-#endif
-
-#ifdef CONFIG_DIRECT_CHARGER
-	/* if chip support scp ,register scp adapter ops */
-	if (0 == hi6523_is_support_scp()) {
-		scp_protocol_ops_register(&hi6523_scp_protocol_ops);
 	}
 #endif
 }
@@ -4705,13 +4494,33 @@ static int hi6523_probe(struct i2c_client *client,/*lint !e64*/
 		di->irq_int = -1;
 		goto hi6523_fail_3;
 	}
-
+	if (di->scp_need_extra_power)
+	{
+		if (!di->boost_5v_use_common_gpio)
+		{
+			ret = gpio_request(di->scp_power_en, "scp_power_en");
+			if (ret)
+			{
+				SCHARGER_ERR("can not request scp_power_en\n");
+				goto hi6523_fail_3;
+			}
+		}
+		if ((di->is_need_bst_ctrl) && (!di->bst_ctrl_use_common_gpio))
+		{
+			ret = gpio_request(di->bst_ctrl,"bst_ctrl");
+			if (ret)
+			{
+				SCHARGER_ERR("could not request bst_ctrl\n");
+				goto hi6523_fail_4;
+			}
+		}
+	}
 	di->charger_type = hisi_get_charger_type();
 	di->usb_nb.notifier_call = hi6523_usb_notifier_call;
 	ret = hisi_charger_type_notifier_register(&di->usb_nb);
 	if (ret < 0) {
 		SCHARGER_ERR("hisi_charger_type_notifier_register failed\n");
-		goto hi6523_fail_3;
+		goto hi6523_fail_5;
 	}
 	di->term_vol_mv = hi6523_get_terminal_voltage();
 	hi6523_apple_adapter_detect(APPLE_DETECT_ENABLE);/*enable scharger apple detect*/
@@ -4726,7 +4535,7 @@ static int hi6523_probe(struct i2c_client *client,/*lint !e64*/
 	ret = charge_ops_register(&hi6523_ops);
 	if (ret) {
 		SCHARGER_ERR("register charge ops failed!\n");
-		goto hi6523_fail_3;
+		goto hi6523_fail_5;
 	}
 	hi6523_fcp_scp_ops_register();
 	ret = hi6523_sysfs_create_group(di);
@@ -4769,6 +4578,22 @@ static int hi6523_probe(struct i2c_client *client,/*lint !e64*/
 
 hi6523_fail_6:
 	hi6523_sysfs_remove_group(di);
+hi6523_fail_5:
+	if(di->scp_need_extra_power)
+	{
+		if((di->is_need_bst_ctrl) && (!di->bst_ctrl_use_common_gpio))
+		{
+			gpio_free(di->bst_ctrl);
+		}
+	}
+hi6523_fail_4:
+	if(di->scp_need_extra_power)
+	{
+		if(!di->boost_5v_use_common_gpio)
+		{
+			gpio_free(di->scp_power_en);
+		}
+	}
 hi6523_fail_3:
 	free_irq(di->irq_int, di);
 hi6523_fail_2:

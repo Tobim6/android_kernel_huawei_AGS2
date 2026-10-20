@@ -1,1 +1,1 @@
-obj-y            += hw_event.o
+obj-$(CONFIG_HW_WIFI)            += hw_event.o

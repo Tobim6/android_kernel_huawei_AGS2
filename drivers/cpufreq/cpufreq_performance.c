@@ -19,44 +19,55 @@
 #ifdef CONFIG_ARCH_HISI
 extern int get_lowbatteryflag(void);
 extern void set_lowBatteryflag(int flag);
-extern int hisi_test_fast_cpu(int cpu);
 #endif
 
-static void cpufreq_gov_performance_limits(struct cpufreq_policy *policy)
+static int cpufreq_governor_performance(struct cpufreq_policy *policy,
+					unsigned int event)
 {
 #ifdef CONFIG_ARCH_HISI
 	unsigned int utarget = policy->max;
 #endif
-	pr_debug("setting to %u kHz\n", policy->max);
+
+	switch (event) {
+	case CPUFREQ_GOV_START:
+	case CPUFREQ_GOV_LIMITS:
+		pr_debug("setting to %u kHz because of event %u\n",
+						policy->max, event);
+
 #ifdef CONFIG_ARCH_HISI
-	if ((get_lowbatteryflag() == 1) && hisi_test_fast_cpu(policy->cpu))
-		utarget = policy->min;
+		if ((get_lowbatteryflag() == 1) && (policy->cpu == 4))
+			utarget = policy->min;
 
-	pr_debug("%s utarget=%d\n", __func__, utarget);
+		pr_info("%s utarget=%d\n", __func__, utarget);
 
-	__cpufreq_driver_target(policy, utarget, CPUFREQ_RELATION_H);
+		__cpufreq_driver_target(policy, utarget,
+			CPUFREQ_RELATION_H);
 #else
-	__cpufreq_driver_target(policy, policy->max, CPUFREQ_RELATION_H);
+		__cpufreq_driver_target(policy, policy->max,
+						CPUFREQ_RELATION_H);
 #endif
-}
+		break;
 
 #ifdef CONFIG_ARCH_HISI
-static void cpufreq_gov_performance_hisi_exit(struct cpufreq_policy *policy)
-{
-	set_lowBatteryflag(0);
-}
+	case CPUFREQ_GOV_POLICY_EXIT:
+		set_lowBatteryflag(0);
+
+		break;
 #endif
+
+	default:
+		break;
+	}
+	return 0;
+}
 
 #ifdef CONFIG_CPU_FREQ_GOV_PERFORMANCE_MODULE
 static
 #endif
 struct cpufreq_governor cpufreq_gov_performance = {
 	.name		= "performance",
+	.governor	= cpufreq_governor_performance,
 	.owner		= THIS_MODULE,
-	.limits		= cpufreq_gov_performance_limits,
-#ifdef CONFIG_ARCH_HISI
-	.exit		= cpufreq_gov_performance_hisi_exit,
-#endif
 };
 
 static int __init cpufreq_gov_performance_init(void)
@@ -68,19 +79,6 @@ static void __exit cpufreq_gov_performance_exit(void)
 {
 	cpufreq_unregister_governor(&cpufreq_gov_performance);
 }
-
-#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE
-struct cpufreq_governor *cpufreq_default_governor(void)
-{
-	return &cpufreq_gov_performance;
-}
-#endif
-#ifndef CONFIG_CPU_FREQ_GOV_PERFORMANCE_MODULE
-struct cpufreq_governor *cpufreq_fallback_governor(void)
-{
-	return &cpufreq_gov_performance;
-}
-#endif
 
 MODULE_AUTHOR("Dominik Brodowski <linux@brodo.de>");
 MODULE_DESCRIPTION("CPUfreq policy governor 'performance'");

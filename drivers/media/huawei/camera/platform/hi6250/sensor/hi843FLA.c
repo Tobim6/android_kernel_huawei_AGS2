@@ -13,7 +13,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 extern int strncpy_s(char *strDest, size_t destMax, const char *strSrc, size_t count);
 
 static hwsensor_vtbl_t s_hi843FLA_vtbl;
@@ -26,7 +25,11 @@ enum rear_sensor_dvdd_type_t{
     DVDD120V=1,//1.20V
 };
 
+static char *sensor_dts_name = "HI843FLA_VENDOR";
+
 #define SENSOR_REG_SETTING_DELAY_1_MS 1
+#define GPIO_LOW_STATE       0
+#define GPIO_HIGH_STATE      1
 
 int hi843FLA_config(hwsensor_intf_t* si, void  *argp);
 
@@ -477,6 +480,13 @@ static int hi843FLA_match_id(hwsensor_intf_t* si, void * data)
 {
     sensor_t* sensor              = NULL;
     struct sensor_cfg_data *cdata = NULL;
+    uint32_t module_id_0 = 0;
+    uint32_t module_id_1 = 0;
+    struct pinctrl_state *pinctrl_def  = NULL;
+    struct pinctrl_state *pinctrl_idle = NULL;
+    struct pinctrl *p    = NULL;
+    char *sensor_name [] = { "HI843FLA_OFILM" , "HI843FLA_QTECH"};
+    int rc = 0;
 
     if (!si || !data){
         cam_err("%s : si or data is null", __func__);
@@ -485,11 +495,117 @@ static int hi843FLA_match_id(hwsensor_intf_t* si, void * data)
 
     sensor = I2S(si);
     cdata  = (struct sensor_cfg_data *)data;
+    memset_s(cdata->cfg.name, DEVICE_NAME_SIZE, 0, DEVICE_NAME_SIZE);
+    if (!strncmp(sensor->board_info->name, sensor_dts_name, strlen(sensor_dts_name)))
+    {
+        p = devm_pinctrl_get(s_hi843FLA.dev);
+        if (IS_ERR_OR_NULL(p)) {
+            cam_err("could not get pinctrl.\n");
+            rc = -1;
+            goto matchID_exit;
+        }
 
-    cam_info("%s enter", __func__);
-    cdata->data = sensor->board_info->sensor_index;
+        rc = gpio_request(sensor->board_info->gpios[FSIN].gpio, NULL);
+        if(rc < 0) {
+            cam_err("%s failed to request gpio[%d]", __func__, sensor->board_info->gpios[FSIN].gpio);
+            rc = -1;
+            goto pinctrl_exit;
+        }
+
+        cam_info("%s gpio[%d].", __func__, sensor->board_info->gpios[FSIN].gpio);
+
+        pinctrl_def = pinctrl_lookup_state(p, "default");
+        if (IS_ERR_OR_NULL(pinctrl_def)) {
+            cam_err("could not get defstate.\n");
+            rc = -1;
+            goto gpio_error;
+        }
+
+        pinctrl_idle = pinctrl_lookup_state(p, "idle");
+        if (IS_ERR_OR_NULL(pinctrl_idle)) {
+            pr_err("could not get idle defstate.\n");
+            rc = -1;
+            goto gpio_error;
+        }
+
+        /*PULL UP*/
+        rc = pinctrl_select_state(p, pinctrl_def);
+        if (rc) {
+            cam_err("could not set pins to default state.\n");
+            rc = -1;
+            goto gpio_error;
+        }
+
+        mdelay(1);
+        cam_info("%s gpio[%d].", __func__, sensor->board_info->gpios[FSIN].gpio);
+        rc = gpio_direction_input(sensor->board_info->gpios[FSIN].gpio);
+        if (rc < 0) {
+            cam_err("%s failed to config gpio(%d) input.\n",__func__, sensor->board_info->gpios[FSIN].gpio);
+            rc = -1;
+            goto gpio_error;
+        }
+
+        module_id_1 = gpio_get_value(sensor->board_info->gpios[FSIN].gpio);
+
+        /*PULL DOWN*/
+        rc = pinctrl_select_state(p, pinctrl_idle);
+        if (rc) {
+            cam_err("could not set pins to idle state.\n");
+            rc = -1;
+            goto gpio_error;
+        }
+
+        mdelay(1);
+        cam_info("%s gpio[%d].", __func__, sensor->board_info->gpios[FSIN].gpio);
+
+        rc = gpio_direction_input(sensor->board_info->gpios[FSIN].gpio);
+        if (rc < 0) {
+            cam_err("%s failed to config gpio(%d) input.\n",__func__, sensor->board_info->gpios[FSIN].gpio);
+            rc = -1;
+            goto gpio_error;
+        }
+
+        module_id_0 = gpio_get_value(sensor->board_info->gpios[FSIN].gpio);
+
+        cam_info("%s module_id_0 %d module_id_1 %d .\n",__func__, module_id_0, module_id_1);
+        if((module_id_0 == GPIO_LOW_STATE) && (module_id_1 == GPIO_LOW_STATE)){
+            //ofilm module
+            strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[0], strlen(sensor_name[0])+1);
+            cdata->data = sensor->board_info->sensor_index;
+            rc = 0;
+        }
+        else if((module_id_0 == GPIO_HIGH_STATE) && (module_id_1 == GPIO_HIGH_STATE)){
+            //qtech module
+            strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[1], strlen(sensor_name[1])+1);
+            cdata->data = sensor->board_info->sensor_index;
+            rc = 0;
+        }
+        else{
+            strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor->board_info->name, strlen(sensor->board_info->name)+1);
+            cdata->data = sensor->board_info->sensor_index;
+            cam_err("%s failed to get the module id value.\n",__func__);
+            rc = 0;
+        }
+
+        gpio_free(sensor->board_info->gpios[FSIN].gpio);
+        goto pinctrl_exit;
+    } else {
+        strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor->board_info->name, strlen(sensor->board_info->name)+1);
+        cdata->data = sensor->board_info->sensor_index;
+        rc = 0;
+        goto matchID_exit;
+    }
+
+gpio_error:
+    gpio_free(sensor->board_info->gpios[FSIN].gpio);
+pinctrl_exit:
+    devm_pinctrl_put(p);
+matchID_exit:
+    if (cdata->data != SENSOR_INDEX_INVALID) {/*lint !e650*/
+        cam_info("%s, cdata->cfg.name = %s", __func__,cdata->cfg.name );
+    }
     
-    return 0;
+    return rc;
 }
 
 static hwsensor_vtbl_t s_hi843FLA_vtbl =
@@ -562,8 +678,10 @@ int hi843FLA_config(hwsensor_intf_t* si, void  *argp)
         case SEN_CONFIG_READ_REG_SETTINGS:
             break;
         case SEN_CONFIG_ENABLE_CSI:
+            //ret = si->vtbl->csi_enable(si);
             break;
         case SEN_CONFIG_DISABLE_CSI:
+            //ret = si->vtbl->csi_disable(si);
             break;
         case SEN_CONFIG_MATCH_ID:
             ret = si->vtbl->match_id(si,argp);
@@ -621,7 +739,7 @@ static int __init hi843FLA_init_module(void)
 }
 static void __exit hi843FLA_exit_module(void)
 {
-    hwsensor_unregister(Sensor2Pdev(s_hi843FLA));
+    hwsensor_unregister(&s_hi843FLA.intf);
     platform_driver_unregister(&s_hi843FLA_driver);
 }
 /*lint -restore*/

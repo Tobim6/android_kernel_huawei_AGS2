@@ -26,8 +26,7 @@
 #define FSC_VSAFE0V       32    /* 0.8V  : vSafe0V */
 #define FSC_VEXTRASAFE0V  12    /* 0.3V  : vSafe0V */
 #define FSC_VSAFE0V_DISCH 8    /* 0.2V  : Discharge slightly below vSafe5V */
-#define FSC_VSAFE_DISCH	96    // 160	/* 4.0V : VOUT No Longer Sourced */
-#define FSC_VSAFE_FOR_DOCK_LEAKAGE	160    // 160	/* 4.0V : VOUT No Longer Sourced */
+#define FSC_VSAFE_DISCH	  160	/* 4.0V : VOUT No Longer Sourced */
 
 #define FSC_VSAFE5V_DISC  146   /* 3.67V : Disconnect level */
 #define FSC_VSAFE5V_L     190   /* 4.75V : vSafe5V - 5% */
@@ -254,8 +253,6 @@ struct Port {
   FSC_BOOL factory_mode_;
   FSC_BOOL double56k;
   FSC_BOOL double_check;
-  FSC_BOOL c2a_cable_;
-  FSC_U32 redobc12_cnt;
 }; /* struct Port */
 
 /* Initialize the port and hardware interface. */
@@ -339,7 +336,7 @@ void FUSB3601_PDDisable(struct Port *port);
 void FUSB3601_PDEnable(struct Port *port, FSC_BOOL is_source);
 
 void FUSB3601_ResetProtocolLayer(struct Port *port);
-int FUSB3601_GetStateCC(struct Port *port);
+
 /* Policy helpers */
 void FUSB3601_set_policy_state(struct Port *port, PolicyState_t state);
 void FUSB3601_f_set_policy_state(struct Port *port, void (*f)(struct Port *));
@@ -361,8 +358,5 @@ void FUSB3601_start_vbus_discharge(struct Port *port);
 void FUSB3601_set_force_discharge(struct Port *port);
 void FUSB3601_disable_vbus_adc(struct Port *port);
 void FUSB3601_enable_vbus_adc(struct Port *port);
-void reset_adc(struct Port *port);
-void FUSB3601_set_vbus_detach(struct Port *port, VbusDetach_t enable);
-void superswitch_dsm_report(int num);
 
 #endif /* FSCPM_PORT_H_ */

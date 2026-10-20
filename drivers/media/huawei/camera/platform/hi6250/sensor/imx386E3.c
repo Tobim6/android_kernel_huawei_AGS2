@@ -7,14 +7,12 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/rpmsg.h>
-#include <securec.h>
 
 #include "hwsensor.h"
 #include "sensor_commom.h"
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 
 //lint -save -e846 -e514 -e866 -e30 -e84 -e785 -e64 -e826 -e838 -e715 -e747 -e778 -e774 -e732 -e650 -e31 -e731 -e528 -e753 -e737
 
@@ -302,10 +300,7 @@ static int imx386E3_match_id(hwsensor_intf_t* si, void * data)
 	char *sensor_name [] = {"IMX386E3_OFILM", "IMX386E3_SUNNY"};
 	int rc = 0;
 
-       rc = memset_s(cdata->cfg.name, DEVICE_NAME_SIZE, 0, DEVICE_NAME_SIZE);
-	if (rc != EOK) {
-          cam_err("%s. failed to memset_s write_data.", __func__);
-      }
+    memset(cdata->cfg.name, 0, DEVICE_NAME_SIZE);
 	if (!strncmp(sensor->board_info->name, sensor_dts_name, strlen(sensor_dts_name))) {
 		rc = gpio_request(sensor->board_info->gpios[FSIN].gpio, NULL);
 		if(rc < 0) {
@@ -330,17 +325,16 @@ static int imx386E3_match_id(hwsensor_intf_t* si, void * data)
 		gpio_free(sensor->board_info->gpios[FSIN].gpio);
 
 		if (0 == module_id) {//ofilm
-		    strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[0], strlen(sensor_name[0]));
+		    strncpy(cdata->cfg.name, sensor_name[0], strlen(sensor_name[0])+1);
 		    cdata->data = sensor->board_info->sensor_index;
 		} else if(1 == module_id){//sunny
-		    strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[1], strlen(sensor_name[1]));
+		    strncpy(cdata->cfg.name, sensor_name[1], strlen(sensor_name[1])+1);
 		    cdata->data = sensor->board_info->sensor_index;
 		}else{
             cam_err("%s module =%d unknown", __func__,module_id);
 		}
 	} else {
-	    strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor->board_info->name, 
-	        strlen(sensor->board_info->name));
+	    strncpy(cdata->cfg.name, sensor->board_info->name, strlen(sensor->board_info->name)+1);
 	    cdata->data = sensor->board_info->sensor_index;
 	}
 
@@ -467,7 +461,7 @@ static void __exit
 imx386E3_exit_module(void)
 {
     rpmsg_sensor_unregister((void*)&s_imx386E3);
-    hwsensor_unregister(Sensor2Pdev(s_imx386E3));
+    hwsensor_unregister(&s_imx386E3.intf);
     platform_driver_unregister(&s_imx386E3_driver);
 }
 //lint -restore

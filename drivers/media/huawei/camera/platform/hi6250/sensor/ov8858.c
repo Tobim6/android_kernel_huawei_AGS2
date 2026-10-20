@@ -6,14 +6,12 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/rpmsg.h>
-#include <securec.h>
 
 #include "hwsensor.h"
 #include "sensor_commom.h"
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 
 static char *sensor_dts_name = "OV8858_FOXCONN";
 static bool power_on_status = false;//false: power off, true:power on
@@ -315,7 +313,7 @@ int ov8858_match_id(
 
     cam_info("%s enter.", __func__);
 
-    strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_dts_name, strlen(sensor_dts_name));
+	strncpy(cdata->cfg.name, sensor_dts_name, strlen(sensor_dts_name)+1);
     cdata->data = sensor->board_info->sensor_index;
 	cam_info("enter %s, name = %s",__func__, cdata->cfg.name);
     return 0;
@@ -371,8 +369,10 @@ int ov8858_config(hwsensor_intf_t* si, void  *argp)
         case SEN_CONFIG_READ_REG_SETTINGS:
             break;
         case SEN_CONFIG_ENABLE_CSI:
+            //ret = si->vtbl->csi_enable(si);
             break;
         case SEN_CONFIG_DISABLE_CSI:
+            //ret = si->vtbl->csi_disable(si);
             break;
         case SEN_CONFIG_MATCH_ID:
             ret = si->vtbl->match_id(si,argp);
@@ -422,7 +422,7 @@ static int __init ov8858_init_module(void)
 static void __exit ov8858_exit_module(void)
 {
     rpmsg_sensor_unregister((void*)&s_ov8858);
-    hwsensor_unregister(Sensor2Pdev(s_ov8858));
+    hwsensor_unregister(&s_ov8858.intf);
     platform_driver_unregister(&s_ov8858_driver);
 }
 

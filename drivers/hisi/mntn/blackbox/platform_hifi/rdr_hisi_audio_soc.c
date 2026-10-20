@@ -43,7 +43,6 @@
 #include "rdr_hisi_audio_soc.h"
 
 #include "hifi_lpp.h"
-#include "hifi_om.h"
 #include "usbaudio_ioctl.h"
 #include <linux/hisi/usb/hisi_hifi_usb.h>
 #include <dsm_audio/dsm_audio.h>
@@ -76,6 +75,7 @@
 #define WATCHDOG_DTS_COMP_NAME "hisilicon,sochifi-watchdog"
 #endif
 
+#define DRV_WATCHDOG_BASE_ADDR          (0xe804d000U)
 #define DRV_WATCHDOG_CONTROL            (DRV_WATCHDOG_BASE_ADDR + 0x008)
 #define DRV_WATCHDOG_INTCLR             (DRV_WATCHDOG_BASE_ADDR + 0x00C)
 #define DRV_WATCHDOG_LOCK               (DRV_WATCHDOG_BASE_ADDR + 0xC00)
@@ -93,7 +93,7 @@
 #define CFG_DSP_NMI                     (0x3C)               /*DSP NMI ,bit0-bit15*/
 #define CFG_MMBUF_REMAP_EN              (0x130)              /*mmbuf remap enable，9bit*/
 #define CFG_OCRAM_REMAP_EN              (0x13C)              /*ocram remap enable，9bit*/
-#define ASP_CFG_BASE                    (SOC_ACPU_ASP_CFG_BASE_ADDR)
+#define ASP_CFG_BASE                    (0xE804E000UL)
 
 struct rdr_soc_des_s {
 	uint32_t modid;
@@ -113,53 +113,14 @@ struct rdr_soc_des_s {
 static struct rdr_soc_des_s soc_des;
 
 #define DTS_COMP_HIFICMA_NAME    "hisilicon,hifi-cma"
+
 #define HIFI_CMA_IMAGE_SIZE    (0x600000UL)
+
 struct hisi_hifi_cma_struct {
     struct device *device;
 };
 
 struct hisi_hifi_cma_struct hificma_dev;
-
-/*mem_dyn*/
-char *mem_dyn_type[] =
-{
-	"UCOM_MEM_DYN_TYPE_DDR",
-	"UCOM_MEM_DYN_TYPE_TCM",
-	"UCOM_MEM_DYN_TYPE_OCB",
-	"UCOM_MEM_DYN_TYPE_USB_160K",
-	"UCOM_MEM_DYN_TYPE_USB_96K",
-	"UCOM_MEM_DYN_TYPE_BUTT"
-};
-
-char *mem_dyn_om_enable[] =
-{
-	"UCOM_MEM_DYN_OM_ENABLE_NO",
-	"UCOM_MEM_DYN_OM_ENABLE_YES",
-	"UCOM_MEM_DYN_OM_ENABLE_BUTT",
-};
-
-/* flag */
-struct flag_info{
-	char flag_name[32];
-	unsigned int flag_addr_offset;
-};
-
-struct flag_info sochifi_flag[] = {
-	{"DRV_DSP_PANIC_MARK",         (DRV_DSP_PANIC_MARK - HIFI_FLAG_DATA_ADDR)},
-	{"DRV_DSP_UART_LOG_LEVEL",     (DRV_DSP_UART_LOG_LEVEL - HIFI_FLAG_DATA_ADDR)},
-	{"DRV_DSP_UART_TO_MEM_CUR",    (DRV_DSP_UART_TO_MEM_CUR_ADDR - HIFI_FLAG_DATA_ADDR)},
-	{"DRV_DSP_EXCEPTION_NO",       (DRV_DSP_EXCEPTION_NO - HIFI_FLAG_DATA_ADDR)},
-	{"DRV_DSP_IDLE_COUNT",         (DRV_DSP_IDLE_COUNT_ADDR - HIFI_FLAG_DATA_ADDR)},
-	{"DRV_DSP_LOADED_INDICATE",    (DRV_DSP_LOADED_INDICATE - HIFI_FLAG_DATA_ADDR)},
-	{"DRV_DSP_POWER_STATUS",       (DRV_DSP_POWER_STATUS_ADDR - HIFI_FLAG_DATA_ADDR)},
-	{"DRV_DSP_NMI_FLAG",           (DRV_DSP_NMI_FLAG_ADDR - HIFI_FLAG_DATA_ADDR)}
-};
-
-#define FLAG_ROW_LEN (64)
-#define FLAG_COMMENT_LEN (128)
-#define PARSE_FLAG_LOG_SIZE (FLAG_ROW_LEN * ARRAY_SIZE(sochifi_flag) + FLAG_COMMENT_LEN)
-#define ICC_DEBUG_ONE_INFO_LEN (76)
-#define PARSE_ICC_DEBUG_LOG_SIZE (ICC_DEBUG_ONE_INFO_LEN*ICC_STAT_MSG_NUM*2 + 330)
 
 static void hisi_rdr_nmi_notify_hifi(void)
 {
@@ -178,8 +139,6 @@ static void hisi_rdr_nmi_notify_hifi(void)
 
 	value |= (0x1 << 0);
 	writel(value, (rdr_aspcfg_base + CFG_DSP_NMI));
-	udelay(1);
-	writel(0x0, (rdr_aspcfg_base + CFG_DSP_NMI));
 
 	iounmap(rdr_aspcfg_base);
 
@@ -261,200 +220,14 @@ static bool is_nmi_complete(void)
 	return is_complete;
 }
 
-static int parse_sochifi_innerlog(char *original_data, unsigned int original_data_size,
-	char *parsed_data, unsigned int parsed_data_size, unsigned int core_type)
-{
-	int i;
-	int ret = 0;
-	unsigned int index;
-	struct innerlog_obj *innerlog;
-
-	if (NULL == original_data || NULL == parsed_data) {
-		BB_PRINT_ERR("input data buffer is null\n");
-		return -EINVAL;
-	}
-
-	memset(parsed_data, 0, parsed_data_size);/* unsafe_function_ignore: memset */
-	snprintf(parsed_data, parsed_data_size, "\n\n/*********[innerlog info begin]*********/\n\n");
-
-	innerlog = (struct innerlog_obj *)original_data;
-	index = innerlog->curr_idx;
-	if (index < OM_LOG_INNER_MAX_NUM) {
-		const char *title = "enLogID | uwTimeStamp | uhwFileID | uhwLineID |   uwVal1          |         uwVal2          |         uwVal3 \n";
-
-		snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data), "%s", title);
-		for (i = 0; i < OM_LOG_INNER_MAX_NUM; i++) {
-			snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-				"0x%-8x 0x%-13x %-11d %-10d 0x%-17x       0x%-17x       0x%-17x \n",
-				innerlog->records[index].enlogid,
-				innerlog->records[index].time_stamp,
-				innerlog->records[index].fileid,
-				innerlog->records[index].lineid,
-				innerlog->records[index].value1,
-				innerlog->records[index].value2,
-				innerlog->records[index].value3);
-			index++;
-			if (index >= OM_LOG_INNER_MAX_NUM) {
-				index = 0;
-			}
-		}
-	} else {
-		ret = -EINVAL;
-		BB_PRINT_ERR("innerlog info invalid\n");
-	}
-	snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-		"\n\n/*********[innerlog info end]*********/\n\n");
-
-	return ret;
-}
-
-static int parse_sochifi_dynmem(char *original_data, unsigned int original_data_size,
-	char *parsed_data, unsigned int parsed_data_size, unsigned int core_type)
-{
-	int i;
-	struct mem_dyn_ctrl *dynmem;
-	struct mem_dyn_status *status;
-	struct mem_dyn_node *nodes;
-
-	if (NULL == original_data || NULL == parsed_data) {
-		BB_PRINT_ERR("input data buffer is null\n");
-		return -EINVAL;
-	}
-
-	memset(parsed_data, 0, parsed_data_size);/* unsafe_function_ignore: memset */
-	snprintf(parsed_data, parsed_data_size, "\n\n/*********[dynmem info begin]*********/\n\n");
-	dynmem = (struct mem_dyn_ctrl *)original_data;
-
-	for (i = 0; i < UCOM_MEM_DYN_TYPE_BUTT; i++ ) {
-		snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-			"astStatus[%s]\n", mem_dyn_type[i]);
-		status = &dynmem->status[i];
-
-		if (status->enable >= UCOM_MEM_DYN_OM_ENABLE_BUTT) {
-		    snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-		    	" |- enEnable: ERROR:0x%-10x\n", status->enable);
-		} else {
-		    snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-		    	" |- enEnable: %-28s\n", mem_dyn_om_enable[status->enable]);
-		}
-
-		snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-			" |- uwTotalSize: %-10u\n |- uwUsedRate: %-10u\n |- astMemTrace\n     |- uwCurrUsedRate: %-10u\n"\
-			"|- uwTimeStamp: 0x%-10x\n",
-			status->total_size,
-			status->used_rate,
-			status->mem_trace.curr_used_rate,
-			status->mem_trace.time_stamp);
-	}
-
-	for (i= 0; i < UCOM_MEM_DYN_NODE_MAX_NUM; i++) {
-		snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-			"astNodes[%d]\n", i + 1);
-		nodes = &dynmem->nodes[i];
-		snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-			" |- stBlk\n      uwAddr: 0x%08x    uwSize: %-10u    uwFileId: %-10u    uwLineId: %-10u\n",
-			nodes->blk.addr, nodes->blk.size, nodes->blk.fileid, nodes->blk.lineid);
-		snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-			" |- pstNext: 0x%08x\n |- pstPrev: 0x%08x\n", nodes->next, nodes->prev);
-	}
-
-	snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-		"\n\n/*********[dynmem info end]*********/\n\n");
-
-	return 0;
-}
-
-static int parse_sochifi_flag(char *original_data, unsigned int original_data_size,
-	char *parsed_data, unsigned int parsed_data_size, unsigned int core_type)
-{
-	unsigned int i = 0;
-
-	if (NULL == original_data || NULL == parsed_data) {
-		BB_PRINT_ERR("%s invalid param:base_buf:%s,dump_flag_addr:%s,dump_flag_size:%d\n",
-			__func__, original_data, parsed_data, (unsigned int)parsed_data_size);
-		return -EINVAL;
-	}
-
-	memset(parsed_data, 0, parsed_data_size);/* unsafe_function_ignore: memset */
-	snprintf(parsed_data, parsed_data_size, "\n\n/*********[flag info begin]*********/\n\n");
-
-	for (i = 0; i < ARRAY_SIZE(sochifi_flag); i++) {
-		snprintf(parsed_data + strlen(parsed_data),	parsed_data_size - strlen(parsed_data),
-			"%-26s 0x%08x\n", sochifi_flag[i].flag_name,
-			*((unsigned int*)(original_data + sochifi_flag[i].flag_addr_offset)));
-	}
-
-	snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-		"\n\n/*********[flag info end]*********/\n\n");
-
-	return 0;
-}
-
-static int parse_sochifi_iccdebug(char *original_data, unsigned int original_data_size,
-	char *parsed_data, unsigned int parsed_data_size, unsigned int core_type)
-{
-	unsigned int i = 0;
-	struct icc_dbg *dbg;
-	struct icc_uni_msg_info *msg;
-
-	if (NULL == original_data || NULL == parsed_data) {
-		BB_PRINT_ERR("input data buffer is null\n");
-		return -EINVAL;
-	}
-
-	dbg = (struct icc_dbg*)original_data;
-	memset(parsed_data, 0, parsed_data_size);/* unsafe_function_ignore: memset */
-	snprintf(parsed_data, parsed_data_size, "\n\n/*********[iccdebug info begin]*********/\n\n");
-
-	msg = &dbg->msg_stat.send.msg[0];
-	snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-		"SEND MSG FIFO  front:%-4drear:%-4dsize:%-4d\nchannelid  timestamp   read   write  drop  sendpid  recvpid  length  msgid\n",
-		dbg->msg_stat.send.front, dbg->msg_stat.send.rear, dbg->msg_stat.send.size);
-	for (i = 0; i < ICC_STAT_MSG_NUM; i++) {
-		snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-			"%-11d0x%-10x%-7d%-7d%-6d%-9d%-9d%-8d0x%-4x\n",
-			msg[i].channel_id, msg[i].time, msg[i].fifo_read_pos, msg[i].fifo_write_pos,
-			msg[i].drop, msg[i].sender_pid, msg[i].receiver_pid, msg[i].packetlen, msg[i].msg_id);
-	}
-
-	msg = &dbg->msg_stat.recv.msg[0];
-	snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-		"\nRECV MSG FIFO:  front:%-4drear:%-4dsize:%-4d\nchannelid  timestamp   read   write  drop  sendpid  recvpid  length  msgid\n",
-		dbg->msg_stat.recv.front, dbg->msg_stat.recv.rear, dbg->msg_stat.recv.size);
-	for (i = 0; i < ICC_STAT_MSG_NUM; i++) {
-		snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-			"%-11d0x%-10x%-7d%-7d%-6d%-9d%-9d%-8d0x%-4x\n",
-			msg[i].channel_id, msg[i].time, msg[i].fifo_read_pos, msg[i].fifo_write_pos,
-			msg[i].drop, msg[i].sender_pid, msg[i].receiver_pid, msg[i].packetlen, msg[i].msg_id);
-	}
-
-	snprintf(parsed_data + strlen(parsed_data), parsed_data_size - strlen(parsed_data),
-		"\n\n/*********[iccdebug info end]*********/\n\n");
-
-	return 0;
-}
-
-struct parse_log parse_sochifi_log[] = {
-	{HIFI_OM_LOG_SIZE + DRV_DSP_UART_TO_MEM_SIZE, DRV_DSP_STACK_TO_MEM_SIZE, PARSER_SOCHIFI_TRACE_SIZE, parse_hifi_trace},
-	{RDR_FALG_OFFSET, HIFI_FLAG_DATA_SIZE, PARSE_FLAG_LOG_SIZE, parse_sochifi_flag},
-	{0, SOCHIFI_ORIGINAL_CPUVIEW_SIZE, PARSER_SOCHIFI_CPUVIEW_LOG_SIZE, parse_hifi_cpuview},
-	{SOCHIFI_ORIGINAL_CPUVIEW_SIZE, SOCHIFI_ORIGINAL_INNERLOG_SIZE, PARSE_INNERLOG_SIZE, parse_sochifi_innerlog},
-	{SOCHIFI_ORIGINAL_CPUVIEW_SIZE + SOCHIFI_ORIGINAL_INNERLOG_SIZE, SOCHIFI_ORIGINAL_DYNMEM_SIZE, PARSE_MEM_DYN_LOG_SIZE, parse_sochifi_dynmem},
-	{HIFI_OM_LOG_SIZE + DRV_DSP_UART_TO_MEM_SIZE + DRV_DSP_STACK_TO_MEM_SIZE, HIFI_ICC_DEBUG_SIZE, PARSE_ICC_DEBUG_LOG_SIZE, parse_sochifi_iccdebug},
-};
-
-static int dump_hifi_ddr(const char *filepath)
+static int dump_hifi_ddr(char *filepath)
 {
 	char *buf = NULL;
 	char *full_text = NULL;
-	char *parse_text = NULL;
-	unsigned int i = 0;
 	int ret = 0;
 	char xn[RDR_FNAME_LEN] = {0};
 	char comment[RDR_COMMENT_LEN] = {0};
 	int count = 0;
-	size_t hifi_log_size = 0;
-	size_t full_text_size = 0;
 
 	if (NULL == filepath) {
 		BB_PRINT_ERR("%s error: filepath is NULL\n", __func__);
@@ -485,44 +258,17 @@ static int dump_hifi_ddr(const char *filepath)
 		return -ENOMEM;
 	}
 
-	hifi_log_size = COMPILE_TIME_BUFF_SIZE + strlen("\n\n") + (DRV_DSP_UART_TO_MEM_SIZE - DRV_DSP_UART_TO_MEM_RESERVE_SIZE);
-	full_text_size = hifi_log_size;
-	for (i = 0; i < ARRAY_SIZE(parse_sochifi_log); i++) {
-		full_text_size += parse_sochifi_log[i].parse_log_size;
-	}
-	full_text = vzalloc(full_text_size);
+	full_text = vmalloc((size_t)(RDR_HIFI_DUMP_SIZE + RDR_COMMENT_LEN));
 	if (NULL == full_text) {
 		BB_PRINT_ERR("%s error: alloc full_text failed\n", __func__);
 		ret = -ENOMEM;
 		goto error;
 	}
 
-	/*hifi log*/
-	memcpy(full_text + strlen(full_text), buf + HIFI_OM_LOG_SIZE, COMPILE_TIME_BUFF_SIZE);
-	memcpy(full_text + strlen(full_text), "\n\n", strlen("\n\n"));
-	memcpy(full_text + COMPILE_TIME_BUFF_SIZE + strlen("\n\n"), buf + HIFI_OM_LOG_SIZE + DRV_DSP_UART_TO_MEM_RESERVE_SIZE,
-		DRV_DSP_UART_TO_MEM_SIZE - DRV_DSP_UART_TO_MEM_RESERVE_SIZE);
+	memcpy(full_text, comment, RDR_COMMENT_LEN);
+	memcpy(full_text + RDR_COMMENT_LEN, buf, RDR_HIFI_DUMP_SIZE);
 
-	/*start parse hifi log*/
-	BB_PRINT_PN("start parse hifi log\n");
-	parse_text = full_text + hifi_log_size;
-	for (i = 0; i < ARRAY_SIZE(parse_sochifi_log); i++) {
-		if (hifi_log_size + strlen(parse_text) + parse_sochifi_log[i].parse_log_size > full_text_size) {
-			BB_PRINT_ERR("log size more than the full_text_size\n");
-			break;
-		}
-
-		ret = parse_sochifi_log[i].parse_func(buf + parse_sochifi_log[i].original_offset,
-			parse_sochifi_log[i].original_log_size,
-			parse_text + strlen(parse_text),
-			parse_sochifi_log[i].parse_log_size,
-			SOCHIFI);
-		if (ret)
-			BB_PRINT_ERR("%s error: parser module %u failed\n", __func__, i);
-	}
-
-	BB_PRINT_PN("end parser hifi log\n");
-	ret = rdr_audio_write_file(xn, full_text, hifi_log_size + strlen(parse_text));/*lint !e747*/
+	ret = rdr_audio_write_file(xn, full_text, RDR_HIFI_DUMP_SIZE + RDR_COMMENT_LEN);/*lint !e747*/
 	if (ret)
 		BB_PRINT_ERR("rdr:dump %s fail\n", xn);
 
@@ -610,11 +356,11 @@ static int save_icc_channel_fifo(void)
 }
 
 
-static void dump_hifi(const char *filepath)
+static void dump_hifi(char *filepath)
 {
 	int ret = 0;
 
-	WARN_ON(NULL == filepath);
+	BUG_ON(NULL == filepath);
 
 	ret = save_icc_channel_fifo();
 	BB_PRINT_PN("rdr:%s()save_icc_channel_fifo,%s\n", __func__, ret ? "fail" : "success");
@@ -622,7 +368,8 @@ static void dump_hifi(const char *filepath)
 	ret = dump_hifi_ddr(filepath);
 	BB_PRINT_PN("rdr:%s():dump hifi ddr, %s\n", __func__, ret ? "fail" : "success");
 
-	if (soc_des.modid == (unsigned int)RDR_AUDIO_SOC_WD_TIMEOUT_MODID) {
+	if ((soc_des.modid >= (unsigned int)RDR_AUDIO_SOC_MODID_START) && (soc_des.modid <= RDR_AUDIO_SOC_MODID_END)) {
+		audio_dsm_report_info(AUDIO_CODEC, DSM_SOC_HIFI_RESET, "DSM_SOC_HIFI_RESET\n");
 	}
 
 	return;
@@ -713,7 +460,7 @@ static int irq_handler_thread(void *arg)
 			continue;
 		}
 
-		BB_PRINT_PN("%s():[sochifi timestamp: %u]sochifi watchdog coming\n", __func__, HIFI_STAMP);
+		BB_PRINT_PN("%s():sochifi watchdog coming\n", __func__);
 		usbaudio_ctrl_hifi_reset_inform();
 		hifi_usb_hifi_reset_inform();
 		if (is_dsp_power_on()) {
@@ -726,7 +473,7 @@ static int irq_handler_thread(void *arg)
 		hifireset_runcbfun(DRV_RESET_CALLCBFUN_RESET_BEFORE);
 
 		BB_PRINT_PN("enter rdr process for sochifi watchdog\n");
-		rdr_system_error((unsigned int)RDR_AUDIO_SOC_WD_TIMEOUT_MODID, 0, 0);
+		rdr_system_error(RDR_AUDIO_SOC_WD_TIMEOUT_MODID, 0, 0);
 		BB_PRINT_PN("exit rdr process for sochifi watchdog\n");
 	}
 
@@ -737,8 +484,8 @@ static int irq_handler_thread(void *arg)
 
 void rdr_audio_soc_dump(u32 modid, char *pathname, pfn_cb_dump_done pfb)
 {
-	WARN_ON(NULL == pathname);
-	WARN_ON(NULL == pfb);
+	BUG_ON(NULL == pathname);
+	BUG_ON(NULL == pfb);
 
 	BB_PRINT_START();
 
@@ -768,24 +515,6 @@ static int hisi_rdr_ipc_notify_lpm3(u32 *msg, int len)
 	return ret;
 }
 
-static bool is_config_cma_secure_by_atf(void)
-{
-	struct hisi_hifi_cma_struct *dev = &hificma_dev;
-	const char *cma_sec_config;
-
-	if (!of_property_read_string(dev->device->of_node, "cma-sec-config", &cma_sec_config)) {
-		if (!strncmp(cma_sec_config, "atf", strlen("atf"))) {
-			BB_PRINT_PN("rdr:%s(): config cma secure by atf\n", __func__);
-			return true;
-		}
-	} else {
-		BB_PRINT_ERR("read cma-sec-config err\n");
-	}
-
-	BB_PRINT_PN("rdr:%s(): config cma secure not by atf\n", __func__);
-	return false;
-}
-
 static int rdr_hifi_cma_alloc(phys_addr_t *hifi_addr)
 {
 	struct hisi_hifi_cma_struct *dev = &hificma_dev;
@@ -797,11 +526,8 @@ static int rdr_hifi_cma_alloc(phys_addr_t *hifi_addr)
 		BB_PRINT_ERR("read align val err\n");
 		return -EINVAL;
 	}
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-	page = dma_alloc_from_contiguous(dev->device, HIFI_CMA_IMAGE_SIZE >> PAGE_SHIFT, align_val, GFP_KERNEL);
-#else
+
 	page = dma_alloc_from_contiguous(dev->device, HIFI_CMA_IMAGE_SIZE >> PAGE_SHIFT, align_val);
-#endif
 	if (!page) {
 		BB_PRINT_ERR("dma_alloc_from_contiguous (hifi) alloc err!\n");
 		return -ENOMEM;
@@ -813,31 +539,21 @@ static int rdr_hifi_cma_alloc(phys_addr_t *hifi_addr)
 	}
 
 	__dma_unmap_area(phys_to_virt(phys), HIFI_CMA_IMAGE_SIZE, DMA_BIDIRECTIONAL);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-	change_secpage_range(phys, (unsigned long)phys_to_virt(phys),
-		HIFI_CMA_IMAGE_SIZE, __pgprot(PROT_DEVICE_nGnRE));
-#else
+
 	create_mapping_late(phys, (unsigned long)phys_to_virt(phys),
 		HIFI_CMA_IMAGE_SIZE, __pgprot(PROT_DEVICE_nGnRE));
-#endif
 
-	if (is_config_cma_secure_by_atf()) {
-		if (-1 == atfd_hisi_service_access_register_smc(ACCESS_REGISTER_FN_MAIN_ID,
-								phys, HIFI_CMA_IMAGE_SIZE,
-								ACCESS_REGISTER_FN_SUB_ID_DDR_HIFI_SEC_OPEN)) {
-			BB_PRINT_ERR("atfd_hisi_service_access_register_smc (hifi) set err!\n");
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-			change_secpage_range(phys, (unsigned long)phys_to_virt(phys),
-				HIFI_CMA_IMAGE_SIZE, __pgprot(PROT_NORMAL));
-#else
-			create_mapping_late(phys, (unsigned long)phys_to_virt(phys),
-				HIFI_CMA_IMAGE_SIZE, __pgprot(PROT_NORMAL));
-#endif
-			(void)dma_release_from_contiguous(dev->device,
-				phys_to_page(phys),
-				(int)HIFI_CMA_IMAGE_SIZE >> PAGE_SHIFT);
-			return -EACCES;
-		}
+	if (-1 == atfd_hisi_service_access_register_smc(ACCESS_REGISTER_FN_MAIN_ID,
+							phys, HIFI_CMA_IMAGE_SIZE,
+							ACCESS_REGISTER_FN_SUB_ID_DDR_HIFI_SEC_OPEN)) {
+		BB_PRINT_ERR("atfd_hisi_service_access_register_smc (hifi) set err!\n");
+		create_mapping_late(phys, (unsigned long)phys_to_virt(phys),
+			HIFI_CMA_IMAGE_SIZE, __pgprot(PROT_NORMAL));
+
+		(void)dma_release_from_contiguous(dev->device,
+			phys_to_page(phys),
+			(int)HIFI_CMA_IMAGE_SIZE >> PAGE_SHIFT);
+		return -EACCES;
 	}
 
 	*hifi_addr = phys;
@@ -854,21 +570,16 @@ static int rdr_hifi_cma_free(phys_addr_t addr)
 		return -EINVAL;
 	}
 
-	if (is_config_cma_secure_by_atf()) {
-		if (-1 == atfd_hisi_service_access_register_smc(ACCESS_REGISTER_FN_MAIN_ID,
-								addr, HIFI_CMA_IMAGE_SIZE,
-								ACCESS_REGISTER_FN_SUB_ID_DDR_HIFI_SEC_CLOSE)) {
-			BB_PRINT_ERR("atfd_hisi_service_access_register_smc (hifi) clear err!\n");
-			return -EACCES;
-		}
+	if (-1 == atfd_hisi_service_access_register_smc(ACCESS_REGISTER_FN_MAIN_ID,
+							addr, HIFI_CMA_IMAGE_SIZE,
+							ACCESS_REGISTER_FN_SUB_ID_DDR_HIFI_SEC_CLOSE)) {
+		BB_PRINT_ERR("atfd_hisi_service_access_register_smc (hifi) clear err!\n");
+		return -EACCES;
 	}
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-	change_secpage_range(addr, (unsigned long)phys_to_virt(addr),
-		HIFI_CMA_IMAGE_SIZE, __pgprot(PROT_NORMAL));
-#else
+
 	create_mapping_late(addr, (unsigned long)phys_to_virt(addr),
 		HIFI_CMA_IMAGE_SIZE, __pgprot(PROT_NORMAL));
-#endif
+
 	(void)dma_release_from_contiguous(dev->device,
 		phys_to_page(addr),
 		(int)HIFI_CMA_IMAGE_SIZE >> PAGE_SHIFT);
@@ -890,7 +601,7 @@ static int get_hifi_image_size(unsigned int *size)
 		return -EINVAL;
 	}
 
-	old_fs = get_fs();/*lint !e501*/
+	old_fs = get_fs();
 	set_fs(KERNEL_DS);/*lint !e501*/
 
 	fd = (int)sys_open(path, O_RDWR, 0);
@@ -1132,7 +843,7 @@ int hifireset_doruncbfun(const char *pname, enum DRV_RESET_CALLCBFUN_MOMENT epar
 	int  iresult = BSP_RESET_OK;
 	struct sreset_mgr_lli  *phead = g_pmgr_hifireset_data;
 
-	WARN_ON(NULL == pname);
+	BUG_ON(NULL == pname);
 
 	/*不判断模块名字,按顺序执行*/
 	if (strncmp(pname, RESET_CBFUN_IGNORE_NAME, strlen(RESET_CBFUN_IGNORE_NAME)) == 0) {

@@ -52,6 +52,7 @@
 #define TX_NUMBER 90		/*f01 control_base_addr + 58*/
 #define RX_NUMBER_S3207 39	/*f11 control_base_addr + 39*/
 #define TX_NUMBER_S3207 40	/*f11 control_base_addr + 40*/
+#define RAWDATA_NUM_OF_TRX_MAX 100
 #define FORCE_NUMER 9
 
 #define BOOTLOADER_ID_OFFSET 0
@@ -64,7 +65,9 @@
 #define DATA_REPORT_DATA_OFFSET 3
 #define CALIBRATION_INFO_OFFSET 0x0E
 
-#define COMMAND_TIMEOUT_100MS 20
+#define COMMAND_TIMEOUT_100MS 100
+#define WAIT_COMMAND_LOOP_MAX 20
+
 #define SENSOR_RX_MAPPING_OFFSET 1
 #define SENSOR_TX_MAPPING_OFFSET 2
 
@@ -224,8 +227,6 @@
 #define LIMIT_TWO 1
 #define CSV_PRODUCT_SYSTEM 1
 #define CSV_ODM_SYSTEM 2
-#define TEST_THRESHOLD_FAIL 1
-int test_failed_reason[RAW_DATA_END] = {0};
 static char tp_test_failed_reason[TP_TEST_FAILED_REASON_LEN] = { "-software_reason" };
 static unsigned short report_rate_offset = 38;
 static char buf_f54test_result[F54_BUF_LEN] = { 0 };	/*store mmi test result*/
@@ -1737,7 +1738,7 @@ static int f54_rawimage_report(void)
 			(int32_t*)kzalloc((rows_size+1)*(columns_size+1)*sizeof(int32_t), GFP_KERNEL);
 		rawdata_from_chip = (int*)kzalloc((rows_size * columns_size)*sizeof(int), GFP_KERNEL);
 		if (!limit_tab.MutualRawMax || !limit_tab.MutualRawMin || !rawdata_from_chip){
-			TS_LOG_ERR("kzalloc error: MutualRawMax:%pK, MutualRawMin:%pK, rawdata_from_chip:%pK\n",
+			TS_LOG_ERR("kzalloc error: MutualRawMax:%p, MutualRawMin:%p, rawdata_from_chip:%p\n",
 				limit_tab.MutualRawMax, limit_tab.MutualRawMin, rawdata_from_chip);
 			goto error_release_mem;
 		}
@@ -1748,15 +1749,15 @@ static int f54_rawimage_report(void)
 			TS_LOG_INFO("Threshold file name is not detected\n");
 			goto error_release_mem;
 		}
-		snprintf(file_name, sizeof(file_name) - 1, "%s_%s_%s_%s_raw.csv",
+		snprintf(file_name, sizeof(file_name), "%s_%s_%s_%s_raw.csv",
 			f54->rmi4_data->synaptics_chip_data->ts_platform_data->product_name,
 			f54->rmi4_data->synaptics_chip_data->chip_name,
 			f54->rmi4_data->rmi4_mod_info.project_id_string,
 			f54->rmi4_data->module_name);
 #ifdef BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE
-		snprintf(file_path, sizeof(file_path) -1, "/product/etc/firmware/ts/%s", file_name);
+		snprintf(file_path, sizeof(file_path), "/product/etc/firmware/ts/%s", file_name);
 #else
-		snprintf(file_path, sizeof(file_path) -1, "/odm/etc/firmware/ts/%s", file_name);
+		snprintf(file_path, sizeof(file_path), "/odm/etc/firmware/ts/%s", file_name);
 #endif
 		TS_LOG_INFO("threshold file name:%s, rows_size=%d, columns_size=%d\n", file_path, rows_size, columns_size);
 
@@ -1869,11 +1870,11 @@ static int test_wait_for_command_completion(void)
 		if ((value & 0x01) == 0x00)
 		  break;
 
-		msleep(100);
+		msleep(COMMAND_TIMEOUT_100MS);
 		timeout_count++;
-	} while (timeout_count < COMMAND_TIMEOUT_100MS);
+	} while (timeout_count < WAIT_COMMAND_LOOP_MAX);
 
-	if (timeout_count == COMMAND_TIMEOUT_100MS) {
+	if (timeout_count == WAIT_COMMAND_LOOP_MAX) {
 		TS_LOG_ERR("%s: Timed out waiting for command completion\n",
 					__func__);
 		return -ETIMEDOUT;
@@ -1906,8 +1907,8 @@ static int test_do_command(unsigned char command)
 
 static int write_to_f54_register(unsigned char report_type)
 {
-	unsigned char command;
-	int result;
+	unsigned char command = 0;
+	int result = 0;
 	unsigned char ready_report = 0xFF;
 	int retry_times = 0;
 
@@ -1952,7 +1953,7 @@ retry:
 
 static int mmi_add_static_data(void)
 {
-	int i;
+	int i = 0;
 
 	i = strlen(buf_f54test_result);
 	if (i >= F54_BUF_LEN) {
@@ -1979,15 +1980,15 @@ static int mmi_add_static_data(void)
 
 static int f54_deltarawimage_report(void)
 {
-	short Rawimage;
-	int i;
+	short Rawimage = 0;
+	int i = 0;
 	int delt_cap_uplimit =
 	    f54->rmi4_data->synaptics_chip_data->raw_limit_buf[DELT_DATA_UP];
 	int delt_cap_lowlimit =
 	    f54->rmi4_data->synaptics_chip_data->raw_limit_buf[DELT_DATA_LOW];
 	int DeltaRawimageSum = 0;
 	short DeltaRawimageAverage = 0;
-	short DeltaRawimageMaxNum, DeltaRawimageMinNum;
+	short DeltaRawimageMaxNum = 0, DeltaRawimageMinNum = 0;
 	short result = 0;
 	struct ts_rawdata_limit_tab limit_tab = {0};
 	int ret = 0;
@@ -2053,7 +2054,6 @@ static int f54_deltarawimage_report(void)
 	} else {
 		TS_LOG_ERR("deltadata is out of range, Result = %d\n", result);
 		ret = TEST_FAIL;
-		test_failed_reason[RAW_DATA_TYPE_Noise] = TEST_THRESHOLD_FAIL;
 	}
 error_release_mem:
 	if (limit_tab.unique_test && limit_tab.unique_test->noise_data_limit){
@@ -2069,7 +2069,7 @@ error_release_mem:
 
 static void mmi_deltacapacitance_test(void)
 {
-	unsigned char command;
+	unsigned char command = 0;
 	int result = 0;
 	command = (unsigned char)F54_16BIT_IMAGE;
 	TS_LOG_INFO("mmi_deltacapacitance_test called\n");
@@ -2096,8 +2096,8 @@ static void mmi_deltacapacitance_test(void)
 
 static void put_hybrid_data(int index)
 {
-	int i, j;
-	u32 temp;
+	int i = 0, j = 0;
+	u32 temp = 0;
 
 	for (i = 0, j = index; i < mmi_hybrid_abs_delta; i += 4, j++) {
 		temp = (f54->mmi_buf[i]) | (f54->mmi_buf[i + 1] << 8) | (f54->mmi_buf[i + 2] << 16) | (f54->mmi_buf[i + 3] << 24);
@@ -2120,7 +2120,7 @@ static bool is_in_range(int inputdata, int uplimit, int downlimit)
 
 static void check_hybrid_raw_cap(void)
 {
-	int i;
+	int i = 0;
 	int index = mmi_hybrid_abs_delta / 4;
 	int result = 0;
 	char file_path[100] = {0};
@@ -2130,15 +2130,15 @@ static void check_hybrid_raw_cap(void)
        int rx_num = f54->rmi4_data->num_of_rx;
        int tx_num = f54->rmi4_data->num_of_tx;
 
-	snprintf(file_name, sizeof(file_name) -1, "%s_%s_%s_%s_raw.csv",
+	snprintf(file_name, sizeof(file_name), "%s_%s_%s_%s_raw.csv",
 			f54->rmi4_data->synaptics_chip_data->ts_platform_data->product_name,
 			f54->rmi4_data->synaptics_chip_data->chip_name,
 			f54->rmi4_data->rmi4_mod_info.project_id_string,
 			f54->rmi4_data->module_name);
 	#ifdef BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE
-	snprintf(file_path, sizeof(file_path) -1, "/product/etc/firmware/ts/%s", file_name);
+	snprintf(file_path, sizeof(file_path), "/product/etc/firmware/ts/%s", file_name);
 	#else
-	snprintf(file_path, sizeof(file_path) -1, "/odm/etc/firmware/ts/%s", file_name);
+	snprintf(file_path, sizeof(file_path), "/odm/etc/firmware/ts/%s", file_name);
 	#endif
 
 	TS_LOG_INFO("%s(%d), threshold file name:%s \n", __func__, __LINE__, file_path);
@@ -2155,7 +2155,6 @@ static void check_hybrid_raw_cap(void)
 			hybird_raw_tx_range[i+tx_num], hybird_raw_tx_range[i]) ) {
 		    TS_LOG_ERR("%s(%d), check_hybrid_raw_cap test is out of range, test result is 6F\n", __func__, __LINE__);
 		    strncpy(tp_test_failed_reason, "-panel_reason",TP_TEST_FAILED_REASON_LEN);
-			test_failed_reason[RAW_DATA_TYPE_SelfCap] = TEST_THRESHOLD_FAIL;
 		    goto test_fail;
 		}
 	}
@@ -2171,7 +2170,6 @@ static void check_hybrid_raw_cap(void)
 			hybird_raw_rx_range[i+rx_num], hybird_raw_rx_range[i]) ){
 		    TS_LOG_ERR("%s(%d), check_hybrid_raw_cap test is out of range, test result is 6F\n", __func__, __LINE__);
 		    strncpy(tp_test_failed_reason, "-panel_reason",TP_TEST_FAILED_REASON_LEN);
-			test_failed_reason[RAW_DATA_TYPE_SelfCap] = TEST_THRESHOLD_FAIL;
 		    goto test_fail;
 		}
 	}
@@ -2187,7 +2185,7 @@ test_fail:
 
 static void check_hybrid_abs_delta(void)
 {
-	int i;
+	int i = 0;
 	int index = 0;
 	char file_path[100] = {0};
 	char file_name[64] = {0};
@@ -2213,17 +2211,16 @@ static void check_hybrid_abs_delta(void)
 	result = ts_kit_parse_csvfile(file_path, CSV_TP_SELFCAP_NOIZE_TX_RANGE,
 		hybird_abs_tx_range, 2, tx_num);
 	if(0 != result){
-	     TS_LOG_ERR("%s(%d), ts_kit_parse_csvfile  parse tx fail result=%dis 9F\n", __func__, __LINE__, result);
+	     TS_LOG_ERR("%s(%d), ts_kit_parse_csvfile  parse tx fail result=%dis 7F\n", __func__, __LINE__, result);
 	     goto test_fail;
 	}
 
 	for(i = 0; i < tx_num; i++){
 		if(false == is_in_range(f54->hybridbuf[index+i+rx_num],
 			hybird_abs_tx_range[i+tx_num], hybird_abs_tx_range[i]) ){
-		    TS_LOG_ERR("%s(%d), hybrid_abs_delta test is out of range, test result is 9F\n", __func__, __LINE__);
+		    TS_LOG_ERR("%s(%d), hybrid_abs_delta test is out of range, test result is 7F\n", __func__, __LINE__);
 		    strncpy(tp_test_failed_reason, "-panel_reason",
 			TP_TEST_FAILED_REASON_LEN);
-			test_failed_reason[RAW_DATA_TYPE_SelfNoisetest] = TEST_THRESHOLD_FAIL;
 		    goto test_fail;
 		}
 	}
@@ -2231,27 +2228,26 @@ static void check_hybrid_abs_delta(void)
 	result = ts_kit_parse_csvfile(file_path, CSV_TP_SELFCAP_NOIZE_RX_RANGE,
 		hybird_abs_rx_range, 2, rx_num);
 	if(0 != result){
-	     TS_LOG_ERR("%s(%d), ts_kit_parse_csvfile  parse rx fail result=%dis 9F\n", __func__, __LINE__, result);
+	     TS_LOG_ERR("%s(%d), ts_kit_parse_csvfile  parse rx fail result=%dis 7F\n", __func__, __LINE__, result);
 	     goto test_fail;
 	}
 
 	for(i = 0; i < rx_num; i++){
 		if(false == is_in_range(f54->hybridbuf[index+i],
 			hybird_abs_rx_range[i+rx_num], hybird_abs_rx_range[i])){
-		    TS_LOG_ERR("%s(%d), hybrid_abs_delta test is out of range, test result is 9F\n", __func__, __LINE__);
+		    TS_LOG_ERR("%s(%d), hybrid_abs_delta test is out of range, test result is 7F\n", __func__, __LINE__);
 		    strncpy(tp_test_failed_reason, "-panel_reason",
 			TP_TEST_FAILED_REASON_LEN);
-			test_failed_reason[RAW_DATA_TYPE_SelfNoisetest] = TEST_THRESHOLD_FAIL;
 		    goto test_fail;
 		}
 	}
 
-	TS_LOG_INFO("%s(%d), hybrid_abs_delta_report_size = %d. test result is 9P \n",__func__, __LINE__, f54->report_size);
-	strncat(buf_f54test_result, "-9P", MAX_STR_LEN);
+	TS_LOG_INFO("%s(%d), hybrid_abs_delta_report_size = %d. test result is 7P \n",__func__, __LINE__, f54->report_size);
+	strncat(buf_f54test_result, "-7P", MAX_STR_LEN);
        return;
 
 test_fail:
-	strncat(buf_f54test_result, "-9F", MAX_STR_LEN);
+	strncat(buf_f54test_result, "-7F", MAX_STR_LEN);
 	return;
 }
 
@@ -2266,7 +2262,7 @@ static int mmi_hybrid_abs_delta_test(void)
 	result = synaptics_rmi4_f54_attention();
 	if (result < 0) {
 		TS_LOG_ERR("%s(%d), Failed to get data\n", __func__, __LINE__);
-		strncat(buf_f54test_result, "-9F", MAX_STR_LEN);
+		strncat(buf_f54test_result, "-7F", MAX_STR_LEN);
 	}
 	else{
 		put_hybrid_data(0);
@@ -2277,7 +2273,7 @@ static int mmi_hybrid_abs_delta_test(void)
 
 static int mmi_hybrid_raw_cap_test(void)
 {
-	unsigned char command;
+	unsigned char command = 0;
 	int result = 0;
 	command = (unsigned char)F54_HYBRID_SENSING_RAW_CAP;
 	TS_LOG_INFO("%s(%d), mmi_hybrid_raw_cap_test called\n", __func__, __LINE__);
@@ -2298,8 +2294,7 @@ static int mmi_hybrid_raw_cap_test(void)
 
 static short FindMedian(short* pdata, int num)
 {
-	int i = 0;
-	int j = 0;
+	int i = 0,j = 0;
 	short temp = 0;
 	short *value = NULL;
 	short median = 0;
@@ -2346,8 +2341,8 @@ static int td43xx_ee_short_normalize_data(signed short * image)
 {
 	int retval = 0;
 	int i = 0, j = 0;
-	unsigned char tx_num = f54->rmi4_data->num_of_tx;
-	unsigned char rx_num = f54->rmi4_data->num_of_rx;
+	int tx_num = f54->rmi4_data->num_of_tx;
+	int rx_num = f54->rmi4_data->num_of_rx;
 	int part_two_limit = f54->rmi4_data->synaptics_chip_data->tddi_ee_short_test_parttwo_limit;
 	unsigned char left_size = TD43XX_EE_SHORT_TEST_LEFT_SIZE; //0x09
 	unsigned char right_size = TD43XX_EE_SHORT_TEST_RIGHT_SIZE;	//0x09
@@ -2642,7 +2637,6 @@ static int td43xx_ee_short_report(void)
 				td43xx_rt95_part_two[i * rx_num + j];
 			if (0 != td43xx_ee_short_data[i * rx_num + j]) {
 				TestResult = TEST_FAIL;
-				test_failed_reason[RAW_DATA_TYPE_OpenShort] = TEST_THRESHOLD_FAIL;
 				TS_LOG_ERR("td43xx_ee_short_data:[%d, %d]%d\n",
 					i, j, td43xx_ee_short_data[i * tx_num + j]);
 			}
@@ -2725,7 +2719,6 @@ static void mmi_trex_shorts_test(void)
 	return;
 
 err_match_defult:
-	test_failed_reason[RAW_DATA_TYPE_OpenShort] = TEST_THRESHOLD_FAIL;
 err_report_size:
 	kfree(buf_backup);
 err_kzalloc_buf:
@@ -2738,7 +2731,7 @@ param_nul:
 
 static void mmi_td43xx_ee_short_report(void)
 {
-	unsigned char command;
+	unsigned char command = 0;
 	int result = 0;
 	command = (unsigned char)F54_TD43XX_EE_SHORT;
 
@@ -2766,9 +2759,9 @@ static void mmi_td43xx_ee_short_report(void)
 }
 static int f54_delta_rx_report(void)
 {
-	short Rawimage_rx;
-	short Rawimage_rx1;
-	short Rawimage_rx2;
+	short Rawimage_rx = 0;
+	short Rawimage_rx1 = 0;
+	short Rawimage_rx2 = 0;
 	short Result = 0;
 	int i = 0;
 	int j = 0;
@@ -2820,8 +2813,8 @@ static int f54_delta_rx_report(void)
 static int f54_delta_tx_report(void)
 {
 	short *Rawimage_tx = NULL;
-	short Rawimage_delta_tx;
-	int i, j, tx_n, rx_n;
+	short Rawimage_delta_tx = 0;
+	int i = 0, j = 0, tx_n = 0, rx_n = 0;
 	int Result = 0;
 	int tx_to_tx_cap_uplimit =
 	    f54->rmi4_data->synaptics_chip_data->raw_limit_buf[TX_TO_TX_UP];
@@ -2938,7 +2931,6 @@ static int f54_delta_rx2_report(void)
 	short Result = 0;
 	int i = 0;
 	int j = 0;
-	int delta_buf_count = 0;
 	int step = 0;
 	int ret = 0;
 	short rxdelt_cap_abslimit = 0;
@@ -2971,51 +2963,30 @@ static int f54_delta_rx2_report(void)
 	}
 	abs_rxdelt_cap_limit = limit_tab.unique_test->Rx_delta_abslimit;
 
-	if(f54->rmi4_data->synaptics_chip_data->rawdata_newformatflag == TS_RAWDATA_NEWFORMAT) {
-		for ( i = 0; i < mmi_buf_size; i+=2) {
-					Rawimage_rx1 = (f54->mmi_buf[i]) | (f54->mmi_buf[i+1] << SHIFT_ONE_BYTE);
-					Rawimage_rx2 = (f54->mmi_buf[i+2]) | (f54->mmi_buf[i+3] << SHIFT_ONE_BYTE);
-					Rawimage_rx = abs(Rawimage_rx2 - Rawimage_rx1);
-			rx_delta_buf[delta_buf_count] = Rawimage_rx;
-			delta_buf_count++;
-			rxdelt_cap_abslimit = abs_rxdelt_cap_limit[i/2 - step];
-			if (Rawimage_rx <= rxdelt_cap_abslimit){
-				Result++;
-			} else {
-				TS_LOG_ERR("[%d,%d] %d\n",i/2 - step,Rawimage_rx, rxdelt_cap_abslimit);
-			}
-			j++;
-			if (j == columns_size - 1) {
-				i += 2;
-				j = 0;
-				step += 1;
-			}
+	snprintf(rx_delta_buf, MAX_CAP_DATA_SIZE, "%s\n", "RX:");
+	for ( i = 0; i < mmi_buf_size; i+=2)
+	{
+		Rawimage_rx1 = (f54->mmi_buf[i]) | (f54->mmi_buf[i+1] << SHIFT_ONE_BYTE);
+		Rawimage_rx2 = (f54->mmi_buf[i+2]) | (f54->mmi_buf[i+3] << SHIFT_ONE_BYTE);
+		Rawimage_rx = abs(Rawimage_rx2 - Rawimage_rx1);
+		snprintf(buf, sizeof(buf),"%3d,", Rawimage_rx);
+		strncat(rx_delta_buf, buf ,sizeof(buf));
+		rxdelt_cap_abslimit = abs_rxdelt_cap_limit[i/2 - step];
+		if (Rawimage_rx <= rxdelt_cap_abslimit){
+			Result++;
 		}
-	} else {
-		snprintf(rx_delta_buf, MAX_CAP_DATA_SIZE, "%s\n", "RX:");
-		for ( i = 0; i < mmi_buf_size; i+=2)
-		{
-			Rawimage_rx1 = (f54->mmi_buf[i]) | (f54->mmi_buf[i+1] << SHIFT_ONE_BYTE);
-			Rawimage_rx2 = (f54->mmi_buf[i+2]) | (f54->mmi_buf[i+3] << SHIFT_ONE_BYTE);
-			Rawimage_rx = abs(Rawimage_rx2 - Rawimage_rx1);
-			snprintf(buf, sizeof(buf),"%3d,", Rawimage_rx);
-			strncat(rx_delta_buf, buf ,sizeof(buf));
-			rxdelt_cap_abslimit = abs_rxdelt_cap_limit[i/2 - step];
-			if (Rawimage_rx <= rxdelt_cap_abslimit){
-				Result++;
-			}
-			else{
-				TS_LOG_ERR("[%d,%d] %d\n",i/2 - step,Rawimage_rx, rxdelt_cap_abslimit);
-			}
-			j++;
-			if (j == columns_size - 1) {
-				i += 2;
-				j = 0;
-				step += 1;
-				strncat(rx_delta_buf, "\n", 1);
-			}
+		else{
+			TS_LOG_ERR("[%d,%d] %d\n",i/2 - step,Rawimage_rx, rxdelt_cap_abslimit);
+		}
+		j++;
+		if (j == columns_size - 1) {
+			i += 2;
+			j = 0;
+			step += 1;
+			strncat(rx_delta_buf, "\n", 1);
 		}
 	}
+
 	if (Result == (mmi_buf_size/2 - rows_size)) {
 		TS_LOG_INFO("rawdata rx diff is all right, Result = %d\n", Result);
 		ret = TEST_PASS;
@@ -3023,7 +2994,6 @@ static int f54_delta_rx2_report(void)
 	else {
 		TS_LOG_ERR("rawdata rx diff is out of range, Result = %d\n", Result);
 		ret = TEST_FAIL;
-		test_failed_reason[RAW_DATA_TYPE_TrxDelta] = TEST_THRESHOLD_FAIL;
 	}
 error_release_mem:
 	if (limit_tab.unique_test && limit_tab.unique_test->Rx_delta_abslimit){
@@ -3044,7 +3014,6 @@ static int f54_delta_tx2_report(void)
 	int tx_n = 0, rx_n = 0;
 	int Result=0;
 	int ret = 0;
-	int delta_buf_count = 0;
 	short txdelt_cap_abslimit = 0;
 	short Rawimage_delta_tx = 0;
 	char buf[MAX_CAP_DATA_SIZE] = {0};
@@ -3083,51 +3052,31 @@ static int f54_delta_tx2_report(void)
 		ret = TEST_FAIL;
 		goto error_release_mem;
 	}
-	if(f54->rmi4_data->synaptics_chip_data->rawdata_newformatflag == TS_RAWDATA_NEWFORMAT) {
-		for ( i = 0, j = 0; i < mmi_buf_size; i+=2, j++)
-					Rawimage_tx[j] = (f54->mmi_buf[i]) | (f54->mmi_buf[i+1] << SHIFT_ONE_BYTE);
-		for( tx_n = 0; tx_n < rows_size - 1; tx_n++) {
-			for(rx_n = 0; rx_n < columns_size; rx_n++) {
-				txdelt_cap_abslimit = abs_txdelt_cap_limit[tx_n*columns_size+rx_n];
-				Rawimage_delta_tx = abs(Rawimage_tx[(tx_n+1)*columns_size+rx_n]
-						- Rawimage_tx[tx_n*columns_size+rx_n]);
-				tx_delta_buf[delta_buf_count] = Rawimage_delta_tx;
-				delta_buf_count++;
 
-				if(Rawimage_delta_tx <= txdelt_cap_abslimit){
-					Result++;
-				}
-				else{
-					TS_LOG_ERR("[%d,%d]\n",tx_n*columns_size+rx_n,Rawimage_delta_tx);
-				}
-			}
-		}
+	snprintf(tx_delta_buf, MAX_CAP_DATA_SIZE, "\n%s\n", "TX:");
+	for ( i = 0, j = 0; i < mmi_buf_size; i+=2, j++)
+		Rawimage_tx[j] = (f54->mmi_buf[i]) | (f54->mmi_buf[i+1] << SHIFT_ONE_BYTE);
 
-	}else{
-
-		snprintf(tx_delta_buf, MAX_CAP_DATA_SIZE, "\n%s\n", "TX:");
-		for ( i = 0, j = 0; i < mmi_buf_size; i+=2, j++)
-			Rawimage_tx[j] = (f54->mmi_buf[i]) | (f54->mmi_buf[i+1] << SHIFT_ONE_BYTE);
-
-		for( tx_n = 0; tx_n < rows_size - 1; tx_n++)
+	for( tx_n = 0; tx_n < rows_size - 1; tx_n++)
+	{
+		for(rx_n = 0; rx_n < columns_size; rx_n++)
 		{
-			for(rx_n = 0; rx_n < columns_size; rx_n++)
-			{
-				txdelt_cap_abslimit = abs_txdelt_cap_limit[tx_n*columns_size+rx_n];
-				Rawimage_delta_tx = abs(Rawimage_tx[(tx_n+1)*columns_size+rx_n]
-					- Rawimage_tx[tx_n*columns_size+rx_n]);
-				snprintf(buf, sizeof(buf),"%3d,", Rawimage_delta_tx);
-				strncat(tx_delta_buf, buf ,sizeof(buf));
-				if(Rawimage_delta_tx <= txdelt_cap_abslimit){
-					Result++;
-				}
-				else{
-					TS_LOG_ERR("[%d,%d]\n",tx_n*columns_size+rx_n,Rawimage_delta_tx);
-				}
+			txdelt_cap_abslimit = abs_txdelt_cap_limit[tx_n*columns_size+rx_n];
+
+			Rawimage_delta_tx = abs(Rawimage_tx[(tx_n+1)*columns_size+rx_n]
+				- Rawimage_tx[tx_n*columns_size+rx_n]);
+			snprintf(buf, sizeof(buf),"%3d,", Rawimage_delta_tx);
+			strncat(tx_delta_buf, buf ,sizeof(buf));
+			if(Rawimage_delta_tx <= txdelt_cap_abslimit){
+				Result++;
 			}
-			strncat(tx_delta_buf, "\n", 1);
+			else{
+				TS_LOG_ERR("[%d,%d]\n",tx_n*columns_size+rx_n,Rawimage_delta_tx);
+			}
 		}
+		strncat(tx_delta_buf, "\n", 1);
 	}
+
 	if (Result == (mmi_buf_size/2 - columns_size)) {
 		TS_LOG_INFO("rawdata tx diff is all right, Result = %d\n", Result);
 		ret = TEST_PASS;
@@ -3135,7 +3084,6 @@ static int f54_delta_tx2_report(void)
 	else {
 		TS_LOG_ERR("rawdata tx diff is out of range, Result = %d\n", Result);
 		ret = TEST_FAIL;
-		test_failed_reason[RAW_DATA_TYPE_TrxDelta] = TEST_THRESHOLD_FAIL;
 	}
 error_release_mem:
 	if (Rawimage_tx) {
@@ -3155,7 +3103,7 @@ error_release_mem:
 
 static void mmi_rawcapacitance_test(void)
 {
-	unsigned char command;
+	unsigned char command = 0;
 	int result = 0;
 
 	if (20 == f54->rmi4_data->synaptics_chip_data->rawdata_report_type)
@@ -3196,8 +3144,8 @@ static void mmi_rawcapacitance_test(void)
 
 static void save_capacitance_data_to_rawdatabuf(void)
 {
-	int i , j;
-	short temp;
+	int i = 0 , j = 0;
+	short temp = 0;
 	int index = 0;
 
 	f54->rawdatabuf[0] = f54->rmi4_data->num_of_rx;
@@ -3211,7 +3159,7 @@ static void save_capacitance_data_to_rawdatabuf(void)
 static int get_int_average(int *p, size_t len)
 {
 	int sum = 0;
-	size_t i;
+	size_t i = 0;
 
 	for (i = 0; i < len; i++) {
 		sum += p[i];
@@ -3226,7 +3174,7 @@ static int get_int_average(int *p, size_t len)
 static int get_int_min(int *p, size_t len)
 {
 	int s_min = SHRT_MAX;
-	size_t i;
+	size_t i = 0;
 
 	for (i = 0; i < len; i++) {
 		s_min = s_min > p[i] ? p[i] : s_min;
@@ -3238,7 +3186,7 @@ static int get_int_min(int *p, size_t len)
 static int get_int_max(int *p, size_t len)
 {
 	int s_max = SHRT_MIN;
-	size_t i;
+	size_t i = 0;
 
 	for (i = 0; i < len; i++) {
 		s_max = s_max < p[i] ? p[i] : s_max;
@@ -3261,7 +3209,7 @@ static void get_capacitance_stats(void)
 
 static int check_enhance_raw_capacitance(void)
 {
-	int i;
+	int i = 0;
 	int count = f54->rmi4_data->num_of_rx * f54->rmi4_data->num_of_tx;
 
 	save_capacitance_data_to_rawdatabuf();
@@ -3318,7 +3266,6 @@ static int check_csvfile_raw_capacitance(void)
 			TS_LOG_ERR("rawdata is out of range, failed at %d: upper: %d, lower: %d, raw: %d\n",
 				i, limit_tab.MutualRawMax[i], limit_tab.MutualRawMin[i], f54->rawdatabuf[i+2]);
 			ret = TEST_FAIL;
-			test_failed_reason[RAW_DATA_TYPE_CAPRAWDATA] = TEST_THRESHOLD_FAIL;
 		}
 	}
 
@@ -3337,7 +3284,7 @@ error_release_mem:
 
 static void mmi_csvfile_rawdata_test(void)
 {
-	unsigned char command;
+	unsigned char command = 0;
 	int result = 0;
 
 	command = (unsigned char)F54_RAW_16BIT_IMAGE;
@@ -3378,7 +3325,7 @@ static void mmi_csvfile_rawdata_test(void)
 
 static void mmi_enhance_raw_capacitance_test(void)
 {
-	unsigned char command;
+	unsigned char command = 0;
 	int result = 0;
 
 	if (20 == f54->rmi4_data->synaptics_chip_data->rawdata_report_type)
@@ -3429,14 +3376,7 @@ unsigned char GetLogicalPin(unsigned char p_pin)
 #define EXT_TRX_SHORT_FAIL 0
 static int mmi_ext_trx_short_test(void)
 {
-	int retval = 0;
-	int result = 0;
-	int i = 0;
-	int j = 0;
-	int k = 0;
-	int ii= 0;
-	int jj = 0;
-	int rxIndex = 0;
+	int retval = 0, result = 0, i = 0, j = 0, k = 0, ii = 0, jj = 0, rxIndex = 0;
 	struct synaptics_rmi4_data *rmi4_data = f54->rmi4_data;
 	unsigned char logical_pin = 0xff;
 	unsigned char *p_data_rt26 = NULL;
@@ -3550,6 +3490,7 @@ static int mmi_ext_trx_short_test(void)
 		TS_LOG_ERR("Failed to read f54_read_report_image 100\n");
 		goto exit_26100_type;
 	}
+
 	for (i = 0, k = 0; i < numberOfRows; i++) {
 		for (j = 0; j < numberOfColums; j++) {
 			temp = f54->report_data[k] | (f54->report_data[k+1] << 8);
@@ -3679,7 +3620,6 @@ exit_26100_type:
 	{
 		TS_LOG_INFO("%s: test result is fail\n", __func__);
 		strncat(buf_f54test_result, SHORT_TEST_FAIL, MAX_STR_LEN);
-		test_failed_reason[RAW_DATA_TYPE_OpenShort] = TEST_THRESHOLD_FAIL;
 	}
 	if(p_data_baseline1)
 	{
@@ -3780,8 +3720,7 @@ static void synaptics_f54_free(void)
 
 static void put_capacitance_data(int index)
 {
-	int i = 0;
-	int j = 0;
+	int i = 0, j = 0;
 	short temp = 0;
 	f54->rawdatabuf[0] = f54->rmi4_data->num_of_rx;
 	f54->rawdatabuf[1] = f54->rmi4_data->num_of_tx;
@@ -3799,8 +3738,8 @@ static void synaptics_change_report_rate(void)
 	unsigned char report_rate60 = 0;
 
 	if (0 == f54->rmi4_data->synaptics_chip_data->report_rate_test) {
-		//strncat(buf_f54test_result, "-4P", MAX_STR_LEN);
-		TS_LOG_INFO("s3207 and s3706 change_report_rate default pass\n");
+		strncat(buf_f54test_result, "-4P", MAX_STR_LEN);
+		TS_LOG_INFO("s3207 change_report_rate default pass\n");
 		return;
 	}
 	TS_LOG_INFO("change report rate 120 first then to 60\n");
@@ -3853,299 +3792,8 @@ static void synaptics_change_report_rate(void)
 		strncat(buf_f54test_result, "-4F", MAX_STR_LEN);
 		strncpy(tp_test_failed_reason, "-panel_reason",
 			TP_TEST_FAILED_REASON_LEN);
-		test_failed_reason[RAW_DATA_TYPE_FreShift] = TEST_THRESHOLD_FAIL;
 	}
 	return;
-}
-
-static int synap_strncat(char *dest, const char *src, size_t dest_sizemax, size_t src_sizemax)
-{
-	int rc = NO_ERR;
-
-	if(dest == NULL || src == NULL) {
-		return -EINVAL;
-	}
-	size_t dest_len = 0;
-	size_t dest_remain_size = 0;
-	dest_len = strnlen(dest, dest_sizemax);
-	dest_remain_size = dest_sizemax - dest_len;
-
-	if(src_sizemax > dest_remain_size - 1){
-		return -EINVAL;
-	}
-	strncat(&dest[dest_len], src, src_sizemax);
-	return rc;
-}
-
-
-static int synaptics_free_test_container(void)
-{
-	int rc = NO_ERR;
-	if (f54->rmi4_data->synaptics_chip_data->trx_delta_test_support) {
-			if (tx_delta_buf) {
-					kfree(tx_delta_buf);
-					tx_delta_buf = NULL;
-			}
-			if (rx_delta_buf) {
-					kfree(rx_delta_buf);
-					rx_delta_buf = NULL;
-			}
-	}
-	if (f54->rmi4_data->synaptics_chip_data->td43xx_ee_short_test_support) {
-			if (g_td43xx_rt95_part_one) {
-					kfree(g_td43xx_rt95_part_one);
-					g_td43xx_rt95_part_one = NULL;
-			}
-			if (g_td43xx_rt95_part_two) {
-					kfree(g_td43xx_rt95_part_two);
-					g_td43xx_rt95_part_two = NULL;
-			}
-	}
-
-	return rc;
-}
-static int synaptics_alloc_test_container(void)
-{
-	int rc = NO_ERR;
-	if (f54->rmi4_data->synaptics_chip_data->trx_delta_test_support) {
-			tx_delta_buf = (int *)kzalloc(mmi_buf_size * sizeof(int), GFP_KERNEL);
-			if (!tx_delta_buf) {
-				TS_LOG_ERR("malloc tx_delta_buf failed\n");
-				goto out;
-			}
-			rx_delta_buf = (int *)kzalloc(mmi_buf_size * sizeof(int), GFP_KERNEL);
-			if (!rx_delta_buf) {
-				TS_LOG_ERR("malloc rx_delta_buf failed\n");
-				goto out;
-			}
-	}
-
-	if (f54->rmi4_data->synaptics_chip_data->td43xx_ee_short_test_support) {
-			g_td43xx_rt95_part_one = (signed int *)kzalloc(mmi_buf_size * sizeof(int), GFP_KERNEL);
-			if (!g_td43xx_rt95_part_one) {
-				TS_LOG_ERR("malloc g_td43xx_rt95_part_one failed\n");
-				goto out;
-			}
-			g_td43xx_rt95_part_two = (signed int *)kzalloc(mmi_buf_size * sizeof(int), GFP_KERNEL);
-			if (!g_td43xx_rt95_part_two) {
-				TS_LOG_ERR("malloc g_td43xx_rt95_part_two failed\n");
-				goto out;
-			}
-	}
-	return rc;
-out:
-	synaptics_free_test_container();
-	return -ENOMEM;
-}
-
-static int synaptics_alloc_newnode(struct ts_rawdata_newnodeinfo ** pts_node,int rawbufsize)
-{
-	int rc = NO_ERR;
-	*pts_node = (struct ts_rawdata_newnodeinfo *)kzalloc(sizeof(struct ts_rawdata_newnodeinfo), GFP_KERNEL);
-	if (!(*pts_node)) {
-		TS_LOG_ERR("malloc failed \n");
-		return -EINVAL;
-	}
-	(*pts_node)->values = kzalloc((rawbufsize)*sizeof(int), GFP_KERNEL);
-	if (!(*pts_node)->values) {
-		TS_LOG_ERR("malloc failed  for values \n");
-		kfree(*pts_node);
-		*pts_node = NULL;
-		return -EINVAL;
-	}
-	return rc;
-}
-static void synap_put_cap_test_deviceinfo(struct ts_rawdata_info_new *info)
-{
-	size_t pjt_sizemax = sizeof(f54->rmi4_data->rmi4_mod_info.project_id_string);
-	size_t ver_sizemax = sizeof(f54->rmi4_data->synaptics_chip_data->version_name);
-	size_t product_sizemax = sizeof(f54->rmi4_data->rmi4_mod_info.product_id_string);
-	size_t devinfo_size = sizeof(info->deviceinfo);
-	synap_strncat(info->deviceinfo, "synaptics-", devinfo_size, sizeof("synaptics-"));
-	synap_strncat(info->deviceinfo,f54->rmi4_data->rmi4_mod_info.product_id_string,
-		devinfo_size,product_sizemax);
-	synap_strncat(info->deviceinfo, "-", devinfo_size,sizeof("-"));
-	synap_strncat(info->deviceinfo,f54->rmi4_data->rmi4_mod_info.project_id_string,
-		devinfo_size,pjt_sizemax);
-	synap_strncat(info->deviceinfo, "-", devinfo_size,sizeof("-"));
-	synap_strncat(info->deviceinfo,f54->rmi4_data->synaptics_chip_data->version_name,
-		devinfo_size,ver_sizemax);
-	synap_strncat(info->deviceinfo, ";", devinfo_size,sizeof(";"));
-	return;
-}
-int synap_put_cap_test_dataNewformat(struct ts_rawdata_info_new *info)
-{
-	int rc = NO_ERR;
-	int test_num = 1;
-	int test_tmp_num = 3;
-	int rawbufsize = f54->rmi4_data->num_of_tx * f54->rmi4_data->num_of_rx;
-	int rawSelfbuf = f54->rmi4_data->num_of_tx + f54->rmi4_data->num_of_rx;
-	int i = 0;
-	struct ts_rawdata_newnodeinfo * pts_node = NULL;
-	char statistics_tmp_data[STATISTICS_DATA_LEN] = {0};
-	TS_LOG_INFO("synap_put_cap_test_dataNewformat called\n");
-
-	info->tx = f54->rmi4_data->num_of_tx;
-	info->rx = f54->rmi4_data->num_of_rx;
-	if (f54->rmi4_data->synaptics_chip_data->rawdata_arrange_type == TS_RAWDATA_TRANS_ABCD2CBAD
-		|| f54->rmi4_data->synaptics_chip_data->rawdata_arrange_type == TS_RAWDATA_TRANS_ABCD2ADCB) {
-		ts_kit_rotate_rawdata_abcd2cbad(info->rx, info->tx, f54->rawdatabuf + 2,
-				f54->rmi4_data->synaptics_chip_data->rawdata_arrange_type);
-		ts_kit_rotate_rawdata_abcd2cbad(info->rx, info->tx,
-				f54->rawdatabuf + rawbufsize + 2, f54->rmi4_data->synaptics_chip_data->rawdata_arrange_type);
-	}
-	/*deviceinfo*/
-	synap_put_cap_test_deviceinfo(info);
-	/*i2c info */
-	if(strncmp(buf_f54test_result, "0P", strlen("0P"))) {
-		synap_strncat(info->i2cinfo, "0F", sizeof(info->i2cinfo),sizeof("0F"));
-		synap_strncat(info->i2cerrinfo, "software reason ", sizeof(info->i2cerrinfo),sizeof("software reason "));
-		return rc;
-	} else {
-		synap_strncat(info->i2cinfo, "0P", sizeof(info->i2cinfo),sizeof("0P"));
-	}
-	test_num = test_num + test_tmp_num;
-	/*rawdata*/
-	if(f54->rmi4_data->synaptics_chip_data->test_capacitance_via_csvfile
-		|| f54->rmi4_data->synaptics_chip_data->test_enhance_raw_data_capacitance) {
-		rc = synaptics_alloc_newnode(&pts_node, rawbufsize);
-		if(rc < 0) {
-			TS_LOG_ERR("malloc failed 1pts_node\n");
-			return rc;
-		}
-		snprintf(statistics_tmp_data, STATISTICS_DATA_LEN - 1,
-			 "[%4d,%4d,%4d]",
-			 f54->raw_statics_data.RawimageAverage,
-			 f54->raw_statics_data.RawimageMaxNum,
-			 f54->raw_statics_data.RawimageMinNum);
-
-		for (i = 0; i < rawbufsize; i++)
-			pts_node->values[i] = f54->rawdatabuf[i+2];
-		strncpy(pts_node->statistics_data,statistics_tmp_data,sizeof(pts_node->statistics_data)-1);
-		memset(statistics_tmp_data, 0, sizeof(statistics_tmp_data));
-		pts_node->size = rawbufsize;
-		pts_node->testresult = buf_f54test_result[test_num];
-		pts_node->typeindex = RAW_DATA_TYPE_CAPRAWDATA;
-		strncpy(pts_node->test_name,"Cap_Rawdata",sizeof(pts_node->test_name)-1);
-		list_add_tail(&pts_node->node, &info->rawdata_head);
-		test_num = test_num + test_tmp_num;
-
-		/* tp test failed reason */
-		if (0 == strlen(buf_f54test_result) || strstr(buf_f54test_result, "F")) {
-			strncpy(pts_node->tptestfailedreason, "software reason", TS_RAWDATA_FAILED_REASON_LEN);
-			for(i = 0; i < RAW_DATA_END; i++) {
-				if(TEST_THRESHOLD_FAIL == test_failed_reason[i]) {
-					strncpy(pts_node->tptestfailedreason, "-panel_reason", TS_RAWDATA_FAILED_REASON_LEN);
-				}
-			}
-		}
-
-		/*Trx delta*/
-		rc = synaptics_alloc_newnode(&pts_node, mmi_buf_size);
-		if(rc < 0) {
-				TS_LOG_ERR("malloc failed 2pts_node\n");
-				return rc;
-		}
-		if (f54->rmi4_data->synaptics_chip_data->trx_delta_test_support) {
-			for (i = 0; i < rawbufsize; i++)
-					pts_node->values[i] =rx_delta_buf[i];
-
-			for(i= 0; i < rawbufsize; i++)
-					pts_node->values[i+rawbufsize] =tx_delta_buf[i];
-
-			pts_node->size = mmi_buf_size;
-		}
-		pts_node->testresult = buf_f54test_result[test_num];
-		pts_node->typeindex = RAW_DATA_TYPE_TrxDelta;
-		strncpy(pts_node->test_name,"Trx delta",sizeof(pts_node->test_name)-1);
-		list_add_tail(&pts_node->node, &info->rawdata_head);
-		test_num = test_num + test_tmp_num;
-	}
-	/*3p3f*/
-	rc = synaptics_alloc_newnode(&pts_node, rawbufsize);
-	if(rc < 0) {
-		TS_LOG_ERR("malloc failed 3pts_node\n");
-		return rc;
-	}
-	snprintf((statistics_tmp_data ), STATISTICS_DATA_LEN - 1,
-		 "[%4d,%4d,%4d]",
-		 f54->delta_statics_data.RawimageAverage,
-		 f54->delta_statics_data.RawimageMaxNum,
-		 f54->delta_statics_data.RawimageMinNum);
-	for (i = 0; i < rawbufsize; i++)
-			pts_node->values[i] = f54->rawdatabuf[rawbufsize+2+i];
-	pts_node->size = rawbufsize;
-	pts_node->testresult = buf_f54test_result[test_num];
-	pts_node->typeindex = RAW_DATA_TYPE_Noise;
-	strncpy(pts_node->statistics_data,statistics_tmp_data,sizeof(pts_node->statistics_data)-1);
-	memset(statistics_tmp_data, 0, sizeof(statistics_tmp_data));
-	strncpy(pts_node->test_name,"noise delta",sizeof(pts_node->test_name)-1);
-	list_add_tail(&pts_node->node, &info->rawdata_head);
-	test_num = test_num + test_tmp_num;
-
-	/*4p4f*/
-	if(f54->rmi4_data->synaptics_chip_data->report_rate_test) {
-		pts_node = (struct ts_rawdata_newnodeinfo *)kzalloc(sizeof(struct ts_rawdata_newnodeinfo), GFP_KERNEL);
-		if (!pts_node) {
-			TS_LOG_ERR("malloc failed 4pts_node\n");
-			return -EINVAL;
-		}
-		pts_node->testresult = buf_f54test_result[test_num];
-		pts_node->typeindex = RAW_DATA_TYPE_FreShift;
-		strncpy(pts_node->test_name,"Frequency shift",sizeof(pts_node->test_name)-1);
-		list_add_tail(&pts_node->node, &info->rawdata_head);
-		test_num = test_num + test_tmp_num;
-	}
-
-	/*5p5f*/
-	if(f54->rmi4_data->synaptics_chip_data->td43xx_ee_short_test_support
-			|| f54->rmi4_data->synaptics_chip_data->support_s3320_short_test
-			|| f54->rmi4_data->synaptics_chip_data->support_ext_trex_short_test) {
-		pts_node = (struct ts_rawdata_newnodeinfo *)kzalloc(sizeof(struct ts_rawdata_newnodeinfo), GFP_KERNEL);
-		if (!pts_node) {
-			TS_LOG_ERR("malloc failed 5pts_node\n");
-			return -EINVAL;
-		}
-		pts_node->testresult = buf_f54test_result[test_num];
-		pts_node->typeindex = RAW_DATA_TYPE_OpenShort;
-		strncpy(pts_node->test_name,"Open short",sizeof(pts_node->test_name)-1);
-		list_add_tail(&pts_node->node, &info->rawdata_head);
-		test_num = test_num + test_tmp_num;
-	}
-
-	/*6p6f*/
-	if(f54->rmi4_data->synaptics_chip_data->self_cap_test) {
-		rc = synaptics_alloc_newnode(&pts_node, rawSelfbuf);
-		if(rc < 0) {
-			TS_LOG_ERR("malloc failed 6pts_node\n");
-			return rc;
-		}
-		pts_node->testresult = buf_f54test_result[test_num];
-		pts_node->typeindex = RAW_DATA_TYPE_SelfCap;
-		pts_node->size = rawSelfbuf;
-		for (i = 0; i < rawSelfbuf; i++)
-			pts_node->values[i] =f54->hybridbuf[i+mmi_hybrid_abs_delta /4];
-		strncpy(pts_node->test_name,"Self Cap",sizeof(pts_node->test_name)-1);
-		list_add_tail(&pts_node->node, &info->rawdata_head);
-		test_num = test_num + test_tmp_num;
-
-		/*9p9f*/
-		rc = synaptics_alloc_newnode(&pts_node, rawSelfbuf);
-		if(rc < 0) {
-			TS_LOG_ERR("malloc failed 9pts_node\n");
-			return rc;
-		}
-		pts_node->testresult = buf_f54test_result[test_num];
-		pts_node->typeindex = RAW_DATA_TYPE_SelfNoisetest;
-		pts_node->size = rawSelfbuf;
-		for (i = 0; i < rawSelfbuf; i++)
-			pts_node->values[i] =f54->hybridbuf[i];
-		strncpy(pts_node->test_name,"Self Noise",sizeof(pts_node->test_name)-1);
-		list_add_tail(&pts_node->node, &info->rawdata_head);
-		test_num = test_num + test_tmp_num;
-	}
-
-	return rc;
 }
 
 int synap_get_cap_data(struct ts_rawdata_info *info)
@@ -4154,20 +3802,12 @@ int synap_get_cap_data(struct ts_rawdata_info *info)
 	unsigned char command = 0;
 
 	TS_LOG_INFO("synap_get_cap_data called\n");
-	if(f54->rmi4_data->synaptics_chip_data->rawdata_newformatflag == TS_RAWDATA_NEWFORMAT) {
-		rc = synaptics_alloc_test_container();
-		if(rc < 0) {
-			TS_LOG_ERR("%s synaptics_alloc_test_container  failed ! \n", __func__);
-			goto exit;
-		}
 
-	} else {
-		tx_delta_buf = info->tx_delta_buf;
-		rx_delta_buf = info->rx_delta_buf;
-		g_td43xx_rt95_part_one = info->td43xx_rt95_part_one;
-		g_td43xx_rt95_part_two = info->td43xx_rt95_part_two;
-	}
-	memset(test_failed_reason, 0, sizeof(test_failed_reason));
+	tx_delta_buf = info->tx_delta_buf;
+	rx_delta_buf = info->rx_delta_buf;
+	g_td43xx_rt95_part_one = info->td43xx_rt95_part_one;
+	g_td43xx_rt95_part_two = info->td43xx_rt95_part_two;
+
 	memset(buf_f54test_result, 0, sizeof(buf_f54test_result));
 	memset(f54->rawdatabuf, 0, rawdata_size * sizeof(int));
 	memset(f54->hybridbuf, 0 , HYBRID_BUF_SIZE * sizeof(u32));
@@ -4204,13 +3844,15 @@ int synap_get_cap_data(struct ts_rawdata_info *info)
 		}
 		put_capacitance_data(mmi_buf_size / 2);
 
-		if (f54->rmi4_data->synaptics_chip_data->support_s3320_short_test){
+		if (f54->rmi4_data->synaptics_chip_data->support_s3320_short_test) {
 			mmi_trex_shorts_test();
 		}
+
 		if(f54->rmi4_data->synaptics_chip_data->support_ext_trex_short_test)
 		{
 			mmi_ext_trx_short_test();
 		}
+
 
 		if(f54->rmi4_data->synaptics_chip_data->self_cap_test)
 		{
@@ -4238,11 +3880,6 @@ int synap_get_cap_data(struct ts_rawdata_info *info)
 				("failed to resume glove/holster/palm or other status!\n");
 		}
 	}
-	if(f54->rmi4_data->synaptics_chip_data->rawdata_newformatflag == TS_RAWDATA_NEWFORMAT) {
-		synap_put_cap_test_dataNewformat((struct ts_rawdata_info_new *)info);
-		goto exit;
-	}
-
 	memcpy(info->buff, f54->rawdatabuf, rawdata_size * sizeof(int));
 
 	info->hybrid_buff[0] = f54->rmi4_data->num_of_rx;
@@ -4293,9 +3930,6 @@ int synap_get_cap_data(struct ts_rawdata_info *info)
 	TS_LOG_INFO("info->used_size = %d\n", info->used_size);
 	rc = NO_ERR;
 exit:
-	if(f54->rmi4_data->synaptics_chip_data->rawdata_newformatflag == TS_RAWDATA_NEWFORMAT) {
-		synaptics_free_test_container();
-	}
 	synaptics_f54_free();
 	return rc;
 }
@@ -4675,6 +4309,13 @@ static int synaptics_read_f34(void)
 			return -EINVAL;
 		}
 	}
+	if(f54->rmi4_data->synaptics_chip_data->blanc501100_tianma_flag){
+		if((f54->rmi4_data->num_of_tx == 0)||(f54->rmi4_data->num_of_tx > RAWDATA_NUM_OF_TRX_MAX)||\
+			(f54->rmi4_data->num_of_rx == 0)||(f54->rmi4_data->num_of_rx > RAWDATA_NUM_OF_TRX_MAX)){
+			TS_LOG_ERR("num of tx or rx overflow TRX MAX\n");
+			return -EINVAL;
+		}
+	}
 
 	/*used for force touch data. */
 	if (1 == f54->rmi4_data->synaptics_chip_data->support_3d_func) {
@@ -4686,11 +4327,6 @@ static int synaptics_read_f34(void)
 	    (f54->rmi4_data->num_of_tx) * (f54->rmi4_data->num_of_rx) * 2 + 2;
 	mmi_buf_size =
 	    (f54->rmi4_data->num_of_tx) * (f54->rmi4_data->num_of_rx) * 2;
-	if(rawdata_size <= 0 || mmi_buf_size <= 0) {
-		TS_LOG_INFO("%s error rawdata_size = %d, mmi_buf_size = %d\n",
-			__func__, rawdata_size, mmi_buf_size);
-		return -EINVAL;
-	}
 
 	TS_LOG_INFO("rx = %d, tx = %d, rawdata_size = %d, mmi_buf_size = %d\n",
 		    f54->rmi4_data->num_of_rx, f54->rmi4_data->num_of_tx,
@@ -4727,7 +4363,7 @@ static void Synaptics_test_free_control_mem(void)
 static int Synaptics_test_set_controls(void)
 {
 	unsigned char length = 0;
-	unsigned char num_of_sensing_freqs =0;
+	unsigned char num_of_sensing_freqs = 0;
 	unsigned short reg_addr = f54->control_base_addr;
 	struct f54_control *control = &f54->control;
 
@@ -5668,11 +5304,12 @@ static int test_f55_set_queries(void)
 
 static int test_f55_init(struct synaptics_rmi4_data *rmi4_data)
 {
-	int retval = -1;
+	int retval = 0;
 	unsigned char ii = 0;
 	unsigned char rx_electrodes = 0;
 	unsigned char tx_electrodes = 0;
 	struct f55_control_43 ctrl_43;
+	memset(&ctrl_43 , 0 ,sizeof(struct f55_control_43));
 
 	retval = test_f55_set_queries();
 	if (retval < 0) {
@@ -5847,6 +5484,7 @@ int synap_rmi4_f54_init(struct synaptics_rmi4_data *rmi4_data,
 	unsigned char page = 0;
 	unsigned char intr_count = 0;
 	struct synaptics_rmi4_fn_desc rmi_fd;
+	memset(&rmi_fd , 0 , sizeof(struct synaptics_rmi4_fn_desc));
 
 	if (synaptics_raw_data_limit_flag) {
 		retval = match_module_name(module_name);
@@ -5901,25 +5539,28 @@ int synap_rmi4_f54_init(struct synaptics_rmi4_data *rmi4_data,
 			} else if (rmi_fd.fn_number == SYNAPTICS_RMI4_F55) {
 				hasF55 = true;
 				f54->fn55->query_base_addr =
-				    rmi_fd.query_base_addr | (page << 8);
+					rmi_fd.query_base_addr | (page << 8);
 				f54->fn55->control_base_addr =
-				    rmi_fd.ctrl_base_addr | (page << 8);
-				f55->query_base_addr =
-				    rmi_fd.query_base_addr | (page << 8);
-				f55->control_base_addr =
-				    rmi_fd.ctrl_base_addr | (page << 8);
-				f55->data_base_addr =
-				    rmi_fd.data_base_addr | (page << 8);
-				f55->command_base_addr =
-				    rmi_fd.cmd_base_addr | (page << 8);
+					rmi_fd.ctrl_base_addr | (page << 8);
+				if (1 == f54->rmi4_data->synaptics_chip_data->blanc501100_tianma_flag) {
+					TS_LOG_INFO("%s blanc501100_tianma_flag", __func__);
+					f55->query_base_addr =
+						rmi_fd.query_base_addr | (page << 8);
+					f55->control_base_addr =
+						rmi_fd.ctrl_base_addr | (page << 8);
+					f55->data_base_addr =
+						rmi_fd.data_base_addr | (page << 8);
+					f55->command_base_addr =
+						rmi_fd.cmd_base_addr | (page << 8);
+					}
 			} else if (rmi_fd.fn_number == SYNAPTICS_RMI4_F34) {
 				hasF34 = true;
 				f54->f34_fd.query_base_addr =
-				    rmi_fd.query_base_addr;
+					rmi_fd.query_base_addr;
 				f54->f34_fd.ctrl_base_addr =
-				    rmi_fd.ctrl_base_addr;
+					rmi_fd.ctrl_base_addr;
 				f54->f34_fd.data_base_addr =
-				    rmi_fd.data_base_addr;
+					rmi_fd.data_base_addr;
 			}
 
 			if (hasF54 && hasF55 && hasF34) {
@@ -5939,16 +5580,16 @@ int synap_rmi4_f54_init(struct synaptics_rmi4_data *rmi4_data,
 
 	if (!hasF54 || !hasF34) {
 		TS_LOG_ERR
-		    ("Funtion  is not available, hasF54=%d, hasF34 = %d\n",
-		     hasF54, hasF34);
+			("Funtion  is not available, hasF54=%d, hasF34 = %d\n",
+			hasF54, hasF34);
 		retval = -EINVAL;
 		goto exit_free_mem;
 	}
 
 found:
 	retval =
-	    f54->fn_ptr->read(rmi4_data, f54->query_base_addr, f54->query.data,
-			      sizeof(f54->query.data));
+		f54->fn_ptr->read(rmi4_data, f54->query_base_addr, f54->query.data,
+				sizeof(f54->query.data));
 	if (retval < 0) {
 		TS_LOG_ERR("Failed to read query registers\n");
 		goto exit_free_mem;
@@ -5966,7 +5607,7 @@ found:
 		goto exit_free_control;
 	}
 
-	if (hasF55) {
+	if (hasF55 && f54->rmi4_data->synaptics_chip_data->blanc501100_tianma_flag) {
 		retval = test_f55_init(rmi4_data);
 		if (retval < 0) {
 			TS_LOG_ERR("Failed to set up f55 init\n");

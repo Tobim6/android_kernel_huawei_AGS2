@@ -20,6 +20,7 @@
 #include <linux/uaccess.h>
 #include <linux/mount.h>
 #include <linux/pagevec.h>
+#include <linux/random.h>
 #include <linux/uio.h>
 #include <linux/uuid.h>
 #include <linux/file.h>
@@ -33,19 +34,6 @@
 #include "trace.h"
 #include <trace/events/f2fs.h>
 
-static int f2fs_filemap_fault(struct vm_area_struct *vma,
-					struct vm_fault *vmf)
-{
-	struct inode *inode = file_inode(vma->vm_file);
-	int err;
-
-	down_read(&F2FS_I(inode)->i_mmap_sem);
-	err = filemap_fault(vma, vmf);
-	up_read(&F2FS_I(inode)->i_mmap_sem);
-
-	return err;
-}
-
 static int f2fs_vm_page_mkwrite(struct vm_area_struct *vma,
 						struct vm_fault *vmf)
 {
@@ -54,11 +42,6 @@ static int f2fs_vm_page_mkwrite(struct vm_area_struct *vma,
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	struct dnode_of_data dn;
 	int err;
-
-	if (unlikely(f2fs_cp_error(sbi))) {
-		err = -EIO;
-		goto err;
-	}
 
 	sb_start_pagefault(inode->i_sb);
 
@@ -78,14 +61,13 @@ static int f2fs_vm_page_mkwrite(struct vm_area_struct *vma,
 	f2fs_balance_fs(sbi, dn.node_changed);
 
 	file_update_time(vma->vm_file);
-	down_read(&F2FS_I(inode)->i_mmap_sem);
 	lock_page(page);
 	if (unlikely(page->mapping != inode->i_mapping ||
 			page_offset(page) > i_size_read(inode) ||
 			!PageUptodate(page))) {
 		unlock_page(page);
 		err = -EFAULT;
-		goto out_sem;
+		goto out;
 	}
 
 	/*
@@ -105,27 +87,23 @@ static int f2fs_vm_page_mkwrite(struct vm_area_struct *vma,
 	if (!PageUptodate(page))
 		SetPageUptodate(page);
 
-	f2fs_update_iostat(sbi, APP_MAPPED_IO, F2FS_BLKSIZE);
-
 	trace_f2fs_vm_page_mkwrite(page, DATA);
 mapped:
 	/* fill the page */
 	f2fs_wait_on_page_writeback(page, DATA, false);
 
 	/* wait for GCed encrypted page writeback */
-	f2fs_wait_on_block_writeback(inode, dn.data_blkaddr);
+	if (f2fs_encrypted_inode(inode) && S_ISREG(inode->i_mode))
+		f2fs_wait_on_encrypted_page_writeback(sbi, dn.data_blkaddr);
 
-out_sem:
-	up_read(&F2FS_I(inode)->i_mmap_sem);
 out:
 	sb_end_pagefault(inode->i_sb);
 	f2fs_update_time(sbi, REQ_TIME);
-err:
 	return block_page_mkwrite_return(err);
 }
 
 static const struct vm_operations_struct f2fs_file_vm_ops = {
-	.fault		= f2fs_filemap_fault,
+	.fault		= filemap_fault,
 	.map_pages	= filemap_map_pages,
 	.page_mkwrite	= f2fs_vm_page_mkwrite,
 };
@@ -140,34 +118,40 @@ static int get_parent_ino(struct inode *inode, nid_t *pino)
 	if (!dentry)
 		return 0;
 
+	if (update_dent_inode(inode, inode, &dentry->d_name)) {
+		dput(dentry);
+		return 0;
+	}
+
 	*pino = parent_ino(dentry);
 	dput(dentry);
 	return 1;
 }
 
-static inline enum cp_reason_type need_do_checkpoint(struct inode *inode)
+static inline bool need_do_checkpoint(struct inode *inode)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
-	enum cp_reason_type cp_reason = CP_NO_NEEDED;
+	bool need_cp = false;
 
-	if (!S_ISREG(inode->i_mode))
-		cp_reason = CP_NON_REGULAR;
-	else if (inode->i_nlink != 1)
-		cp_reason = CP_HARDLINK;
+	if (!S_ISREG(inode->i_mode) || inode->i_nlink != 1)
+		need_cp = true;
 	else if (is_sbi_flag_set(sbi, SBI_NEED_CP))
-		cp_reason = CP_SB_NEED_CP;
+		need_cp = true;
+	else if (S_ISDIR(inode->i_mode) &&
+			is_sbi_flag_set(sbi, SBI_NEED_CP_DIR))
+		need_cp = true;
 	else if (file_wrong_pino(inode))
-		cp_reason = CP_WRONG_PINO;
+		need_cp = true;
 	else if (!space_for_roll_forward(sbi))
-		cp_reason = CP_NO_SPC_ROLL;
+		need_cp = true;
 	else if (!is_checkpointed_node(sbi, F2FS_I(inode)->i_pino))
-		cp_reason = CP_NODE_NEED_CP;
+		need_cp = true;
 	else if (test_opt(sbi, FASTBOOT))
-		cp_reason = CP_FASTBOOT_MODE;
+		need_cp = true;
 	else if (sbi->active_logs == 2)
-		cp_reason = CP_SPEC_LOG_NUM;
+		need_cp = true;
 
-	return cp_reason;
+	return need_cp;
 }
 
 static bool need_inode_page_update(struct f2fs_sb_info *sbi, nid_t ino)
@@ -195,6 +179,72 @@ static void try_to_fix_pino(struct inode *inode)
 	up_write(&fi->i_sem);
 }
 
+static int f2fs_update_inode_meta(struct f2fs_sb_info *sbi, nid_t pino,
+			struct list_head *fsync_list,
+			struct radix_tree_root *fsync_root)
+{
+	struct list_head *head = &sbi->inode_list[DIRTY_META];
+	struct inode *inode;
+	struct f2fs_inode_info *fi;
+	struct ino_entry *entry, *tmp, *e;
+	int err = 0;
+
+	spin_lock(&sbi->inode_lock[DIRTY_META]);
+	list_for_each_entry(fi, head, gdirty_list) {
+		if (fi->i_pino != pino) {
+			continue;
+		}
+		entry = kmem_cache_alloc(ino_entry_slab, GFP_ATOMIC);
+		if (!entry) {
+			spin_unlock(&sbi->inode_lock[DIRTY_META]);
+			return -ENOMEM;
+		}
+		entry->ino = fi->vfs_inode.i_ino;
+		list_add_tail(&entry->list, fsync_list);
+	}
+	spin_unlock(&sbi->inode_lock[DIRTY_META]);
+
+	list_for_each_entry_safe(entry, tmp, fsync_list, list) {
+		inode = f2fs_iget(sbi->sb, entry->ino);
+		if (IS_ERR(inode)) {
+			if (PTR_ERR(inode) == -ENOMEM) {
+				err = -ENOMEM;
+				break;
+			}
+			list_del(&entry->list);
+			kmem_cache_free(ino_entry_slab, entry);
+			continue;
+		}
+
+		update_inode_page(inode);
+		iput(inode);
+
+		e = radix_tree_lookup(fsync_root, entry->ino);
+		if (!e) {
+			e = entry;
+			err = radix_tree_insert(fsync_root, entry->ino, e);
+			if (err)
+				break;
+		}
+	}
+
+	return err;
+}
+
+static void destroy_fsync_inodes(struct list_head *fsync_list,
+			struct radix_tree_root *fsync_root)
+{
+	struct ino_entry *entry, *tmp, *e;
+
+	list_for_each_entry_safe(entry, tmp, fsync_list, list) {
+		list_del(&entry->list);
+		e = radix_tree_lookup(fsync_root, entry->ino);
+		if (e)
+			radix_tree_delete(fsync_root, entry->ino);
+		kmem_cache_free(ino_entry_slab, entry);
+	}
+}
+
 static int f2fs_do_sync_file(struct file *file, loff_t start, loff_t end,
 						int datasync, bool atomic)
 {
@@ -202,7 +252,10 @@ static int f2fs_do_sync_file(struct file *file, loff_t start, loff_t end,
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	nid_t ino = inode->i_ino;
 	int ret = 0;
-	enum cp_reason_type cp_reason = 0;
+	bool need_cp = false;
+	struct list_head fsync_list;
+	struct radix_tree_root fsync_root;
+	struct ino_entry *entry;
 	struct writeback_control wbc = {
 		.sync_mode = WB_SYNC_ALL,
 		.nr_to_write = LONG_MAX,
@@ -219,6 +272,9 @@ static int f2fs_do_sync_file(struct file *file, loff_t start, loff_t end,
 	pgcache_log_path(BIT_FSYNC_SYSCALL_DUMP, &(file->f_path),
 			"f2fs sync file start");
 
+	INIT_LIST_HEAD(&fsync_list);
+	INIT_RADIX_TREE(&fsync_root, GFP_NOFS);
+
 	fsync_begin = local_clock();
 	/* if fdatasync is triggered, let's do in-place-update */
 	if (datasync || get_dirty_pages(inode) <= SM_I(sbi)->min_fsync_blocks)
@@ -228,7 +284,7 @@ static int f2fs_do_sync_file(struct file *file, loff_t start, loff_t end,
 	clear_inode_flag(inode, FI_NEED_IPU);
 
 	if (ret) {
-		trace_f2fs_sync_file_exit(inode, cp_reason, datasync, ret);
+		trace_f2fs_sync_file_exit(inode, need_cp, datasync, ret);
 		return ret;
 	}
 
@@ -259,10 +315,11 @@ go_write:
 	 * sudden-power-off.
 	 */
 	down_read(&F2FS_I(inode)->i_sem);
-	cp_reason = need_do_checkpoint(inode);
+	need_cp = need_do_checkpoint(inode);
 	up_read(&F2FS_I(inode)->i_sem);
 
-	if (cp_reason) {
+write_cp:
+	if (need_cp) {
 		/* all the dirty node pages should be flushed for POR */
 		cp_begin = local_clock();
 		ret = f2fs_sync_fs(inode->i_sb, 1);
@@ -279,7 +336,14 @@ go_write:
 	}
 sync_nodes:
 	sync_node_begin = local_clock();
-	ret = fsync_node_pages(sbi, inode, &wbc, atomic);
+	if (!atomic && S_ISDIR(inode->i_mode)) {
+		ret = f2fs_update_inode_meta(sbi, ino, &fsync_list, &fsync_root);
+		if (ret) {
+			need_cp = true;
+			goto write_cp;
+		}
+	}
+	ret = fsync_node_pages(sbi, inode, &wbc, atomic, &fsync_root);
 	if (ret)
 		goto out;
 
@@ -295,38 +359,37 @@ sync_nodes:
 		goto sync_nodes;
 	}
 
-	/*
-	 * If it's atomic_write, it's just fine to keep write ordering. So
-	 * here we don't need to wait for node write completion, since we use
-	 * node chain which serializes node blocks. If one of node writes are
-	 * reordered, we can see simply broken chain, resulting in stopping
-	 * roll-forward recovery. It means we'll recover all or none node blocks
-	 * given fsync mark.
-	 */
-	if (!atomic) {
-		ret = wait_on_node_pages_writeback(sbi, ino);
+	list_for_each_entry(entry, &fsync_list, list) {
+		ret = wait_on_node_pages_writeback(sbi, entry->ino);
 		if (ret)
 			goto out;
 	}
+	ret = wait_on_node_pages_writeback(sbi, ino);
+	if (ret)
+		goto out;
 
 	/* once recovery info is written, don't need to tack this */
 	remove_ino_entry(sbi, ino, APPEND_INO);
 	clear_inode_flag(inode, FI_APPEND_WRITE);
 	sync_node_end = local_clock();
 flush_out:
+	remove_ino_entry(sbi, ino, UPDATE_INO);
+	clear_inode_flag(inode, FI_UPDATE_WRITE);
+	if (S_ISDIR(inode->i_mode) && !is_sbi_flag_set(sbi, SBI_IS_DIRTY))
+		goto out;
+#ifdef CONFIG_F2FS_CLOSE_FUA
+	if (!atomic || blk_flush_async_support(sbi->sb->s_bdev)) {
+#else
 	if (!atomic) {
+#endif
 		flush_begin = local_clock();
-		ret = f2fs_issue_flush(sbi, inode->i_ino);
+		ret = f2fs_issue_flush(sbi);
 		flush_end = local_clock();
-	}
-	if (!ret) {
-		remove_ino_entry(sbi, ino, UPDATE_INO);
-		clear_inode_flag(inode, FI_UPDATE_WRITE);
-		remove_ino_entry(sbi, ino, FLUSH_INO);
 	}
 	f2fs_update_time(sbi, REQ_TIME);
 out:
-	trace_f2fs_sync_file_exit(inode, cp_reason, datasync, ret);
+	destroy_fsync_inodes(&fsync_list, &fsync_root);
+	trace_f2fs_sync_file_exit(inode, need_cp, datasync, ret);
 	pgcache_log_path(BIT_FSYNC_SYSCALL_DUMP, &(file->f_path),
 			"f2fs sync file end");
 	f2fs_trace_ios(NULL, 1);
@@ -338,7 +401,7 @@ out:
 		else if (S_ISDIR(inode->i_mode))
 			inc_bd_val(sbi, fsync_dir_cnt, 1);
 		inc_bd_val(sbi, fsync_time, fsync_end - fsync_begin);
-		max_bd_val(sbi, max_fsync_time, fsync_end - fsync_begin);
+		max_bd_val(sbi, fsync_time, fsync_end - fsync_begin);
 		inc_bd_val(sbi, fsync_wr_file_time, wr_file_end - fsync_begin);
 		max_bd_val(sbi, max_fsync_wr_file_time, wr_file_end - fsync_begin);
 		inc_bd_val(sbi, fsync_cp_time, cp_end - cp_begin);
@@ -358,8 +421,6 @@ out:
 
 int f2fs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 {
-	if (unlikely(f2fs_cp_error(F2FS_I_SB(file_inode(file)))))
-		return -EIO;
 	return f2fs_do_sync_file(file, start, end, datasync, false);
 }
 
@@ -381,13 +442,13 @@ static pgoff_t __get_first_dirty_index(struct address_space *mapping,
 	return pgofs;
 }
 
-static bool __found_offset(struct f2fs_sb_info *sbi, block_t blkaddr,
-				pgoff_t dirty, pgoff_t pgofs, int whence)
+static bool __found_offset(block_t blkaddr, pgoff_t dirty, pgoff_t pgofs,
+							int whence)
 {
 	switch (whence) {
 	case SEEK_DATA:
 		if ((blkaddr == NEW_ADDR && dirty == pgofs) ||
-			is_valid_data_blkaddr(sbi, blkaddr))
+			(blkaddr != NEW_ADDR && blkaddr != NULL_ADDR))
 			return true;
 		break;
 	case SEEK_HOLE:
@@ -447,18 +508,9 @@ static loff_t f2fs_seek_block(struct file *file, loff_t offset, int whence)
 				dn.ofs_in_node++, pgofs++,
 				data_ofs = (loff_t)pgofs << PAGE_SHIFT) {
 			block_t blkaddr;
-			blkaddr = datablock_addr(dn.inode,
-					dn.node_page, dn.ofs_in_node);
+			blkaddr = datablock_addr(dn.node_page, dn.ofs_in_node);
 
-			if (__is_valid_data_blkaddr(blkaddr) &&
-				!f2fs_is_valid_blkaddr(F2FS_I_SB(inode),
-						blkaddr, DATA_GENERIC)) {
-				f2fs_put_dnode(&dn);
-				goto fail;
-			}
-
-			if (__found_offset(F2FS_I_SB(inode), blkaddr, dirty,
-							pgofs, whence)) {
+			if (__found_offset(blkaddr, dirty, pgofs, whence)) {
 				f2fs_put_dnode(&dn);
 				goto found;
 			}
@@ -504,8 +556,13 @@ static int f2fs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	struct inode *inode = file_inode(file);
 	int err;
 
-	if (unlikely(f2fs_cp_error(F2FS_I_SB(inode))))
-		return -EIO;
+	if (f2fs_encrypted_inode(inode)) {
+		err = fscrypt_get_encryption_info(inode);
+		if (err)
+			return 0;
+		if (!f2fs_encrypted_inode(inode))
+			return -ENOKEY;
+	}
 
 	/* we don't need to use inline_data strictly */
 	err = f2fs_convert_inline_inode(inode);
@@ -519,10 +576,11 @@ static int f2fs_file_mmap(struct file *file, struct vm_area_struct *vma)
 
 static int f2fs_file_open(struct inode *inode, struct file *filp)
 {
+	int ret = generic_file_open(inode, filp);
 	struct dentry *dir;
 
-	if (f2fs_encrypted_inode(inode)) {
-		int ret = fscrypt_get_encryption_info(inode);
+	if (!ret && f2fs_encrypted_inode(inode)) {
+		ret = fscrypt_get_encryption_info(inode);
 		if (ret)
 			return -EACCES;
 		if (!fscrypt_has_encryption_key(inode))
@@ -535,7 +593,7 @@ static int f2fs_file_open(struct inode *inode, struct file *filp)
 		return -EPERM;
 	}
 	dput(dir);
-	return dquot_file_open(inode, filp);
+	return ret;
 }
 
 int truncate_data_blocks_range(struct dnode_of_data *dn, int count)
@@ -544,13 +602,9 @@ int truncate_data_blocks_range(struct dnode_of_data *dn, int count)
 	struct f2fs_node *raw_node;
 	int nr_free = 0, ofs = dn->ofs_in_node, len = count;
 	__le32 *addr;
-	int base = 0;
-
-	if (IS_INODE(dn->node_page) && f2fs_has_extra_attr(dn->inode))
-		base = get_extra_isize(dn->inode);
 
 	raw_node = F2FS_NODE(dn->node_page);
-	addr = blkaddr_in_node(raw_node) + base + ofs;
+	addr = blkaddr_in_node(raw_node) + ofs;
 
 	for (; count > 0; count--, addr++, dn->ofs_in_node++) {
 		block_t blkaddr = le32_to_cpu(*addr);
@@ -559,11 +613,6 @@ int truncate_data_blocks_range(struct dnode_of_data *dn, int count)
 
 		dn->data_blkaddr = NULL_ADDR;
 		set_data_blkaddr(dn);
-
-		if (__is_valid_data_blkaddr(blkaddr) &&
-			!f2fs_is_valid_blkaddr(sbi, blkaddr, DATA_GENERIC))
-			continue;
-
 		invalidate_blocks(sbi, blkaddr);
 		if (dn->ofs_in_node == 0 && IS_INODE(dn->node_page))
 			clear_inode_flag(dn->inode, FI_FIRST_BLOCK_WRITTEN);
@@ -619,16 +668,14 @@ static int truncate_partial_data_page(struct inode *inode, u64 from,
 truncate_out:
 	f2fs_wait_on_page_writeback(page, DATA, true);
 	zero_user(page, offset, PAGE_SIZE - offset);
-
-	/* An encrypted inode should have a key and truncate the last page. */
-	f2fs_bug_on(F2FS_I_SB(inode), cache_only && f2fs_encrypted_inode(inode));
-	if (!cache_only)
+	if (!cache_only || !f2fs_encrypted_inode(inode) ||
+					!S_ISREG(inode->i_mode))
 		set_page_dirty(page);
 	f2fs_put_page(page, 1);
 	return 0;
 }
 
-int truncate_blocks(struct inode *inode, u64 from, bool lock, bool buf_write)
+int truncate_blocks(struct inode *inode, u64 from, bool lock)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	unsigned int blocksize = inode->i_sb->s_blocksize;
@@ -637,8 +684,6 @@ int truncate_blocks(struct inode *inode, u64 from, bool lock, bool buf_write)
 	int count = 0, err = 0;
 	struct page *ipage;
 	bool truncate_page = false;
-	int flag = buf_write ? F2FS_GET_BLOCK_PRE_AIO : F2FS_GET_BLOCK_PRE_DIO;
-	bool lock2 = false;
 
 	trace_f2fs_truncate_blocks_enter(inode, from);
 
@@ -648,7 +693,7 @@ int truncate_blocks(struct inode *inode, u64 from, bool lock, bool buf_write)
 		goto free_partial;
 
 	if (lock)
-		lock2 = __do_map_lock(sbi, flag, true, false);
+		f2fs_lock_op(sbi);
 
 	ipage = get_node_page(sbi, inode->i_ino);
 	if (IS_ERR(ipage)) {
@@ -657,7 +702,9 @@ int truncate_blocks(struct inode *inode, u64 from, bool lock, bool buf_write)
 	}
 
 	if (f2fs_has_inline_data(inode)) {
-		truncate_inline_inode(inode, ipage, from);
+		truncate_inline_inode(ipage, from);
+		if (from == 0)
+			clear_inode_flag(inode, FI_DATA_EXIST);
 		f2fs_put_page(ipage, 1);
 		truncate_page = true;
 		goto out;
@@ -686,7 +733,7 @@ free_next:
 	err = truncate_inode_blocks(inode, free_from);
 out:
 	if (lock)
-		(void)__do_map_lock(sbi, flag, false, lock2);
+		f2fs_unlock_op(sbi);
 free_partial:
 	/* lastly zero out the first data page */
 	if (!err)
@@ -700,21 +747,12 @@ int f2fs_truncate(struct inode *inode)
 {
 	int err;
 
-	if (unlikely(f2fs_cp_error(F2FS_I_SB(inode))))
-		return -EIO;
-
 	if (!(S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
 				S_ISLNK(inode->i_mode)))
 		return 0;
 
 	trace_f2fs_truncate(inode);
 
-#ifdef CONFIG_F2FS_FAULT_INJECTION
-	if (time_to_inject(F2FS_I_SB(inode), FAULT_TRUNCATE)) {
-		f2fs_show_injection_info(FAULT_TRUNCATE);
-		return -EIO;
-	}
-#endif
 	/* we should check inline_data size */
 	if (!f2fs_may_inline_data(inode)) {
 		err = f2fs_convert_inline_inode(inode);
@@ -722,7 +760,7 @@ int f2fs_truncate(struct inode *inode)
 			return err;
 	}
 
-	err = truncate_blocks(inode, i_size_read(inode), true, false);
+	err = truncate_blocks(inode, i_size_read(inode), true);
 	if (err)
 		return err;
 
@@ -732,17 +770,11 @@ int f2fs_truncate(struct inode *inode)
 }
 
 int f2fs_getattr(struct vfsmount *mnt,
-			struct dentry *dentry, struct kstat *stat)
+			 struct dentry *dentry, struct kstat *stat)
 {
 	struct inode *inode = d_inode(dentry);
-
 	generic_fillattr(inode, stat);
-
-	/* we need to show initial sectors used for inline_data/dentries */
-	if ((S_ISREG(inode->i_mode) && f2fs_has_inline_data(inode)) ||
-					f2fs_has_inline_dentry(inode))
-		stat->blocks += (stat->size + 511) >> 9;
-
+	stat->blocks <<= 3;
 	return 0;
 }
 
@@ -781,72 +813,28 @@ int f2fs_setattr(struct dentry *dentry, struct iattr *attr)
 	struct inode *inode = d_inode(dentry);
 	int err;
 	bool size_changed = false;
-	bool to_smaller;
 
-	if (unlikely(f2fs_cp_error(F2FS_I_SB(inode))))
-		return -EIO;
-
-	err = setattr_prepare(dentry, attr);
+	err = inode_change_ok(inode, attr);
 	if (err)
 		return err;
 
-	if (is_quota_modification(inode, attr)) {
-		err = f2fs_dquot_initialize(inode);
-		if (err)
-			return err;
-	}
-	if ((attr->ia_valid & ATTR_UID &&
-		!uid_eq(attr->ia_uid, inode->i_uid)) ||
-		(attr->ia_valid & ATTR_GID &&
-		!gid_eq(attr->ia_gid, inode->i_gid))) {
-		f2fs_lock_op(F2FS_I_SB(inode));
-		err = f2fs_dquot_transfer(inode, attr);
-		if (err) {
-			set_sbi_flag(F2FS_I_SB(inode),
-					SBI_QUOTA_NEED_REPAIR);
-			f2fs_unlock_op(F2FS_I_SB(inode));
-			return err;
-		}
-		/*
-		 * update uid/gid under lock_op(), so that dquot and inode can
-		 * be updated atomically.
-		 */
-		if (attr->ia_valid & ATTR_UID)
-			inode->i_uid = attr->ia_uid;
-		if (attr->ia_valid & ATTR_GID)
-			inode->i_gid = attr->ia_gid;
-		f2fs_mark_inode_dirty_sync(inode, true);
-		f2fs_unlock_op(F2FS_I_SB(inode));
-	}
-
 	if (attr->ia_valid & ATTR_SIZE) {
-		if (f2fs_encrypted_inode(inode)) {
-			err = fscrypt_get_encryption_info(inode);
+		if (f2fs_encrypted_inode(inode) &&
+				fscrypt_get_encryption_info(inode))
+			return -EACCES;
+
+		if (attr->ia_size <= i_size_read(inode)) {
+			truncate_setsize(inode, attr->ia_size);
+			err = f2fs_truncate(inode);
 			if (err)
 				return err;
-			if (!fscrypt_has_encryption_key(inode))
-				return -ENOKEY;
-		}
+		} else {
+			/*
+			 * do not trim all blocks after i_size if target size is
+			 * larger than i_size.
+			 */
+			truncate_setsize(inode, attr->ia_size);
 
-		to_smaller = (attr->ia_size <= i_size_read(inode));
-
-		down_write(&F2FS_I(inode)->dio_rwsem[WRITE]);
-		down_write(&F2FS_I(inode)->i_mmap_sem);
-
-		truncate_setsize(inode, attr->ia_size);
-
-		if (to_smaller)
-			err = f2fs_truncate(inode);
-		/*
-		 * do not trim all blocks after i_size if target size is
-		 * larger than i_size.
-		 */
-		up_write(&F2FS_I(inode)->i_mmap_sem);
-		up_write(&F2FS_I(inode)->dio_rwsem[WRITE]);
-		if (err)
-			return err;
-
-		if (!to_smaller) {
 			/* should convert inline inode here */
 			if (!f2fs_may_inline_data(inode)) {
 				err = f2fs_convert_inline_inode(inode);
@@ -855,10 +843,6 @@ int f2fs_setattr(struct dentry *dentry, struct iattr *attr)
 			}
 			inode->i_mtime = inode->i_ctime = current_time(inode);
 		}
-
-		down_write(&F2FS_I(inode)->i_sem);
-		F2FS_I(inode)->last_disk_size = i_size_read(inode);
-		up_write(&F2FS_I(inode)->i_sem);
 
 		size_changed = true;
 	}
@@ -888,7 +872,10 @@ const struct inode_operations f2fs_file_inode_operations = {
 	.get_acl	= f2fs_get_acl,
 	.set_acl	= f2fs_set_acl,
 #ifdef CONFIG_F2FS_FS_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
 	.listxattr	= f2fs_listxattr,
+	.removexattr	= generic_removexattr,
 #endif
 	.fiemap		= f2fs_fiemap,
 };
@@ -992,16 +979,12 @@ static int punch_hole(struct inode *inode, loff_t offset, loff_t len)
 
 			blk_start = (loff_t)pg_start << PAGE_SHIFT;
 			blk_end = (loff_t)pg_end << PAGE_SHIFT;
-			down_write(&F2FS_I(inode)->dio_rwsem[WRITE]);
-			down_write(&F2FS_I(inode)->i_mmap_sem);
 			truncate_inode_pages_range(mapping, blk_start,
 					blk_end - 1);
 
 			f2fs_lock_op(sbi);
 			ret = truncate_hole(inode, pg_start, pg_end);
 			f2fs_unlock_op(sbi);
-			up_write(&F2FS_I(inode)->i_mmap_sem);
-			up_write(&F2FS_I(inode)->dio_rwsem[WRITE]);
 		}
 	}
 
@@ -1032,8 +1015,7 @@ next_dnode:
 	done = min((pgoff_t)ADDRS_PER_PAGE(dn.node_page, inode) -
 							dn.ofs_in_node, len);
 	for (i = 0; i < done; i++, blkaddr++, do_replace++, dn.ofs_in_node++) {
-		*blkaddr = datablock_addr(dn.inode,
-					dn.node_page, dn.ofs_in_node);
+		*blkaddr = datablock_addr(dn.node_page, dn.ofs_in_node);
 		if (!is_checkpointed_data(sbi, *blkaddr)) {
 
 			if (test_opt(sbi, LFS)) {
@@ -1109,15 +1091,15 @@ static int __clone_blkaddrs(struct inode *src_inode, struct inode *dst_inode,
 				ADDRS_PER_PAGE(dn.node_page, dst_inode) -
 						dn.ofs_in_node, len - i);
 			do {
-				dn.data_blkaddr = datablock_addr(dn.inode,
-						dn.node_page, dn.ofs_in_node);
+				dn.data_blkaddr = datablock_addr(dn.node_page,
+								dn.ofs_in_node);
 				truncate_data_blocks_range(&dn, 1);
 
 				if (do_replace[i]) {
 					f2fs_i_blocks_write(src_inode,
-							1, false, false);
+								1, false);
 					f2fs_i_blocks_write(dst_inode,
-							1, true, false);
+								1, true);
 					f2fs_replace_block(sbi, &dn, dn.data_blkaddr,
 					blkaddr[i], ni.version, true, false);
 
@@ -1169,11 +1151,11 @@ static int __exchange_data_block(struct inode *src_inode,
 	while (len) {
 		olen = min((pgoff_t)4 * ADDRS_PER_BLOCK, len);
 
-		src_blkaddr = kvzalloc(sizeof(block_t) * olen, GFP_KERNEL);
+		src_blkaddr = f2fs_kvzalloc(sizeof(block_t) * olen, GFP_KERNEL);
 		if (!src_blkaddr)
 			return -ENOMEM;
 
-		do_replace = kvzalloc(sizeof(int) * olen, GFP_KERNEL);
+		do_replace = f2fs_kvzalloc(sizeof(int) * olen, GFP_KERNEL);
 		if (!do_replace) {
 			kvfree(src_blkaddr);
 			return -ENOMEM;
@@ -1241,20 +1223,16 @@ static int f2fs_collapse_range(struct inode *inode, loff_t offset, loff_t len)
 	pg_start = offset >> PAGE_SHIFT;
 	pg_end = (offset + len) >> PAGE_SHIFT;
 
-	down_write(&F2FS_I(inode)->i_mmap_sem);
 	/* write out all dirty pages from offset */
 	ret = filemap_write_and_wait_range(inode->i_mapping, offset, LLONG_MAX);
 	if (ret)
-		goto out;
-
-	/* avoid gc operation during block exchange */
-	down_write(&F2FS_I(inode)->dio_rwsem[WRITE]);
+		return ret;
 
 	truncate_pagecache(inode, offset);
 
 	ret = f2fs_do_collapse(inode, pg_start, pg_end);
 	if (ret)
-		goto out_unlock;
+		return ret;
 
 	/* write out all moved pages, if possible */
 	filemap_write_and_wait_range(inode->i_mapping, offset, LLONG_MAX);
@@ -1263,13 +1241,10 @@ static int f2fs_collapse_range(struct inode *inode, loff_t offset, loff_t len)
 	new_size = i_size_read(inode) - len;
 	truncate_pagecache(inode, new_size);
 
-	ret = truncate_blocks(inode, new_size, true, false);
+	ret = truncate_blocks(inode, new_size, true);
 	if (!ret)
 		f2fs_i_size_write(inode, new_size);
-out_unlock:
-	up_write(&F2FS_I(inode)->dio_rwsem[WRITE]);
-out:
-	up_write(&F2FS_I(inode)->i_mmap_sem);
+
 	return ret;
 }
 
@@ -1283,8 +1258,7 @@ static int f2fs_do_zero_range(struct dnode_of_data *dn, pgoff_t start,
 	int ret;
 
 	for (; index < end; index++, dn->ofs_in_node++) {
-		if (datablock_addr(dn->inode, dn->node_page,
-					dn->ofs_in_node) == NULL_ADDR)
+		if (datablock_addr(dn->node_page, dn->ofs_in_node) == NULL_ADDR)
 			count++;
 	}
 
@@ -1295,8 +1269,8 @@ static int f2fs_do_zero_range(struct dnode_of_data *dn, pgoff_t start,
 
 	dn->ofs_in_node = ofs_in_node;
 	for (index = start; index < end; index++, dn->ofs_in_node++) {
-		dn->data_blkaddr = datablock_addr(dn->inode,
-					dn->node_page, dn->ofs_in_node);
+		dn->data_blkaddr =
+				datablock_addr(dn->node_page, dn->ofs_in_node);
 		/*
 		 * reserve_new_blocks will not guarantee entire block
 		 * allocation.
@@ -1334,12 +1308,10 @@ static int f2fs_zero_range(struct inode *inode, loff_t offset, loff_t len,
 	ret = f2fs_convert_inline_inode(inode);
 	if (ret)
 		return ret;
-	down_write(&F2FS_I(inode)->dio_rwsem[WRITE]);
 
-	down_write(&F2FS_I(inode)->i_mmap_sem);
 	ret = filemap_write_and_wait_range(mapping, offset, offset + len - 1);
 	if (ret)
-		goto out_sem;
+		return ret;
 
 	truncate_pagecache_range(inode, offset, offset + len - 1);
 
@@ -1353,15 +1325,17 @@ static int f2fs_zero_range(struct inode *inode, loff_t offset, loff_t len,
 		ret = fill_zero(inode, pg_start, off_start,
 						off_end - off_start);
 		if (ret)
-			goto out_sem;
+			return ret;
 
+		if (offset + len > new_size)
+			new_size = offset + len;
 		new_size = max_t(loff_t, new_size, offset + len);
 	} else {
 		if (off_start) {
 			ret = fill_zero(inode, pg_start++, off_start,
 						PAGE_SIZE - off_start);
 			if (ret)
-				goto out_sem;
+				return ret;
 
 			new_size = max_t(loff_t, new_size,
 					(loff_t)pg_start << PAGE_SHIFT);
@@ -1410,9 +1384,6 @@ static int f2fs_zero_range(struct inode *inode, loff_t offset, loff_t len,
 out:
 	if (!(mode & FALLOC_FL_KEEP_SIZE) && i_size_read(inode) < new_size)
 		f2fs_i_size_write(inode, new_size);
-out_sem:
-	up_write(&F2FS_I(inode)->i_mmap_sem);
-	up_write(&F2FS_I(inode)->dio_rwsem[WRITE]);
 
 	return ret;
 }
@@ -1425,9 +1396,8 @@ static int f2fs_insert_range(struct inode *inode, loff_t offset, loff_t len)
 	int ret = 0;
 
 	new_size = i_size_read(inode) + len;
-	ret = inode_newsize_ok(inode, new_size);
-	if (ret)
-		return ret;
+	if (new_size > inode->i_sb->s_maxbytes)
+		return -EFBIG;
 
 	if (offset >= i_size_read(inode))
 		return -EINVAL;
@@ -1442,18 +1412,14 @@ static int f2fs_insert_range(struct inode *inode, loff_t offset, loff_t len)
 
 	f2fs_balance_fs(sbi, true);
 
-	down_write(&F2FS_I(inode)->i_mmap_sem);
-	ret = truncate_blocks(inode, i_size_read(inode), true, false);
+	ret = truncate_blocks(inode, i_size_read(inode), true);
 	if (ret)
-		goto out;
+		return ret;
 
 	/* write out all dirty pages from offset */
 	ret = filemap_write_and_wait_range(inode->i_mapping, offset, LLONG_MAX);
 	if (ret)
-		goto out;
-
-	/* avoid gc operation during block exchange */
-	down_write(&F2FS_I(inode)->dio_rwsem[WRITE]);
+		return ret;
 
 	truncate_pagecache(inode, offset);
 
@@ -1482,10 +1448,6 @@ static int f2fs_insert_range(struct inode *inode, loff_t offset, loff_t len)
 
 	if (!ret)
 		f2fs_i_size_write(inode, new_size);
-
-	up_write(&F2FS_I(inode)->dio_rwsem[WRITE]);
-out:
-	up_write(&F2FS_I(inode)->i_mmap_sem);
 	return ret;
 }
 
@@ -1533,12 +1495,8 @@ static int expand_inode_data(struct inode *inode, loff_t offset,
 		new_size = ((loff_t)pg_end << PAGE_SHIFT) + off_end;
 	}
 
-	if (new_size > i_size_read(inode)) {
-		if (mode & FALLOC_FL_KEEP_SIZE)
-			file_set_keep_isize(inode);
-		else
-			f2fs_i_size_write(inode, new_size);
-	}
+	if (!(mode & FALLOC_FL_KEEP_SIZE) && i_size_read(inode) < new_size)
+		f2fs_i_size_write(inode, new_size);
 
 	return err;
 }
@@ -1548,9 +1506,6 @@ static long f2fs_fallocate(struct file *file, int mode,
 {
 	struct inode *inode = file_inode(file);
 	long ret = 0;
-
-	if (unlikely(f2fs_cp_error(F2FS_I_SB(inode))))
-		return -EIO;
 
 	/* f2fs only support ->fallocate for regular file */
 	if (!S_ISREG(inode->i_mode))
@@ -1585,6 +1540,8 @@ static long f2fs_fallocate(struct file *file, int mode,
 	if (!ret) {
 		inode->i_mtime = inode->i_ctime = current_time(inode);
 		f2fs_mark_inode_dirty_sync(inode, false);
+		if (mode & FALLOC_FL_KEEP_SIZE)
+			file_set_keep_isize(inode);
 		f2fs_update_time(F2FS_I_SB(inode), REQ_TIME);
 	}
 
@@ -1610,7 +1567,6 @@ static int f2fs_release_file(struct inode *inode, struct file *filp)
 		drop_inmem_pages(inode);
 	if (f2fs_is_volatile_file(inode)) {
 		clear_inode_flag(inode, FI_VOLATILE_FILE);
-		stat_dec_volatile_write(inode);
 		set_inode_flag(inode, FI_DROP_CACHE);
 		filemap_fdatawrite(inode->i_mapping);
 		clear_inode_flag(inode, FI_DROP_CACHE);
@@ -1618,27 +1574,24 @@ static int f2fs_release_file(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static int f2fs_file_flush(struct file *file, fl_owner_t id)
-{
-	struct inode *inode = file_inode(file);
+#define F2FS_REG_FLMASK		(~(FS_DIRSYNC_FL | FS_TOPDIR_FL))
+#define F2FS_OTHER_FLMASK	(FS_NODUMP_FL | FS_NOATIME_FL | FS_UNRM_FL)
 
-	/*
-	 * If the process doing a transaction is crashed, we should do
-	 * roll-back. Otherwise, other reader/write can see corrupted database
-	 * until all the writers close its file. Since this should be done
-	 * before dropping file lock, it needs to do in ->flush.
-	 */
-	if (f2fs_is_atomic_file(inode) &&
-			F2FS_I(inode)->inmem_task == current)
-		drop_inmem_pages(inode);
-	return 0;
+static inline __u32 f2fs_mask_flags(umode_t mode, __u32 flags)
+{
+	if (S_ISDIR(mode))
+		return flags;
+	else if (S_ISREG(mode))
+		return flags & F2FS_REG_FLMASK;
+	else
+		return flags & F2FS_OTHER_FLMASK;
 }
 
 static int f2fs_ioc_getflags(struct file *filp, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
 	struct f2fs_inode_info *fi = F2FS_I(inode);
-	unsigned int flags = fi->i_flags & F2FS_FL_USER_VISIBLE;
+	unsigned int flags = fi->i_flags & FS_FL_USER_VISIBLE;
 	return put_user(flags, (int __user *)arg);
 }
 
@@ -1660,34 +1613,28 @@ static int f2fs_ioc_setflags(struct file *filp, unsigned long arg)
 	if (ret)
 		return ret;
 
-	inode_lock(inode);
-
-	/* Is it quota file? Do not allow user to mess with it */
-	if (IS_NOQUOTA(inode)) {
-		ret = -EPERM;
-		goto unlock_out;
-	}
-
 	flags = f2fs_mask_flags(inode->i_mode, flags);
+
+	inode_lock(inode);
 
 	oldflags = fi->i_flags;
 
 	if ((flags ^ oldflags) & (FS_APPEND_FL | FS_IMMUTABLE_FL)) {
 		if (!capable(CAP_LINUX_IMMUTABLE)) {
+			inode_unlock(inode);
 			ret = -EPERM;
-			goto unlock_out;
+			goto out;
 		}
 	}
 
-	flags = flags & F2FS_FL_USER_MODIFIABLE;
-	flags |= oldflags & ~F2FS_FL_USER_MODIFIABLE;
+	flags = flags & FS_FL_USER_MODIFIABLE;
+	flags |= oldflags & ~FS_FL_USER_MODIFIABLE;
 	fi->i_flags = flags;
+	inode_unlock(inode);
 
 	inode->i_ctime = current_time(inode);
 	f2fs_set_inode_flags(inode);
-	f2fs_mark_inode_dirty_sync(inode, false);
-unlock_out:
-	inode_unlock(inode);
+out:
 	mnt_drop_write_file(filp);
 	return ret;
 }
@@ -1727,27 +1674,20 @@ static int f2fs_ioc_start_atomic_write(struct file *filp)
 		goto out;
 
 	set_inode_flag(inode, FI_ATOMIC_FILE);
-	set_inode_flag(inode, FI_HOT_DATA);
 	f2fs_update_time(F2FS_I_SB(inode), REQ_TIME);
 
 	if (!get_dirty_pages(inode))
-		goto inc_stat;
+		goto out;
 
 	f2fs_msg(F2FS_I_SB(inode)->sb, KERN_INFO,
 		"Unexpected flush for atomic writes: ino=%lu, npages=%u",
 					inode->i_ino, get_dirty_pages(inode));
 	ret = filemap_write_and_wait_range(inode->i_mapping, 0, LLONG_MAX);
-	if (ret) {
+	if (ret)
 		clear_inode_flag(inode, FI_ATOMIC_FILE);
-		clear_inode_flag(inode, FI_HOT_DATA);
-		goto out;
-	}
-
-inc_stat:
-	F2FS_I(inode)->inmem_task = current;
+out:
 	stat_inc_atomic_write(inode);
 	stat_update_max_atomic_write(inode);
-out:
 	inode_unlock(inode);
 	mnt_drop_write_file(filp);
 	return ret;
@@ -1780,11 +1720,10 @@ static int f2fs_ioc_commit_atomic_write(struct file *filp)
 		ret = f2fs_do_sync_file(filp, 0, LLONG_MAX, 0, true);
 		if (!ret) {
 			clear_inode_flag(inode, FI_ATOMIC_FILE);
-			clear_inode_flag(inode, FI_HOT_DATA);
 			stat_dec_atomic_write(inode);
 		}
 	} else {
-		ret = f2fs_do_sync_file(filp, 0, LLONG_MAX, 1, false);
+		ret = f2fs_do_sync_file(filp, 0, LLONG_MAX, 0, false);
 	}
 err_out:
 	inode_unlock(inode);
@@ -1815,9 +1754,6 @@ static int f2fs_ioc_start_volatile_write(struct file *filp)
 	ret = f2fs_convert_inline_inode(inode);
 	if (ret)
 		goto out;
-
-	stat_inc_volatile_write(inode);
-	stat_update_max_volatile_write(inode);
 
 	set_inode_flag(inode, FI_VOLATILE_FILE);
 	f2fs_update_time(F2FS_I_SB(inode), REQ_TIME);
@@ -1874,7 +1810,6 @@ static int f2fs_ioc_abort_volatile_write(struct file *filp)
 		drop_inmem_pages(inode);
 	if (f2fs_is_volatile_file(inode)) {
 		clear_inode_flag(inode, FI_VOLATILE_FILE);
-		stat_dec_volatile_write(inode);
 		ret = f2fs_do_sync_file(filp, 0, LLONG_MAX, 0, true);
 	}
 
@@ -1920,7 +1855,7 @@ static int f2fs_ioc_shutdown(struct file *filp, unsigned long arg)
 		f2fs_stop_checkpoint(sbi, false);
 		break;
 	case F2FS_GOING_DOWN_METAFLUSH:
-		sync_meta_pages(sbi, META, LONG_MAX, FS_META_IO);
+		sync_meta_pages(sbi, META, LONG_MAX);
 		f2fs_stop_checkpoint(sbi, false);
 		break;
 	default:
@@ -1959,6 +1894,10 @@ static int f2fs_ioc_fitrim(struct file *filp, unsigned long arg)
 	 * disable aligning minlen to discard granularity of device,
 	 * so that smaller discard could be issued from FITRIM interface.
 	 */
+	#if 0
+	range.minlen = max((unsigned int)range.minlen,
+				q->limits.discard_granularity);
+	#endif
 
 	f2fs_msg(sb, KERN_ALERT,
 		"%s: Recive fstrim command from userspace!\n", __func__);
@@ -1989,9 +1928,6 @@ static int f2fs_ioc_set_encryption_policy(struct file *filp, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
 
-	if (!f2fs_sb_has_crypto(inode->i_sb))
-		return -EOPNOTSUPP;
-
 	f2fs_update_time(F2FS_I_SB(inode), REQ_TIME);
 
 	return fscrypt_ioctl_set_policy(filp, (const void __user *)arg);
@@ -1999,8 +1935,6 @@ static int f2fs_ioc_set_encryption_policy(struct file *filp, unsigned long arg)
 
 static int f2fs_ioc_get_encryption_policy(struct file *filp, unsigned long arg)
 {
-	if (!f2fs_sb_has_crypto(file_inode(filp)->i_sb))
-		return -EOPNOTSUPP;
 	return fscrypt_ioctl_get_policy(filp, (void __user *)arg);
 }
 
@@ -2075,55 +2009,7 @@ static int f2fs_ioc_gc(struct file *filp, unsigned long arg)
 		(le64_to_cpu(sbi->user_block_count - valid_user_blocks(sbi)) * sbi->blocksize) /1024/1024,
 		IOC_GC_count++, sync);
 
-	current->flags |= PF_MUTEX_GC;
-	ret = f2fs_gc(sbi, sync, true, NULL_SEGNO);
-	current->flags &= (~PF_MUTEX_GC);
-out:
-	mnt_drop_write_file(filp);
-	return ret;
-}
-
-static int f2fs_ioc_gc_range(struct file *filp, unsigned long arg)
-{
-	struct inode *inode = file_inode(filp);
-	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
-	struct f2fs_gc_range range;
-	u64 end;
-	int ret;
-
-	if (!capable(CAP_SYS_ADMIN))
-		return -EPERM;
-
-	if (copy_from_user(&range, (struct f2fs_gc_range __user *)arg,
-							sizeof(range)))
-		return -EFAULT;
-
-	if (f2fs_readonly(sbi->sb))
-		return -EROFS;
-
-	ret = mnt_want_write_file(filp);
-	if (ret)
-		return ret;
-
-	end = range.start + range.len;
-	if (range.start < MAIN_BLKADDR(sbi) || end >= MAX_BLKADDR(sbi))
-		return -EINVAL;
-do_more:
-	if (!range.sync) {
-		if (!mutex_trylock(&sbi->gc_mutex)) {
-			ret = -EBUSY;
-			goto out;
-		}
-	} else {
-		mutex_lock(&sbi->gc_mutex);
-	}
-
-	current->flags |= PF_MUTEX_GC;
-	ret = f2fs_gc(sbi, range.sync, true, GET_SEGNO(sbi, range.start));
-	current->flags &= (~PF_MUTEX_GC);
-	range.start += sbi->blocks_per_seg;
-	if (range.start <= end)
-		goto do_more;
+	ret = f2fs_gc(sbi, sync, true);
 out:
 	mnt_drop_write_file(filp);
 	return ret;
@@ -2161,12 +2047,13 @@ static int f2fs_defragment_range(struct f2fs_sb_info *sbi,
 	pgoff_t pg_start, pg_end;
 	unsigned int blk_per_seg = sbi->blocks_per_seg;
 	unsigned int total = 0, sec_num;
+	unsigned int pages_per_sec = sbi->segs_per_sec * blk_per_seg;
 	block_t blk_end = 0;
 	bool fragmented = false;
 	int err;
 
 	/* if in-place-update policy is enabled, don't waste time here */
-	if (need_inplace_update_policy(inode, NULL))
+	if (need_inplace_update(inode, NULL))
 		return -EINVAL;
 
 	pg_start = range->start >> PAGE_SHIFT;
@@ -2200,7 +2087,7 @@ static int f2fs_defragment_range(struct f2fs_sb_info *sbi,
 	 */
 	while (map.m_lblk < pg_end) {
 		map.m_len = pg_end - map.m_lblk;
-		err = f2fs_map_blocks(inode, &map, 0, F2FS_GET_BLOCK_DEFAULT);
+		err = f2fs_map_blocks(inode, &map, 0, F2FS_GET_BLOCK_READ);
 		if (err)
 			goto out;
 
@@ -2224,7 +2111,7 @@ static int f2fs_defragment_range(struct f2fs_sb_info *sbi,
 	map.m_lblk = pg_start;
 	map.m_len = pg_end - pg_start;
 
-	sec_num = (map.m_len + BLKS_PER_SEC(sbi) - 1) / BLKS_PER_SEC(sbi);
+	sec_num = (map.m_len + pages_per_sec - 1) / pages_per_sec;
 
 	/*
 	 * make sure there are enough free section for LFS allocation, this can
@@ -2242,7 +2129,7 @@ static int f2fs_defragment_range(struct f2fs_sb_info *sbi,
 
 do_map:
 		map.m_len = pg_end - map.m_lblk;
-		err = f2fs_map_blocks(inode, &map, 0, F2FS_GET_BLOCK_DEFAULT);
+		err = f2fs_map_blocks(inode, &map, 0, F2FS_GET_BLOCK_READ);
 		if (err)
 			goto clear_out;
 
@@ -2301,40 +2188,42 @@ static int f2fs_ioc_defragment(struct file *filp, unsigned long arg)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	if (!S_ISREG(inode->i_mode) || f2fs_is_atomic_file(inode))
-		return -EINVAL;
-
-	if (f2fs_readonly(sbi->sb))
-		return -EROFS;
-
-	if (copy_from_user(&range, (struct f2fs_defragment __user *)arg,
-							sizeof(range)))
-		return -EFAULT;
-
-	/* verify alignment of offset & size */
-	if (range.start & (F2FS_BLKSIZE - 1) || range.len & (F2FS_BLKSIZE - 1))
-		return -EINVAL;
-
-	if (unlikely((range.start + range.len) >> PAGE_SHIFT >
-					sbi->max_file_blocks))
+	if (!S_ISREG(inode->i_mode))
 		return -EINVAL;
 
 	err = mnt_want_write_file(filp);
 	if (err)
 		return err;
 
-	err = f2fs_defragment_range(sbi, filp, &range);
-	mnt_drop_write_file(filp);
+	if (f2fs_readonly(sbi->sb)) {
+		err = -EROFS;
+		goto out;
+	}
 
+	if (copy_from_user(&range, (struct f2fs_defragment __user *)arg,
+							sizeof(range))) {
+		err = -EFAULT;
+		goto out;
+	}
+
+	/* verify alignment of offset & size */
+	if (range.start & (F2FS_BLKSIZE - 1) ||
+		range.len & (F2FS_BLKSIZE - 1)) {
+		err = -EINVAL;
+		goto out;
+	}
+
+	err = f2fs_defragment_range(sbi, filp, &range);
 	f2fs_update_time(sbi, REQ_TIME);
 	if (err < 0)
-		return err;
+		goto out;
 
 	if (copy_to_user((struct f2fs_defragment __user *)arg, &range,
 							sizeof(range)))
-		return -EFAULT;
-
-	return 0;
+		err = -EFAULT;
+out:
+	mnt_drop_write_file(filp);
+	return err;
 }
 
 static int f2fs_move_file_range(struct file *file_in, loff_t pos_in,
@@ -2368,13 +2257,9 @@ static int f2fs_move_file_range(struct file *file_in, loff_t pos_in,
 	}
 
 	inode_lock(src);
-	down_write(&F2FS_I(src)->dio_rwsem[WRITE]);
 	if (src != dst) {
-		ret = -EBUSY;
-		if (!inode_trylock(dst))
-			goto out;
-		if (!down_write_trylock(&F2FS_I(dst)->dio_rwsem[WRITE])) {
-			inode_unlock(dst);
+		if (!inode_trylock(dst)) {
+			ret = -EBUSY;
 			goto out;
 		}
 	}
@@ -2434,12 +2319,9 @@ static int f2fs_move_file_range(struct file *file_in, loff_t pos_in,
 	}
 	f2fs_unlock_op(sbi);
 out_unlock:
-	if (src != dst) {
-		up_write(&F2FS_I(dst)->dio_rwsem[WRITE]);
+	if (src != dst)
 		inode_unlock(dst);
-	}
 out:
-	up_write(&F2FS_I(src)->dio_rwsem[WRITE]);
 	inode_unlock(src);
 	return ret;
 }
@@ -2475,8 +2357,6 @@ static int f2fs_ioc_move_range(struct file *filp, unsigned long arg)
 					range.pos_out, range.len);
 
 	mnt_drop_write_file(filp);
-	if (err)
-		goto err_out;
 
 	if (copy_to_user((struct f2fs_move_range __user *)arg,
 						&range, sizeof(range)))
@@ -2486,163 +2366,8 @@ err_out:
 	return err;
 }
 
-static int f2fs_ioc_flush_device(struct file *filp, unsigned long arg)
-{
-	struct inode *inode = file_inode(filp);
-	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
-	struct sit_info *sm = SIT_I(sbi);
-	unsigned int start_segno = 0, end_segno = 0;
-	unsigned int dev_start_segno = 0, dev_end_segno = 0;
-	struct f2fs_flush_device range;
-	int ret;
-
-	if (!capable(CAP_SYS_ADMIN))
-		return -EPERM;
-
-	if (f2fs_readonly(sbi->sb))
-		return -EROFS;
-
-	if (copy_from_user(&range, (struct f2fs_flush_device __user *)arg,
-							sizeof(range)))
-		return -EFAULT;
-
-	if (sbi->s_ndevs <= 1 || sbi->s_ndevs - 1 <= range.dev_num ||
-			sbi->segs_per_sec != 1) {
-		f2fs_msg(sbi->sb, KERN_WARNING,
-			"Can't flush %u in %d for segs_per_sec %u != 1\n",
-				range.dev_num, sbi->s_ndevs,
-				sbi->segs_per_sec);
-		return -EINVAL;
-	}
-
-	ret = mnt_want_write_file(filp);
-	if (ret)
-		return ret;
-
-	if (range.dev_num != 0)
-		dev_start_segno = GET_SEGNO(sbi, FDEV(range.dev_num).start_blk);
-	dev_end_segno = GET_SEGNO(sbi, FDEV(range.dev_num).end_blk);
-
-	start_segno = sm->last_victim[FLUSH_DEVICE];
-	if (start_segno < dev_start_segno || start_segno >= dev_end_segno)
-		start_segno = dev_start_segno;
-	end_segno = min(start_segno + range.segments, dev_end_segno);
-
-	while (start_segno < end_segno) {
-		if (!mutex_trylock(&sbi->gc_mutex)) {
-			ret = -EBUSY;
-			goto out;
-		}
-		sm->last_victim[GC_CB] = end_segno + 1;
-		sm->last_victim[GC_GREEDY] = end_segno + 1;
-		sm->last_victim[ALLOC_NEXT] = end_segno + 1;
-		current->flags |= PF_MUTEX_GC;
-		ret = f2fs_gc(sbi, true, true, start_segno);
-		current->flags &= (~PF_MUTEX_GC);
-		if (ret == -EAGAIN)
-			ret = 0;
-		else if (ret < 0)
-			break;
-		start_segno++;
-	}
-out:
-	mnt_drop_write_file(filp);
-	return ret;
-}
-
-static int f2fs_ioc_get_features(struct file *filp, unsigned long arg)
-{
-	struct inode *inode = file_inode(filp);
-	u32 sb_feature = le32_to_cpu(F2FS_I_SB(inode)->raw_super->feature);
-
-	/* Must validate to set it with SQLite behavior in Android. */
-	sb_feature |= F2FS_FEATURE_ATOMIC_WRITE;
-
-	return put_user(sb_feature, (u32 __user *)arg);
-}
-
-int f2fs_pin_file_control(struct inode *inode, bool inc)
-{
-	struct f2fs_inode_info *fi = F2FS_I(inode);
-	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
-
-	/* Use i_gc_failures for normal file as a risk signal. */
-	if (inc)
-		f2fs_i_gc_failures_write(inode, fi->i_gc_failures + 1);
-
-	if (fi->i_gc_failures > sbi->gc_pin_file_threshold) {
-		f2fs_msg(sbi->sb, KERN_WARNING,
-			"%s: Enable GC = ino %lx after %x GC trials\n",
-			__func__, inode->i_ino, fi->i_gc_failures);
-		clear_inode_flag(inode, FI_PIN_FILE);
-		return -EAGAIN;
-	}
-	return 0;
-}
-
-static int f2fs_ioc_set_pin_file(struct file *filp, unsigned long arg)
-{
-	struct inode *inode = file_inode(filp);
-	__u32 pin;
-	int ret = 0;
-
-	if (!inode_owner_or_capable(inode))
-		return -EACCES;
-
-	if (get_user(pin, (__u32 __user *)arg))
-		return -EFAULT;
-
-	if (!S_ISREG(inode->i_mode))
-		return -EINVAL;
-
-	if (f2fs_readonly(F2FS_I_SB(inode)->sb))
-		return -EROFS;
-
-	ret = mnt_want_write_file(filp);
-	if (ret)
-		return ret;
-
-	inode_lock(inode);
-
-	if (!pin) {
-		clear_inode_flag(inode, FI_PIN_FILE);
-		F2FS_I(inode)->i_gc_failures = 1;
-		goto done;
-	}
-
-	if (f2fs_pin_file_control(inode, false)) {
-		ret = -EAGAIN;
-		goto out;
-	}
-	ret = f2fs_convert_inline_inode(inode);
-	if (ret)
-		goto out;
-
-	set_inode_flag(inode, FI_PIN_FILE);
-	ret = F2FS_I(inode)->i_gc_failures;
-done:
-	f2fs_update_time(F2FS_I_SB(inode), REQ_TIME);
-out:
-	inode_unlock(inode);
-	mnt_drop_write_file(filp);
-	return ret;
-}
-
-static int f2fs_ioc_get_pin_file(struct file *filp, unsigned long arg)
-{
-	struct inode *inode = file_inode(filp);
-	__u32 pin = 0;
-
-	if (is_inode_flag_set(inode, FI_PIN_FILE))
-		pin = F2FS_I(inode)->i_gc_failures;
-	return put_user(pin, (u32 __user *)arg);
-}
-
 long f2fs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-	if (unlikely(f2fs_cp_error(F2FS_I_SB(file_inode(filp)))))
-		return -EIO;
-
 	switch (cmd) {
 	case F2FS_IOC_GETFLAGS:
 		return f2fs_ioc_getflags(filp, arg);
@@ -2672,30 +2397,12 @@ long f2fs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return f2fs_ioc_get_encryption_pwsalt(filp, arg);
 	case F2FS_IOC_GARBAGE_COLLECT:
 		return f2fs_ioc_gc(filp, arg);
-	case F2FS_IOC_GARBAGE_COLLECT_RANGE:
-		return f2fs_ioc_gc_range(filp, arg);
 	case F2FS_IOC_WRITE_CHECKPOINT:
 		return f2fs_ioc_write_checkpoint(filp, arg);
 	case F2FS_IOC_DEFRAGMENT:
 		return f2fs_ioc_defragment(filp, arg);
 	case F2FS_IOC_MOVE_RANGE:
 		return f2fs_ioc_move_range(filp, arg);
-	case F2FS_IOC_FLUSH_DEVICE:
-		return f2fs_ioc_flush_device(filp, arg);
-	case F2FS_IOC_GET_FEATURES:
-		return f2fs_ioc_get_features(filp, arg);
-	case F2FS_IOC_GET_PIN_FILE:
-		return f2fs_ioc_get_pin_file(filp, arg);
-	case F2FS_IOC_SET_PIN_FILE:
-		return f2fs_ioc_set_pin_file(filp, arg);
-#if DEFINE_F2FS_FS_SDP_ENCRYPTION
-	case F2FS_IOC_SET_SDP_ENCRYPTION_POLICY:
-		return f2fs_ioc_set_sdp_encryption_policy(filp, arg);
-	case F2FS_IOC_GET_SDP_ENCRYPTION_POLICY:
-		return f2fs_ioc_get_sdp_encryption_policy(filp, arg);
-	case F2FS_IOC_GET_ENCRYPTION_POLICY_TYPE:
-		return f2fs_ioc_get_encryption_policy_type(filp, arg);
-#endif
 	default:
 		return -ENOTTY;
 	}
@@ -2707,8 +2414,10 @@ static ssize_t f2fs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	struct inode *inode = file_inode(file);
 	ssize_t ret;
 
-	if (unlikely(f2fs_cp_error(F2FS_I_SB(inode))))
-		return -EIO;
+	if (f2fs_encrypted_inode(inode) &&
+				!fscrypt_has_encryption_key(inode) &&
+				fscrypt_get_encryption_info(inode))
+		return -EACCES;
 
 	inode_lock(inode);
 	ret = generic_write_checks(iocb, from);
@@ -2720,20 +2429,22 @@ static ssize_t f2fs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 
 		err = f2fs_preallocate_blocks(iocb, from);
 		if (err) {
-			clear_inode_flag(inode, FI_NO_PREALLOC);
 			inode_unlock(inode);
 			return err;
 		}
+
 		ret = __generic_file_write_iter(iocb, from);
 		clear_inode_flag(inode, FI_NO_PREALLOC);
-
-		if (ret > 0)
-			f2fs_update_iostat(F2FS_I_SB(inode), APP_WRITE_IO, ret);
 	}
 	inode_unlock(inode);
 
-	if (ret > 0)
-		ret = generic_write_sync(iocb, ret);
+	if (ret > 0) {
+		ssize_t err;
+
+		err = generic_write_sync(file, iocb->ki_pos - ret, ret);
+		if (err < 0)
+			ret = err;
+	}
 	return ret;
 }
 
@@ -2760,20 +2471,10 @@ long f2fs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case F2FS_IOC_GET_ENCRYPTION_PWSALT:
 	case F2FS_IOC_GET_ENCRYPTION_POLICY:
 	case F2FS_IOC_GARBAGE_COLLECT:
-	case F2FS_IOC_GARBAGE_COLLECT_RANGE:
 	case F2FS_IOC_WRITE_CHECKPOINT:
 	case F2FS_IOC_DEFRAGMENT:
-#if DEFINE_F2FS_FS_SDP_ENCRYPTION
-	case F2FS_IOC_SET_SDP_ENCRYPTION_POLICY:
-	case F2FS_IOC_GET_ENCRYPTION_POLICY_TYPE:
-	case F2FS_IOC_GET_SDP_ENCRYPTION_POLICY:
-#endif
 		break;
 	case F2FS_IOC_MOVE_RANGE:
-	case F2FS_IOC_FLUSH_DEVICE:
-	case F2FS_IOC_GET_FEATURES:
-	case F2FS_IOC_GET_PIN_FILE:
-	case F2FS_IOC_SET_PIN_FILE:
 		break;
 	default:
 		return -ENOIOCTLCMD;
@@ -2789,7 +2490,6 @@ const struct file_operations f2fs_file_operations = {
 	.open		= f2fs_file_open,
 	.release	= f2fs_release_file,
 	.mmap		= f2fs_file_mmap,
-	.flush		= f2fs_file_flush,
 	.fsync		= f2fs_sync_file,
 	.fallocate	= f2fs_fallocate,
 	.unlocked_ioctl	= f2fs_ioctl,

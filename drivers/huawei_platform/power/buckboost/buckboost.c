@@ -39,12 +39,6 @@ static int max77813_read_block(struct max77813_device_info *di, u8 *value,
 	struct i2c_msg msg[2];
 	u8 buf = 0;
 	int ret = 0;
-
-	if(NULL == di){
-		hwlog_err("%s:NULL POINTER!!\n",__func__);
-		return -1;
-	}
-
 	buf = reg;
 	msg[0].addr = di->client->addr;
 	msg[0].flags = 0;
@@ -83,11 +77,6 @@ static int max77813_write_block(struct max77813_device_info *di, u8 *value, u8 r
 {
 	struct i2c_msg msg[1];
 	int ret = 0;
-
-	if(NULL == di){
-		hwlog_err("%s:NULL POINTER!!\n",__func__);
-		return -1;
-	}
 
 	*value = reg;
 
@@ -273,7 +262,7 @@ static int max77813_probe(struct i2c_client *client,
 		goto max77813_fail_3;
 	}
 	#ifdef CONFIG_HUAWEI_HW_DEV_DCT
-	set_hw_dev_flag(DEV_I2C_BUCKBOOST);
+	set_hw_dev_flag(DEV_I2C_BUCKBOOST_MAX77813);
 	#endif
 	hwlog_info("max77813 probe ok!\n");
 	return 0;

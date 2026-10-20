@@ -12,21 +12,6 @@ menuconfig INPUT_KEYBOARD
 
 if INPUT_KEYBOARD
 
-config KEYBOARD_ADC
-	tristate "ADC Ladder Buttons"
-	depends on IIO
-	select INPUT_POLLDEV
-	help
-	  This driver implements support for buttons connected
-	  to an ADC using a resistor ladder.
-
-	  Say Y here if your device has such buttons connected to an ADC.  Your
-	  board-specific setup logic must also provide a configuration data
-	  for mapping voltages to buttons.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called adc_keys.
-
 config KEYBOARD_ADP5520
 	tristate "Keypad Support for ADP5520 PMIC"
 	depends on PMIC_ADP5520
@@ -575,7 +560,7 @@ config KEYBOARD_SUNKBD
 
 config KEYBOARD_SH_KEYSC
 	tristate "SuperH KEYSC keypad support"
-	depends on ARCH_SHMOBILE || COMPILE_TEST
+	depends on SUPERH || ARCH_SHMOBILE || COMPILE_TEST
 	help
 	  Say Y here if you want to use a keypad attached to the KEYSC block
 	  on SuperH processors such as sh7722 and sh7343.
@@ -742,15 +727,6 @@ config KEYBOARD_HISI_GPIO_KEY
 	  To compile this driver as a module, choose M here: the
 	  module will be called hisi_gpio_key.
 
-config KEYBOARD_HISI_PMIC_GPIO_KEY
-	tristate "HISI pmic gpio key support,use to realize volume-up and volume-down"
-	depends on HISI_SPMI && HISI_PMIC_PMU_SPMI
-	help
-	  Say Y here to enable the volume key support for HISI platform.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called hisi_pmic_gpio_key.
-
 config HISI_GPIO_KEY_SUPPORT_SMART_KEY
 	bool "Smart key support, depends on HISI gpio key support"
 	depends on KEYBOARD_HISI_GPIO_KEY
@@ -759,13 +735,13 @@ config HISI_GPIO_KEY_SUPPORT_SMART_KEY
 
 config VOLUME_KEY_MASK
 	bool "volume keymask support, depends on HISI gpio key support"
-	depends on KEYBOARD_HISI_GPIO_KEY || KEYBOARD_HISI_PMIC_GPIO_KEY
+	depends on KEYBOARD_HISI_GPIO_KEY
 	help
 	  Say Y here to enable the volume keymask.
 
 config HISI_VOLUMEKEY_COMBINATION
 	bool "volume combination support, depends on HISI gpio key support"
-	depends on KEYBOARD_HISI_GPIO_KEY || KEYBOARD_HISI_PMIC_GPIO_KEY
+	depends on KEYBOARD_HISI_GPIO_KEY
 	help
 	  Say Y here to enable the volume key combination function.
 endif

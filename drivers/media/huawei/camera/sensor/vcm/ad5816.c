@@ -153,7 +153,7 @@ static int __init hw_ad5816_module_init(void)
 
 static void __exit hw_ad5816_module_exit(void)
 {
-	hw_vcm_unregister(s_ad5816.intf.subdev);
+	hw_vcm_unregister(&s_ad5816.intf);
 	platform_driver_unregister(&hw_ad5816_platform_driver);
 }
 

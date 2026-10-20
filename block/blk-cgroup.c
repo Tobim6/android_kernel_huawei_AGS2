@@ -206,8 +206,7 @@ static struct blkcg_gq *blkg_create(struct blkcg *blkcg,
 	}
 
 	wb_congested = wb_congested_get_create(q->backing_dev_info,
-					       blkcg->css.id,
-					       GFP_NOWAIT | __GFP_NOWARN);
+					       blkcg->css.id, GFP_NOWAIT);
 	if (!wb_congested) {
 		ret = -ENOMEM;
 		goto err_put_css;
@@ -215,7 +214,7 @@ static struct blkcg_gq *blkg_create(struct blkcg *blkcg,
 
 	/* allocate */
 	if (!new_blkg) {
-		new_blkg = blkg_alloc(blkcg, q, GFP_NOWAIT | __GFP_NOWARN);
+		new_blkg = blkg_alloc(blkcg, q, GFP_NOWAIT);
 		if (unlikely(!new_blkg)) {
 			ret = -ENOMEM;
 			goto err_put_congested;
@@ -961,7 +960,7 @@ static int blkcg_print_stat(struct seq_file *sf, void *v)
 }
 
 /*lint -save -e785*/
-static struct cftype blkcg_files[] = {
+struct cftype blkcg_files[] = {
 	{
 		.name = "stat",
 		.flags = CFTYPE_NOT_ON_ROOT,
@@ -970,7 +969,7 @@ static struct cftype blkcg_files[] = {
 	{ }	/* terminate */
 };
 
-static struct cftype blkcg_legacy_files[] = {
+struct cftype blkcg_legacy_files[] = {
 	{
 		.name = "reset_stats",
 		.write_u64 = blkcg_reset_stats,
@@ -1086,7 +1085,7 @@ blkcg_css_alloc(struct cgroup_subsys_state *parent_css)
 	}
 
 	spin_lock_init(&blkcg->lock);
-	INIT_RADIX_TREE(&blkcg->blkg_tree, GFP_NOWAIT | __GFP_NOWARN);
+	INIT_RADIX_TREE(&blkcg->blkg_tree, GFP_NOWAIT);
 	INIT_HLIST_HEAD(&blkcg->blkg_list);
 #ifdef CONFIG_CGROUP_WRITEBACK
 	INIT_LIST_HEAD(&blkcg->cgwb_list);
@@ -1204,7 +1203,7 @@ int blkcg_attach_notify_register(enum blkcg_attach_notify type, struct notifier_
 {
 	int err = -EINVAL;
 	if (type >= BLKG_ATTACH_NOTIFY_NR || n == NULL) {
-		pr_err("%s: invalide parameters, type=%d, n = %pK\n",__func__, type, n);
+		pr_err("%s: invalide parameters, type=%d, n = %p\n",__func__, type, n);
 		return err;
 	}
 	switch (type) {
@@ -1288,7 +1287,7 @@ static void blkcg_attach(struct cgroup_taskset *tset)
 	spin_unlock_irq(&blkcg->lock);
 }
 
-static void blkcg_fork(struct task_struct *task)
+static void blkcg_fork(struct task_struct *task, void *priv)
 {
 	struct blkcg *blkcg;
 
@@ -1364,6 +1363,27 @@ static void blkcg_bind(struct cgroup_subsys_state *root_css)
 	mutex_unlock(&blkcg_pol_mutex);
 }
 
+static int blkcg_allow_attach(struct cgroup_taskset *tset)
+{
+	/*lint -save -e50 -e64 -e529 -e666 -e1058*/
+	const struct cred *cred = current_cred(), *tcred;
+	struct task_struct *task;
+	struct cgroup_subsys_state *css;
+
+	cgroup_taskset_for_each(task, css, tset) {
+		tcred = __task_cred(task);
+
+		if ((current != task) && !capable(CAP_SYS_ADMIN) &&
+			!uid_eq(cred->euid, tcred->uid) &&
+			!uid_eq(cred->euid, tcred->suid))
+			return -EACCES;
+	}
+	/*lint -restore*/
+
+	return 0;
+/*lint -save -e715*/
+}
+/*lint -restore*/
 /*lint -save -e785*/
 struct cgroup_subsys io_cgrp_subsys = {
 	.css_alloc = blkcg_css_alloc,
@@ -1371,6 +1391,7 @@ struct cgroup_subsys io_cgrp_subsys = {
 	.css_free = blkcg_css_free,
 	.can_attach = blkcg_can_attach,
 #ifdef CONFIG_BLK_DEV_THROTTLING
+	.allow_attach = blkcg_allow_attach,
 	.attach = blkcg_attach,
 	.fork = blkcg_fork,
 #endif
@@ -1436,7 +1457,7 @@ pd_prealloc:
 		if (blkg->pd[pol->plid])
 			continue;
 
-		pd = pol->pd_alloc_fn(GFP_NOWAIT | __GFP_NOWARN, q->node);
+		pd = pol->pd_alloc_fn(GFP_NOWAIT, q->node);
 		if (!pd)
 			swap(pd, pd_prealloc);
 		if (!pd) {

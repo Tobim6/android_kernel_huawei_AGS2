@@ -239,17 +239,35 @@ static int hw_aw3642_find_match_torch_current(int cur_torch)
 
 static int hw_aw3642_init(struct hw_flash_ctrl_t *flash_ctrl)
 {
+#if 0
+    struct hw_aw3642_private_data_t *pdata;
+#endif
 
     cam_debug("%s enter.\n", __func__);
     if (NULL == flash_ctrl) {
         cam_err("%s flash_ctrl is NULL.", __func__);
         return -EINVAL;
     }
+#if 0
+    pdata = (struct hw_aw3642_private_data_t *)flash_ctrl->pdata;
+
+    flash_ctrl->pctrl = devm_pinctrl_get_select(flash_ctrl->dev,
+                        PINCTRL_STATE_DEFAULT);
+
+    rc = gpio_request(pdata->strobe, "flash-strobe");
+    if (rc < 0) {
+        cam_err("%s failed to request strobe pin.", __func__);
+        return -EIO;
+    }
+#endif
     return 0;
 }
 
 static int hw_aw3642_exit(struct hw_flash_ctrl_t *flash_ctrl)
 {
+#if 0
+    struct hw_aw3642_private_data_t *pdata;
+#endif
 
     cam_debug("%s enter.\n", __func__);
     if (NULL == flash_ctrl || NULL == flash_ctrl->func_tbl || NULL == flash_ctrl->func_tbl->flash_off) {
@@ -258,6 +276,13 @@ static int hw_aw3642_exit(struct hw_flash_ctrl_t *flash_ctrl)
     }
 
     flash_ctrl->func_tbl->flash_off(flash_ctrl);
+#if 0
+    pdata = (struct hw_aw3642_private_data_t *)flash_ctrl->pdata;
+
+    gpio_free(pdata->strobe);
+    flash_ctrl->pctrl = devm_pinctrl_get_select(flash_ctrl->dev,
+                        PINCTRL_STATE_IDLE);
+#endif
     return 0;
 }
 
@@ -380,7 +405,7 @@ static int hw_aw3642_on(struct hw_flash_ctrl_t *flash_ctrl, void *data)
 
     cam_info("%s mode=%d, level=%d.\n", __func__, cdata->mode, cdata->data);
     mutex_lock(flash_ctrl->hw_flash_mutex);
-    if ((FLASH_MODE == cdata->mode) || (FLASH_STROBE_MODE == cdata->mode)) {
+    if (FLASH_MODE == cdata->mode) {
         rc = hw_aw3642_flash_mode(flash_ctrl, cdata->data);
     } else {
         rc = hw_aw3642_torch_mode(flash_ctrl, cdata->data);
@@ -463,7 +488,6 @@ static int hw_aw3642_get_dt_data(struct hw_flash_ctrl_t *flash_ctrl)
     return rc;
 }
 
-extern int snprintf_s(char* strDest, size_t destMax, size_t count, const char* format, ...);
 #ifdef CAMERA_FLASH_FACTORY_TEST
 static ssize_t hw_aw3642_lightness_show(struct device *dev,
     struct device_attribute *attr,char *buf)
@@ -475,7 +499,7 @@ static ssize_t hw_aw3642_lightness_show(struct device *dev,
     }
     int rc=0;
 
-    snprintf_s(buf, MAX_ATTRIBUTE_BUFFER_SIZE, MAX_ATTRIBUTE_BUFFER_SIZE-1, "mode=%d, data=%d.\n",
+    snprintf(buf, MAX_ATTRIBUTE_BUFFER_SIZE, "mode=%d, data=%d.\n",
     hw_aw3642_ctrl.state.mode, hw_aw3642_ctrl.state.data);
     rc = strlen(buf)+1;
     return rc;
@@ -584,7 +608,8 @@ static ssize_t hw_aw3642_flash_mask_show(struct device *dev,
         return -EINVAL;
     }
 
-    snprintf_s(buf, MAX_ATTRIBUTE_BUFFER_SIZE, MAX_ATTRIBUTE_BUFFER_SIZE-1, "flash_mask_disabled=%d.\n", hw_aw3642_ctrl.flash_mask_enable);
+    snprintf(buf, MAX_ATTRIBUTE_BUFFER_SIZE, "flash_mask_disabled=%d.\n",
+    hw_aw3642_ctrl.flash_mask_enable);
     rc = strlen(buf)+1;
     return rc;
 }

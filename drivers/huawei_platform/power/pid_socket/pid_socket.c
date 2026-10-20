@@ -9,66 +9,67 @@
 
 #include <net/tcp.h>
 
-#include <linux/sched.h>
-#include <linux/rcupdate.h>
+#include <linux/compiler.h>
+#include <linux/gfp.h>
+#include <linux/module.h>
+
+
+#include <linux/fs.h>
+#ifdef CONFIG_HW_CROSSLAYER_OPT
+#ifdef CONFIG_HW_CROSSLAYER_OPT_DBG
+#include <linux/time.h>
+#include <linux/timex.h>
+#include <linux/rtc.h>
+#endif 
+#include <net/tcp_crosslayer.h>
+#endif 
+
+#ifdef CONFIG_HW_WIFIPRO
+#include <huawei_platform/net/ipv4/wifipro_tcp_monitor.h>
+#endif
+#ifdef CONFIG_HW_WIFI
+#include <huawei_platform/net/ipv4/wifi_tcp_statistics.h>
+#endif
 
 #include "pid_socket.h"
-#include <linux/version.h>
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14,0 )
-#include <linux/sched/task.h>
-#endif
-#include <net/sock.h>
 
-#include <log/log_usertype.h>
+
+/*20150114 add,get pid and process name of the app who used connect function.*/
+int get_proc_name(int pid, char *buf, int len)
+{
+	char filename[32];
+	struct file *filep;
+	int result = 0;
+	mm_segment_t oldfs;
+
+	oldfs = get_fs();
+	set_fs(KERNEL_DS);
+	snprintf(filename, sizeof(filename), "/proc/%d/cmdline", pid);
+	filep = filp_open(filename, O_RDONLY, 0);
+	if (IS_ERR(filep)) {
+		pr_err("get_proc_name:open file error\n");
+		result = -EINVAL;
+		set_fs(oldfs);
+		return -1;
+	}
+
+	filep->f_pos = 0;
+	result = filep->f_op->read(filep, buf, len, &filep->f_pos);
+	filp_close(filep, NULL);
+	set_fs(oldfs);
+	return 0;
+}
+
 
 void print_process_pid_name(struct inet_sock *inet)
 {
-	int pid = 0;
-        int uid = 0;
-	unsigned short source_port = 0;
-	struct task_struct * task = NULL;
-#ifdef CONFIG_LOG_EXCEPTION
-	unsigned int user_type = get_logusertype_flag();
+	char process_name[100] = {0};
+	int pid = task_tgid_vnr(current);
+	unsigned short source_port = inet->inet_sport;
 
-	if (user_type != BETA_USER && user_type != OVERSEA_USER)
-		return;
-#endif
-
-#if defined(CONFIG_HUAWEI_KSTATE) || defined(CONFIG_MPTCP)
-	if (NULL == inet || NULL == inet->sk.sk_socket) {
-		return;
-	}
-
-	pid = inet->sk.sk_socket->pid;
-#else
-	if (NULL == inet) {
-		return;
-	}
-
-	pid = task_tgid_vnr(current);
-#endif
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 10)
-	uid = sock_i_uid(&inet->sk).val;
-#else
-	uid = sock_i_uid(&inet->sk);
-#endif
-
-	source_port = inet->inet_sport;
-
-	rcu_read_lock();
-	task = find_task_by_vpid(pid);
-	if (NULL == task) {
-		rcu_read_unlock();
-                printk("task=NULL,%s:uid:%d,pid:%d,port:%d\n",__func__, uid , pid, htons(source_port));
-		return;
-	}
-	get_task_struct(task);
-	rcu_read_unlock();
-
+	get_proc_name(pid, process_name, 99);
 	source_port = htons(source_port);
-	printk("%s: uid:%d,pid:(%d),name:(%s),port:(%d)\n",__func__, uid, pid, task->comm, source_port);
-	put_task_struct(task);
+	pr_crit("%s: pid:(%d),name:(%s),port:(%d)\n", __func__, pid, process_name, source_port);
 }
 
 /*20150114 add,get pid and process name of the app who used connect function.*/

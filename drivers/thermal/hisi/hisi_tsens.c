@@ -29,11 +29,22 @@
 #define TSENS_DRIVER_NAME	"hisi-tsens"
 static struct tsens_tm_device	*g_tmdev;
 
+#define CLUSTER0				0
+#define CLUSTER1				1
+#define GPU					2
+#define MODEM					3
+#define DDR					4
+#define TSENSOR_MAX			5
+
 #define	READTEMP_SVC_REG_RD	0xc5009900UL
 
-#define CAPACITY_OF_TSENSOR_ARRAY 10
-const char *hisi_tsensor_name[CAPACITY_OF_TSENSOR_ARRAY];
-u32 hisi_tsensor_mode[CAPACITY_OF_TSENSOR_ARRAY];
+char *hisi_tsensor_name[] = {
+	[CLUSTER0] = "cluster0",
+	[CLUSTER1] = "cluster1",
+	[GPU] = "gpu",
+	[MODEM] = "modem",
+	[DDR] = "ddr",
+};
 EXPORT_SYMBOL_GPL(hisi_tsensor_name);
 
 /* Trips: warm and cool */
@@ -47,18 +58,11 @@ enum tsens_trip_type {
 #endif
 };
 
-enum sensor_type {
-	TYPE_TSENSOR = 0,
-	TYPE_PVTSENSOR,
-};
-
-
 struct tsens_tm_device_sensor {
 	struct thermal_zone_device		*tz_dev;
 	enum thermal_device_mode		mode;
 	int							reg_no;
 	unsigned int			sensor_num;
-	int				sensor_type;
 #ifdef CONFIG_HISI_THERMAL_TRIP
 	s32				temp_throttling;
 	s32				temp_shutdown;
@@ -71,8 +75,6 @@ struct tsens_tm_device {
 	int				tsens_num_sensor;
 	u32				adc_start_value;
 	u32				adc_end_value;
-	u32				pvtsensor_adc_start_value;
-	u32				pvtsensor_adc_end_value;
 	struct tsens_tm_device_sensor	sensor[0];/*put the struct last place*/
 };
 
@@ -87,7 +89,7 @@ void tsen_debug(int onoff)
 {
 	g_tsensor_debug = onoff;
 }
-static int tsens_tz_code_to_degc(int adc_val, int sensor_type)
+static int tsens_tz_code_to_degc(int adc_val)
 {
 	int temp = 0;
 	int adc_start_value, adc_end_value;
@@ -95,16 +97,8 @@ static int tsens_tz_code_to_degc(int adc_val, int sensor_type)
 	if (!g_tmdev)
 		goto ERROR;
 
-	if(sensor_type == TYPE_TSENSOR){
-		adc_start_value = (int)g_tmdev->adc_start_value;
-		adc_end_value = (int)g_tmdev->adc_end_value;
-	} else if (sensor_type == TYPE_PVTSENSOR) {
-		adc_start_value = (int)g_tmdev->pvtsensor_adc_start_value;
-		adc_end_value = (int)g_tmdev->pvtsensor_adc_end_value;
-	} else {
-		adc_start_value = 0;
-		adc_end_value = 0;
-	}
+	adc_start_value = (int)g_tmdev->adc_start_value;
+	adc_end_value = (int)g_tmdev->adc_end_value;
 
 	if ((adc_start_value > adc_val) || (adc_val > adc_end_value) || (adc_start_value == 0) || (adc_end_value == 0))
 		goto ERROR;
@@ -121,12 +115,8 @@ ERROR:
 }
 
 /*lint -e715*/
-noinline int atfd_readtemp_smc(u64 _function_id, u64 _arg0, u64 _arg1, u64 _arg2)
+noinline int atfd_readtemp_smc(u64 function_id, u64 arg0, u64 arg1, u64 arg2)
 {
-	register u64 function_id asm("x0") = _function_id;
-	register u64 arg0 asm("x1") = _arg0;
-	register u64 arg1 asm("x2") = _arg1;
-	register u64 arg2 asm("x3") = _arg2;
 	asm volatile (
 		__asmeq("%0", "x0")
 		__asmeq("%1", "x1")
@@ -156,7 +146,7 @@ static int tsens_tz_get_temp(struct thermal_zone_device *thermal,
 
 	if (tm_sensor->reg_no >= 0 && tm_sensor->reg_no < g_tmdev->tsens_num_sensor) {
 		adc_value = hisi_sec_readtemp_read(tm_sensor->reg_no);
-		*temp = tsens_tz_code_to_degc(adc_value, tm_sensor->sensor_type);
+		*temp = tsens_tz_code_to_degc(adc_value);
 	} else
 		*temp = TSENS_TEMP_START_VALUE;
 
@@ -187,18 +177,15 @@ int tsens_get_temp(u32 sensor, int *temp)
 int ipa_get_tsensor_id(const char *name)
 {
 	int ret = -ENODEV;
-	int id = 0;
+	u32 id = 0;
+	u32 sensor_num = sizeof(hisi_tsensor_name)/sizeof(char *);
 
-	pr_info("IPA tsensor_num =%d\n", g_tmdev->tsens_num_sensor);
-	if (name == NULL) {
-		pr_err("%s:name == NULL!\n", __func__);
-		return ret;
-	}
+	pr_info("IPA sensor_num =%d\n", sensor_num);
 
-	for (id = 0; id < g_tmdev->tsens_num_sensor; id++) {
+	for (id = 0; id < sensor_num; id++) {
 		pr_info("IPA: sensor_name=%s, hisi_tsensor_name[%d]=%s\n", name, id, hisi_tsensor_name[id]);
 
-		if (!strncmp(name, hisi_tsensor_name[id], strlen(hisi_tsensor_name[id]))) {
+		if (!strncmp(name, hisi_tsensor_name[id], sizeof(name) - 1)) {
 			ret = id;
 			pr_info("sensor_id=%d\n", ret);
 			return ret;/*break;*/
@@ -319,7 +306,6 @@ static int get_device_tree_data(struct platform_device *pdev)
 	unsigned int register_info = 0;
 	u32 rc = 0;
 	int tsens_num_sensors = 0;
-	int i = 0;
 
 	/* parse .hisi tsensor number */
 	rc = of_property_read_s32(of_node, "hisi,sensors", &tsens_num_sensors);
@@ -337,22 +323,6 @@ static int get_device_tree_data(struct platform_device *pdev)
 
 	g_tmdev->tsens_num_sensor = tsens_num_sensors;
 
-	for (i = 0; i < tsens_num_sensors; i++) {
-		rc =  of_property_read_string_index(of_node, "hisi,tsensor_name", i, &hisi_tsensor_name[i]); /*lint !e605*/
-		if (rc) {
-			pr_err("%s hisi_tsensor_name[%d] read err\n", \
-				__func__, i);
-			goto dt_parse_common_end;
-		}
-	}
-
-	rc = of_property_read_u32_array(of_node, "hisi,tsensor_mode", \
-		hisi_tsensor_mode, tsens_num_sensors);
-	if (rc) {
-		pr_err("%s hisi_tsensor_mode read err\n", __func__);
-		goto dt_parse_common_end;
-	}
-
 	rc = (u32)of_property_read_u32(of_node, "hisi,tsensor_adc_start_value", &register_info);
 	if (rc) {
 		dev_err(dev, "no hisi,tsensor_adc_start_value!\n");
@@ -366,20 +336,6 @@ static int get_device_tree_data(struct platform_device *pdev)
 		goto dt_parse_common_end;
 	}
 	g_tmdev->adc_end_value = register_info;
-
-	rc = (u32)of_property_read_u32(of_node, "hisi,pvtsensor_adc_start_value", &register_info);
-	if (rc) {
-		dev_err(dev, "no hisi,pvtsensor_adc_start_value!\n");
-		g_tmdev->pvtsensor_adc_start_value = 0;
-	} else
-		g_tmdev->pvtsensor_adc_start_value = register_info;
-
-	rc = (u32)of_property_read_u32(of_node, "hisi,pvtsensor_adc_end_value", &register_info);
-	if (rc) {
-		dev_err(dev, "no hisi,pvtsensor_adc_end_value!\n");
-		g_tmdev->pvtsensor_adc_end_value = 0;
-	} else
-		g_tmdev->pvtsensor_adc_end_value = register_info;
 
 	return 0;
 dt_parse_common_end:
@@ -424,8 +380,6 @@ static int _tsens_register_thermal(void)
 	struct device_node *node;
 	char reg_no_name[40];
 	int reg_no = 0;
-	char sensor_type_name[40];
-	int sensor_type = 0;
 
 	memset(name, 0, sizeof(name));
 	if (!g_tmdev) {
@@ -440,7 +394,7 @@ static int _tsens_register_thermal(void)
 		int mask = 0;
 		memset((void *)name, 0, sizeof(name));
 		snprintf(name, sizeof(name), hisi_tsensor_name[i]); /*lint !e592*/
-		g_tmdev->sensor[i].mode = hisi_tsensor_mode[i];
+		g_tmdev->sensor[i].mode = THERMAL_DEVICE_ENABLED;
 		g_tmdev->sensor[i].sensor_num = i;
 
 		memset(reg_no_name, 0, sizeof(reg_no_name));
@@ -451,15 +405,6 @@ static int _tsens_register_thermal(void)
 			reg_no = -1;
 		}
 		g_tmdev->sensor[i].reg_no = reg_no;
-
-		memset(sensor_type_name, 0, sizeof(sensor_type_name));
-		snprintf(sensor_type_name, sizeof(sensor_type_name), "hisi,detect_%s_sensortype", name);
-		rc = of_property_read_s32(node, sensor_type_name, &sensor_type);
-		if (rc) {
-			dev_err(&pdev->dev, "%s node not found, use default type!\n", sensor_type_name);
-			sensor_type = 0; /*default tsensor*/
-		}
-		g_tmdev->sensor[i].sensor_type = sensor_type;
 
 #ifdef CONFIG_HISI_THERMAL_TRIP
 		memset((void *)node_name, 0, sizeof(node_name));

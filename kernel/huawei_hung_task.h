@@ -15,5 +15,4 @@ extern void fetch_task_timeout_secs(unsigned long new_sysctl_hung_task_timeout_s
 
 extern int create_sysfs_hungtask(void);
 
-extern void hwhungtask_show_state_filter(unsigned long state_filter);
 #endif

@@ -93,7 +93,7 @@ int usb_gadget_config_buf(
 	*cp = *config;
 
 	/* then interface/endpoint/class/vendor/... */
-	len = usb_descriptor_fillbuf(USB_DT_CONFIG_SIZE + (u8 *)buf,
+	len = usb_descriptor_fillbuf(USB_DT_CONFIG_SIZE + (u8*)buf,
 			length - USB_DT_CONFIG_SIZE, desc);
 	if (len < 0)
 		return len;
@@ -201,10 +201,6 @@ void usb_free_all_descriptors(struct usb_function *f)
 	usb_free_descriptors(f->hs_descriptors);
 	usb_free_descriptors(f->ss_descriptors);
 	usb_free_descriptors(f->ssp_descriptors);
-	f->fs_descriptors = NULL;
-	f->hs_descriptors = NULL;
-	f->ss_descriptors = NULL;
-	f->ssp_descriptors = NULL;
 }
 EXPORT_SYMBOL_GPL(usb_free_all_descriptors);
 

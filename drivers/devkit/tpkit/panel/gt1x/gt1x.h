@@ -182,7 +182,6 @@
 
 
 #define GT1X_OF_NAME	"gt1x"
-#define GT1X_OF_NAME_LEN	4
 #define GT1X_RETRY_NUM 		3
 #define GT1X_RETRY_FIVE	5
 #define GT1X_FW_SD_NAME "ts/touch_screen_firmware.img"
@@ -327,8 +326,8 @@ struct gt1x_ts_roi {
 
 struct roi_matrix {
 	short *data;
-	unsigned int row;
-	unsigned int col;
+	int row;
+	int col;
 };
 
 struct gt1x_ts_data;
@@ -382,10 +381,8 @@ struct gt1x_ts_data {
 	struct regulator *vci;
 	struct regulator *vddio;
 	struct pinctrl *pinctrl;
-
 	struct pinctrl_state *pins_default;
 	struct pinctrl_state *pins_suspend;
-	struct pinctrl_state *pins_release;
 	struct pinctrl_state *pins_gesture;
 	struct ts_kit_device_data *dev_data;
 
@@ -408,14 +405,13 @@ struct gt1x_ts_data {
 	u32 vdd_value;
 	bool flip_x;
 	bool flip_y;
-	u32 qcom_adapter_flag;
-	u32 power_self_ctrl;/*0-LCD control, 1-tp controlled*/
-	u32 vci_power_type;/*0 - gpio control  1 - ldo  2 - not used*/
-	u32 vddio_power_type;/*0 - gpio control  1 - ldo  2 - not used*/
-	u32 easy_wakeup_supported;
-	u32 create_project_id_supported;
-	char project_id[MAX_STR_LEN +1];
-	char chip_name[GT1X_PRODUCT_ID_LEN +1];
+    u32 power_self_ctrl;/*0-LCD control, 1-tp controlled*/
+    u32 vci_power_type;/*0 - gpio control  1 - ldo  2 - not used*/
+    u32 vddio_power_type;/*0 - gpio control  1 - ldo  2 - not used*/
+    u32 easy_wakeup_supported;
+    u32 create_project_id_supported;
+    char project_id[MAX_STR_LEN +1];
+    char chip_name[GT1X_PRODUCT_ID_LEN +1];
 	char firmware_name[GT1X_FW_NAME_LEN +1];
 	volatile bool rawdiff_mode;/*get rawdata flag for gtp tool, 0 : position mode, 1: data mode */
 	bool tools_support;
@@ -428,17 +424,13 @@ struct gt1x_ts_data {
 	int support_get_tp_color;
 	u32 gt1x_edge_add;
 	u32 gt1x_edge_support_xyer;
-	int gt1x_support_wxy;
-	u32 gt1x_wxy_data_add;
 	u32 gt1x_roi_data_add;
 	int gt1x_roi_fw_supported;
 	bool open_threshold_status;
 	int only_open_once_captest_threshold;
 	int fw_only_depend_on_lcd;//0 : fw depend on TP and others ,1 : fw only depend on lcd.
-	int hide_plain_lcd_log;
 	char lcd_panel_info[LCD_PANEL_INFO_MAX_LEN];
 	char  lcd_module_name[MAX_STR_LEN];
-	char  lcd_hide_module_name[MAX_STR_LEN];
 };
 
 #define IC_TYPE_9PT 0

@@ -142,7 +142,7 @@ static int __init hw_lc8981_module_init(void)
 
 static void __exit hw_lc8981_module_exit(void)
 {
-	hw_ois_unregister(s_lc8981.intf.subdev);
+	hw_ois_unregister(&s_lc8981.intf);
 	platform_driver_unregister(&hw_lc8981_platform_driver);
 }
 

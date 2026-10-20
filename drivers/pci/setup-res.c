@@ -63,7 +63,7 @@ static void pci_std_update_resource(struct pci_dev *dev, int resno)
 		mask = (u32)PCI_BASE_ADDRESS_IO_MASK;
 		new |= res->flags & ~PCI_BASE_ADDRESS_IO_MASK;
 	} else if (resno == PCI_ROM_RESOURCE) {
-		mask = PCI_ROM_ADDRESS_MASK;
+		mask = (u32)PCI_ROM_ADDRESS_MASK;
 	} else {
 		mask = (u32)PCI_BASE_ADDRESS_MEM_MASK;
 		new |= res->flags & ~PCI_BASE_ADDRESS_MEM_MASK;
@@ -140,14 +140,6 @@ int pci_claim_resource(struct pci_dev *dev, int resource)
 			 resource, res);
 		return -EINVAL;
 	}
-
-	/*
-	 * If we have a shadow copy in RAM, the PCI device doesn't respond
-	 * to the shadow range, so we don't need to claim it, and upstream
-	 * bridges don't need to route the range to the device.
-	 */
-	if (res->flags & IORESOURCE_ROM_SHADOW)
-		return 0;
 
 	root = pci_find_parent_resource(dev, res);
 	if (!root) {
@@ -304,9 +296,6 @@ int pci_assign_resource(struct pci_dev *dev, int resno)
 	resource_size_t align, size;
 	int ret;
 
-	if (res->flags & IORESOURCE_PCI_FIXED)
-		return 0;
-
 	res->flags |= IORESOURCE_UNSET;
 	align = pci_resource_alignment(dev, res);
 	if (!align) {
@@ -351,9 +340,6 @@ int pci_reassign_resource(struct pci_dev *dev, int resno, resource_size_t addsiz
 	unsigned long flags;
 	resource_size_t new_size;
 	int ret;
-
-	if (res->flags & IORESOURCE_PCI_FIXED)
-		return 0;
 
 	flags = res->flags;
 	res->flags |= IORESOURCE_UNSET;

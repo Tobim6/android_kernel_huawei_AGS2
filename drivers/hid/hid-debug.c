@@ -659,13 +659,13 @@ EXPORT_SYMBOL_GPL(hid_dump_device);
 /* enqueue string to 'events' ring buffer */
 void hid_debug_event(struct hid_device *hdev, char *buf)
 {
-	unsigned i;
+	int i;
 	struct hid_debug_list *list;
 	unsigned long flags;
 
 	spin_lock_irqsave(&hdev->debug_list_lock, flags);
 	list_for_each_entry(list, &hdev->debug_list, node) {
-		for (i = 0; buf[i]; i++)
+		for (i = 0; i < strlen(buf); i++)
 			list->hid_debug_buf[(list->tail + i) % HID_DEBUG_BUFSIZE] =
 				buf[i];
 		list->tail = (list->tail + i) % HID_DEBUG_BUFSIZE;
@@ -1152,8 +1152,6 @@ copy_rest:
 			goto out;
 		if (list->tail > list->head) {
 			len = list->tail - list->head;
-			if (len > count)
-				len = count;
 
 			if (copy_to_user(buffer + ret, &list->hid_debug_buf[list->head], len)) {
 				ret = -EFAULT;
@@ -1163,8 +1161,6 @@ copy_rest:
 			list->head += len;
 		} else {
 			len = HID_DEBUG_BUFSIZE - list->head;
-			if (len > count)
-				len = count;
 
 			if (copy_to_user(buffer, &list->hid_debug_buf[list->head], len)) {
 				ret = -EFAULT;
@@ -1172,9 +1168,7 @@ copy_rest:
 			}
 			list->head = 0;
 			ret += len;
-			count -= len;
-			if (count > 0)
-				goto copy_rest;
+			goto copy_rest;
 		}
 
 	}

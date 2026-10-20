@@ -1,1 +1,3 @@
-obj-$(CONFIG_HUAWEI_TYPEC_TUSB320) += tusb320.o
+#tusb320 Type C Connector Driver
+
+obj-y	+= tusb320.o

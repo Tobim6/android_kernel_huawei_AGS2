@@ -16,8 +16,6 @@
 #ifndef __ASM_PERCPU_H
 #define __ASM_PERCPU_H
 
-#include <asm/stack_pointer.h>
-
 static inline void set_my_cpu_offset(unsigned long off)
 {
 	asm volatile("msr tpidr_el1, %0" :: "r" (off) : "memory");
@@ -86,7 +84,6 @@ static inline unsigned long __percpu_##op(void *ptr,			\
 		: [val] "Ir" (val));					\
 		break;							\
 	default:							\
-		ret = 0;						\
 		BUILD_BUG();						\
 	}								\
 									\
@@ -116,7 +113,6 @@ static inline unsigned long __percpu_read(void *ptr, int size)
 		ret = ACCESS_ONCE(*(u64 *)ptr);
 		break;
 	default:
-		ret = 0;
 		BUILD_BUG();
 	}
 
@@ -186,7 +182,6 @@ static inline unsigned long __percpu_xchg(void *ptr, unsigned long val,
 		: [val] "r" (val));
 		break;
 	default:
-		ret = 0;
 		BUILD_BUG();
 	}
 
@@ -196,19 +191,19 @@ static inline unsigned long __percpu_xchg(void *ptr, unsigned long val,
 #define _percpu_read(pcp)						\
 ({									\
 	typeof(pcp) __retval;						\
-	preempt_disable_notrace();					\
+	preempt_disable();						\
 	__retval = (typeof(pcp))__percpu_read(raw_cpu_ptr(&(pcp)), 	\
 					      sizeof(pcp));		\
-	preempt_enable_notrace();					\
+	preempt_enable();						\
 	__retval;							\
 })
 
 #define _percpu_write(pcp, val)						\
 do {									\
-	preempt_disable_notrace();					\
+	preempt_disable();						\
 	__percpu_write(raw_cpu_ptr(&(pcp)), (unsigned long)(val), 	\
 				sizeof(pcp));				\
-	preempt_enable_notrace();					\
+	preempt_enable();						\
 } while(0)								\
 
 #define _pcp_protect(operation, pcp, val)			\

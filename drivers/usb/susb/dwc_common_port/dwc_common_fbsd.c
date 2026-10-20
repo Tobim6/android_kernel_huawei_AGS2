@@ -249,6 +249,7 @@ void DWC_EXCEPTION(char *format, ...)
 	va_start(args, format);
 	DWC_VPRINTF(format, args);
 	va_end(args);
+/*	BUG_ON(1);	??? */
 }
 
 #ifdef DEBUG

@@ -31,8 +31,6 @@
 #include <linux/of_platform.h>
 #include <linux/rtc.h>
 
-unsigned long hisi_pmu_rtc_readcount(void);
-
 static struct rtc_device *rtc_timekeeper = NULL;
 
 /**
@@ -46,13 +44,24 @@ static struct rtc_device *rtc_timekeeper = NULL;
  */
 void read_persistent_clock(struct timespec *ts)
 {
+	int err;
+	struct rtc_time tm = {0};
+
 	ts->tv_sec = 0;
 	ts->tv_nsec = 0;
 
 	if (rtc_timekeeper == NULL)
 		return;
 
-	ts->tv_sec = hisi_pmu_rtc_readcount();
+	err = rtc_read_time(rtc_timekeeper, &tm);
+	if (err < 0) {
+		pr_debug("%s:  fail to read rtc time\n",
+			dev_name(&rtc_timekeeper->dev));
+		return;
+	}
+
+	ts->tv_sec = rtc_tm_to_time64(&tm);
+
 	return;
 }
 

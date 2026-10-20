@@ -27,9 +27,6 @@
 #include <asm/cacheflush.h>
 #endif
 
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_AXI_TAG
-
 #define A53_cluster0_cpu0		(0)
 #define A53_cluster1_cpu4		(4)
 
@@ -154,6 +151,7 @@ static int hisi_axi_set_affinity(void)
 	return 0;
 
 }
+
 static int hisi_axi_resume(struct platform_device *pdev)
 {
 	int ret = 0;

@@ -31,12 +31,9 @@ struct fusb30x_chip                                 // Contains data required by
     FSC_U8 vconn_swap_to_on_supported;
     FSC_U8 vconn_swap_to_off_supported;
     FSC_U8 dp_enabled;
+    FSC_U8 pr_swap_wa;
     FSC_U8 product_type_ama;
     FSC_U8 modal_operation_supported;
-    FSC_U8 discover_mode_supported;
-    FSC_U8 enter_mode_supported;
-    FSC_U8 discover_svid_supported;
-    FSC_U8 sink_pdo_number;
 
 #ifdef FSC_DEBUG
     FSC_U8 dbgTimerTicks;                           // Count of timer ticks
@@ -79,7 +76,7 @@ struct fusb30x_chip                                 // Contains data required by
     struct hrtimer timer_policystatetimer;
     struct hrtimer timer_noresponsetimer;
     struct hrtimer timer_loopresettimer;
-    struct hrtimer timer_vbusonlytimer;
+    struct hrtimer timer_prswaptimer;
 
     struct hrtimer timer_wake_unlock;
     struct hrtimer timer_force_timeout;
@@ -103,10 +100,6 @@ struct fusb30x_chip                                 // Contains data required by
     struct kthread_worker set_drp_worker;
     struct kthread_work set_drp_work;
     struct task_struct *set_drp_worker_task;
-
-    struct kthread_worker vbus_only_worker;
-    struct kthread_work vbus_only_work;
-    struct task_struct *vbus_only_worker_task;
 };
 
 extern struct fusb30x_chip* g_chip;

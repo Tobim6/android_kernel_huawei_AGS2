@@ -60,8 +60,7 @@ static int gmc_alloc_device_number(void)
 
 static int read_pid(const char __user *ubuf, size_t len, loff_t *offp, long *pid, long *compress_size)
 {
-	char *buf = NULL;
-	char *p = NULL;
+	char *buf,*p = NULL;
 	/*
 	 * The variable pid here is signed long to satisfy requirements of
 	 * the function kstrtol(). pid_t is defined in the kernel as int, thus
@@ -74,10 +73,10 @@ static int read_pid(const char __user *ubuf, size_t len, loff_t *offp, long *pid
 		return -EINVAL;
 
 	buf = kmalloc(len + 1, GFP_KERNEL);
-	if(buf == NULL)
+	if(!buf)
 		return -ENOMEM;
 
-	if ((ubuf != NULL) && copy_from_user(buf, ubuf, len)){
+	if (copy_from_user(buf, ubuf, len)){
 		ret = -EFAULT;
 		goto out;
 	}
@@ -85,7 +84,7 @@ static int read_pid(const char __user *ubuf, size_t len, loff_t *offp, long *pid
 	buf[len] = '\0';
 
 	p = strstr(buf, " ");
-	if(p != NULL){
+	if(p){
 		*p = '\0';
 		p++;
 	}
@@ -105,7 +104,7 @@ static int read_pid(const char __user *ubuf, size_t len, loff_t *offp, long *pid
 	if(p && kstrtol(p, 10, &value) != 0)
 		value = 0;
 
-	if(compress_size != NULL){
+	if(compress_size){
 		*compress_size = value;
 		if(value < 0)
 			*compress_size = 0;
@@ -161,19 +160,19 @@ static ssize_t gmc_compress_write(struct file *file, const char __user *ubuf,
 	size_t len, loff_t *offp)
 {
 	struct gmc_device *device = (struct gmc_device *)(PDE_DATA(file->f_inode));
-	int ret = 0;
+	int ret;
 	long pid = 0,compress_size=0;
 	struct gmc_private *gmc_work_data = NULL;
 
-	if (device == NULL)
+	if (!device)
 		return -EPERM;
 
 	ret = read_pid(ubuf, len, offp,&pid,&compress_size);
-	if (ret)
+	if (IS_ERR_VALUE(ret))
 		return ret;
 
 	gmc_work_data = kzalloc(sizeof(*gmc_work_data), GFP_KERNEL);
-	if(gmc_work_data == NULL)
+	if(!gmc_work_data)
 		return -ENOMEM;
 
 	gmc_work_data->pid = pid;
@@ -184,26 +183,26 @@ static ssize_t gmc_compress_write(struct file *file, const char __user *ubuf,
 
 	queue_work(system_unbound_wq, &gmc_work_data->gmc_work);
 
-	return len;//lint !e429
+	return len;
 }
 
 static ssize_t gmc_decompress_write(struct file *file, const char __user *ubuf,
 	size_t len, loff_t *offp)
 {
 	struct gmc_device *device = (struct gmc_device *)(PDE_DATA(file->f_inode));
-	int ret = 0;
+	int ret;
 	long pid = 0;
 	struct gmc_private *gmc_work_data = NULL;
 
-	if (device == NULL)
+	if (!device)
 		return -EPERM;
 
 	ret = read_pid(ubuf, len, offp,&pid, NULL);
-	if (ret)
+	if (IS_ERR_VALUE(ret))
 		return ret;
 
 	gmc_work_data = kzalloc(sizeof(*gmc_work_data), GFP_KERNEL);
-	if(gmc_work_data == NULL)
+	if(!gmc_work_data)
 		return -ENOMEM;
 
 	gmc_work_data->pid = pid;
@@ -214,14 +213,14 @@ static ssize_t gmc_decompress_write(struct file *file, const char __user *ubuf,
 
 	queue_work(system_unbound_wq, &gmc_work_data->gmc_work);
 
-	return len;//lint !e429
+	return len;
 }
 
 #ifdef GPU_GMC_DEBUG
 int gmc_meminfo_open(struct inode *in, struct file *file)
 {
 	struct gmc_device *device = (struct gmc_device *)(PDE_DATA(file->f_inode));
-	if (device == NULL)
+	if (!device)
 		return -EPERM;
 
 	if (!device->ops->compress_kctx)
@@ -229,21 +228,20 @@ int gmc_meminfo_open(struct inode *in, struct file *file)
 
 	return device->ops->meminfo_open(in, file);
 }
+#endif
 
 static ssize_t gmc_storage_stat_read(struct file *file, char __user *ubuf,
 				size_t len, loff_t *offp)
 {
-	ssize_t ret;
-	ssize_t out_offset;
-	const ssize_t out_count = GMC_DEBUGFS_BUFMAX;
+	ssize_t ret, out_offset, out_count = GMC_DEBUGFS_BUFMAX;
 	struct gmc_device *device = (struct gmc_device *)(PDE_DATA(file->f_inode));
-	char *buf = NULL;
+	char *buf;
 
-	if (device == NULL)
+	if (!device)
 		return -EPERM;
 
 	buf = kmalloc(out_count, GFP_KERNEL);
-	if (buf == NULL)
+	if (!buf)
 		return -ENOMEM;
 
 	out_offset = 0;
@@ -270,7 +268,6 @@ static ssize_t gmc_storage_stat_read(struct file *file, char __user *ubuf,
 
 	return ret;
 }
-#endif
 
 static const struct file_operations gmc_compress_fops = {
 	.open = simple_open,
@@ -303,7 +300,7 @@ static const struct file_operations gmc_memory_info_fops = {
 static int gmc_fs_init(void)
 {
 	gmc_root_dentry = proc_mkdir("gmc", NULL);
-	if (gmc_root_dentry == NULL) {
+	if (!gmc_root_dentry) {
 		pr_err("Unable to create gmc proc directory\n");
 		return -EINVAL;
 	}
@@ -327,13 +324,12 @@ static int gmc_fs_init(void)
  */
 int gmc_register_device(struct gmc_ops *gmc_operations, struct gmc_device *device)
 {
-	char dirname[GMC_DIRNAME_LENGTH] = {0};
+	char	dirname[GMC_DIRNAME_LENGTH];
 	struct gmc_storage *storage;
 	struct proc_dir_entry *device_dir_dentry;
 
 	int id,i,array_size = 0;
 	int err = -EINVAL;
-	int ret = -1;
 
 	/*
 	 * This data structure describes files associated with some particular
@@ -347,7 +343,7 @@ int gmc_register_device(struct gmc_ops *gmc_operations, struct gmc_device *devic
 	} files[] = {
 		{"compress",     &gmc_compress_fops},
 		{"decompress",   &gmc_decompress_fops},
-#ifdef GPU_GMC_DEBUG
+#if GPU_GMC_DEBUG
 		{"storage_stat", &gmc_storage_stat_fops},
 		{"memory_info", &gmc_memory_info_fops},
 #endif
@@ -356,15 +352,11 @@ int gmc_register_device(struct gmc_ops *gmc_operations, struct gmc_device *devic
 	BUILD_BUG_ON(ARRAY_SIZE(files) > GMC_FS_MAX_DENTRIES);
 
 	id = gmc_alloc_device_number();
-	ret = snprintf_s(dirname, GMC_DIRNAME_LENGTH,  GMC_DIRNAME_LENGTH - 1, "device%d", id);
-	if (ret == -1) {
-		pr_err("GMC register device snprintf_s failed\n");
-		return -EINVAL;
-	}
+	snprintf_s(dirname, GMC_DIRNAME_LENGTH,  GMC_DIRNAME_LENGTH - 1, "device%d", id);
 	dirname[GMC_DIRNAME_LENGTH - 1] = '\0';
 
 	storage = gmc_storage_create();
-	if (storage == NULL) {
+	if (!storage) {
 		pr_err("Unable to create a storage for the device.\n");
 		err = -ENOMEM;
 		goto error_out;
@@ -374,13 +366,13 @@ int gmc_register_device(struct gmc_ops *gmc_operations, struct gmc_device *devic
 	device->ops = gmc_operations;
 
 	/* Lazy creation of the root GMC dentry. */
-	if (gmc_root_dentry == NULL) {
+	if (!gmc_root_dentry) {
 		if (gmc_fs_init())
 			goto error_destroy_storage;
 	}
 
 	device_dir_dentry = proc_mkdir(dirname, gmc_root_dentry);
-	if (device_dir_dentry == NULL) {
+	if (!device_dir_dentry) {
 		pr_err("Unable to create gmc device proc directory\n");
 		goto error_cleanup_debugfs;
 	}
@@ -392,8 +384,8 @@ int gmc_register_device(struct gmc_ops *gmc_operations, struct gmc_device *devic
 	 */
 	array_size = ARRAY_SIZE(files);
 	for (i = 0; i < array_size; i++) {
-		struct proc_dir_entry *dir_entry = proc_create_data(files[i].name,S_IWUSR|S_IRUSR|S_IWGRP,device_dir_dentry,files[i].fops_p, device);
-		if (dir_entry == NULL) {
+		struct proc_dir_entry *dir_entry = proc_create_data(files[i].name,S_IWUSR|S_IWGRP,device_dir_dentry,files[i].fops_p, device);
+		if (!dir_entry) {
 			pr_err("Unable to create %s file\n", files[i].name);
 			goto error_cleanup_debugfs;
 		}

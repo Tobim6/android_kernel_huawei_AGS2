@@ -26,8 +26,6 @@
 #include <linux/io.h>
 #include <linux/string.h>
 #include <linux/hisi/util.h>
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_NOC_TAG
 
 #include "hisi_noc_info.h"
 #include "hisi_noc.h"
@@ -38,12 +36,6 @@
 #define PLATFORM_ID_BIT_HI3660       (2U)
 #define PLATFORM_ID_BIT_KIRIN970_ES  (3U)
 #define PLATFORM_ID_BIT_KIRIN970     (4U)
-#define PLATFORM_ID_BIT_MIA          (5U)
-#define PLATFORM_ID_BIT_ATLA_ES      (6U)
-#define PLATFORM_ID_BIT_ATLA         (7U)
-#define PLATFORM_ID_BIT_ORLA         (8U)
-#define PLATFORM_ID_BIT_PHOE_ES      (9U)
-#define PLATFORM_ID_BIT_PHOE         (10U)
 
 /*hisi platform noc bus info struct.*/
 struct noc_platform_info {
@@ -115,71 +107,6 @@ static struct noc_platform_info g_noc_platform_info[] = {
 	       .pfun_get_size = hisi_noc_get_array_size_kirin970,
 	       .pfun_clock_enable = hisi_noc_clock_enable_kirin970,
 	       },
-
-	/*hisi platform: MIA */
-	[5] = {
-	       .name = "MIA",
-	       .platform_id = 1 << PLATFORM_ID_BIT_MIA,	/* must be same as the value defined in DTS. */
-	       .p_noc_info_bus = noc_buses_info_MIA,
-	       .p_noc_info_dump = noc_dump_reg_list_MIA,
-	       .p_noc_info_filter_initflow = hisi_filter_initflow_MIA,
-	       .pfun_get_size = hisi_noc_get_array_size_MIA,
-	       .pfun_clock_enable = hisi_noc_clock_enable_MIA,
-	       },
-
-	/*hisi platform: ATLA_es */
-	[6] = {
-	       .name = "ATLA_es",
-	       .platform_id = 1 << PLATFORM_ID_BIT_ATLA_ES,	/* must be same as the value defined in DTS. */
-	       .p_noc_info_bus = noc_buses_info_ATLA_es,
-	       .p_noc_info_dump = noc_dump_reg_list_ATLA_es,
-	       .p_noc_info_filter_initflow = hisi_filter_initflow_ATLA_es,
-	       .pfun_get_size = hisi_noc_get_array_size_ATLA_es,
-	       .pfun_clock_enable = hisi_noc_clock_enable_ATLA_es,
-	       },
-
-	/*hisi platform: ATLA */
-	[7] = {
-	       .name = "ATLA",
-	       .platform_id = 1 << PLATFORM_ID_BIT_ATLA,	/* must be same as the value defined in DTS. */
-	       .p_noc_info_bus = noc_buses_info_ATLA,
-	       .p_noc_info_dump = noc_dump_reg_list_ATLA,
-	       .p_noc_info_filter_initflow = hisi_filter_initflow_ATLA,
-	       .pfun_get_size = hisi_noc_get_array_size_ATLA,
-	       .pfun_clock_enable = hisi_noc_clock_enable_ATLA,
-	       },
-
-	/*hisi platform: ORLA */
-	[8] = {
-	       .name = "ORLA",
-	       .platform_id = 1 << PLATFORM_ID_BIT_ORLA,	/* must be same as the value defined in DTS. */
-	       .p_noc_info_bus = noc_buses_info_ORLA,
-	       .p_noc_info_dump = noc_dump_reg_list_ORLA,
-	       .p_noc_info_filter_initflow = hisi_filter_initflow_ORLA,
-	       .pfun_get_size = hisi_noc_get_array_size_ORLA,
-	       .pfun_clock_enable = hisi_noc_clock_enable_ORLA,
-	      },
-
-	/*hisi platform: PHOE_es */
-	[9] = {
-	       .name = "PHOE_es",
-	       .platform_id = 1 << PLATFORM_ID_BIT_PHOE_ES,	/* must be same as the value defined in DTS. */
-	       .p_noc_info_bus = noc_buses_info_PHOE_es,
-	       .p_noc_info_dump = noc_dump_reg_list_PHOE_es,
-	       .p_noc_info_filter_initflow = hisi_filter_initflow_PHOE_es,
-	       .pfun_get_size = hisi_noc_get_array_size_PHOE_es,
-	       .pfun_clock_enable = hisi_noc_clock_enable_PHOE_es,
-	       },
-	/*hisi platform: PHOE */
-	[10] = {
-	       .name = "PHOE",
-	       .platform_id = 1 << PLATFORM_ID_BIT_PHOE,	/* must be same as the value defined in DTS. */
-	       .p_noc_info_bus = noc_buses_info_PHOE,
-	       .p_noc_info_dump = noc_dump_reg_list_PHOE,
-	       .p_noc_info_filter_initflow = hisi_filter_initflow_PHOE,
-	       .pfun_get_size = hisi_noc_get_array_size_PHOE,
-	       .pfun_clock_enable = hisi_noc_clock_enable_PHOE,
-	       }
 };
 
 static unsigned int g_info_index = 0;

@@ -1,8 +1,8 @@
 VERSION = 4
-PATCHLEVEL = 9
-SUBLEVEL = 148
+PATCHLEVEL = 4
+SUBLEVEL = 23
 EXTRAVERSION =
-NAME = Roaring Lionus
+NAME = Blurry Fish Butt
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
@@ -217,6 +217,7 @@ endif
 objtree		:= $(CURDIR)
 src		:= $(srctree)
 obj		:= $(objtree)
+obb_llt_mdrv    := "--obb_llt_mdrv"
 
 VPATH		:= $(srctree)$(if $(KBUILD_EXTMOD),:$(KBUILD_EXTMOD))
 
@@ -302,14 +303,9 @@ CONFIG_SHELL := $(shell if [ -x "$$BASH" ]; then echo $$BASH; \
 	  else if [ -x /bin/bash ]; then echo /bin/bash; \
 	  else echo sh; fi ; fi)
 
-ifeq ($(strip $(clang)), true)
-CLANG_CROSS_COMPILE_PRE:=$(srctree)/../../prebuilts/clang/host/linux-x86/clang-4679922/bin/
-HOSTCC       = $(CLANG_CROSS_COMPILE_PRE)clang
-else
 HOSTCC       = gcc
-endif
 HOSTCXX      = g++
-HOSTCFLAGS   := -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon
+HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89
 HOSTCXXFLAGS = -O2
 
 ifeq ($(shell $(HOSTCC) -v 2>&1 | grep -c "clang version"), 1)
@@ -354,15 +350,7 @@ include scripts/Kbuild.include
 # Make variables (CC, etc...)
 AS		= $(SOURCEANALYZER) $(CROSS_COMPILE)as
 LD		= $(SOURCEANALYZER) $(CROSS_COMPILE)ld
-ifeq (,$(strip $(KP_PATCH)))
-CCACHE		?= $(srctree)/../../prebuilts/misc/linux-x86/ccache/ccache
-endif
-ifeq ($(strip $(clang)), true)
-CC		= $(SOURCEANALYZER) $(wildcard $(CCACHE)) $(CLANG_CROSS_COMPILE_PRE)clang
-else
-CC		= $(SOURCEANALYZER) $(wildcard $(CCACHE)) $(CROSS_COMPILE)gcc
-endif
-LDGOLD		= $(CROSS_COMPILE)ld.gold
+CC		= $(SOURCEANALYZER) $(CCACHE) $(CROSS_COMPILE)gcc
 CPP		= $(CC) -E
 AR		= $(SOURCEANALYZER) $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
@@ -378,21 +366,22 @@ PYTHON		= python
 CHECK		= sparse
 
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
-		  -Wbitwise -Wno-return-void $(CF)
-NOSTDINC_FLAGS  =
+		  -Wbitwise -Wno-return-void $(CF) -Wall
 CFLAGS_MODULE   =
 AFLAGS_MODULE   =
 LDFLAGS_MODULE  =
 CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
-LDFLAGS_vmlinux =
+CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage -fno-tree-loop-im
+CFLAGS_KCOV	= -fsanitize-coverage=trace-pc
+
 
 # Use USERINCLUDE when you must reference the UAPI directories only.
 USERINCLUDE    := \
 		-I$(srctree)/arch/$(hdr-arch)/include/uapi \
-		-I$(objtree)/arch/$(hdr-arch)/include/generated/uapi \
+		-Iarch/$(hdr-arch)/include/generated/uapi \
 		-I$(srctree)/include/uapi \
-		-I$(objtree)/include/generated/uapi \
+		-Iinclude/generated/uapi \
                 -include $(srctree)/include/linux/kconfig.h
 
 export TARGET_BOARD_PLATFORM = hi6250
@@ -400,58 +389,42 @@ export TARGET_BOARD_PLATFORM = hi6250
 # Needed to be compatible with the O= option
 LINUXINCLUDE    := \
 		-I$(srctree)/arch/$(hdr-arch)/include \
-		-I$(srctree)/arch/$(hdr-arch)/include/generated \
-		-I$(objtree)/arch/$(hdr-arch)/include/generated/uapi \
-		-I$(objtree)/arch/$(hdr-arch)/include/generated \
+		-Iarch/$(hdr-arch)/include/generated/uapi \
+		-Iarch/$(hdr-arch)/include/generated \
 		$(if $(KBUILD_SRC), -I$(srctree)/include) \
-		-I$(objtree)/include\
+		-Iinclude \
 		$(USERINCLUDE)
 LINUXINCLUDE += -I$(srctree)/mm \
-		-I$(srctree)/include \
-		-I$(srctree)/include/linux/hisi \
-		-I$(srctree)/drivers \
-		-I$(srctree)/drivers/huawei_platform \
-		-I$(srctree)/fs/proc
+				-I$(srctree)/include \
+				-I$(srctree)/include/linux/hisi \
+				-I$(srctree)/drivers \
+				-I$(srctree)/drivers/huawei_platform \
+				-I$(srctree)/fs/proc
 
-ifeq ($(CFG_LCD_KIT),true)
-LINUXINCLUDE += -I$(objtree)/drivers/devkit/lcdkit/lcdkit3.0
-else
-LINUXINCLUDE += -I$(objtree)/drivers/devkit/lcdkit/lcdkit1.0
-endif
-
-ifeq ($(strip $(TARGET_BOARD_PLATFORM)), kirin980)
-LINUXINCLUDE += -I$(srctree)/drivers/hisi/ap/platform/$(TARGET_BOARD_PLATFORM)
-else
 ifeq ($(chip_type),es)
 LINUXINCLUDE += -I$(srctree)/drivers/hisi/ap/platform/$(TARGET_BOARD_PLATFORM)_es
 else
-ifeq ($(chip_type),m536)
-LINUXINCLUDE += -I$(srctree)/drivers/hisi/ap/platform/$(TARGET_BOARD_PLATFORM)_m536
-else
 LINUXINCLUDE += -I$(srctree)/drivers/hisi/ap/platform/$(TARGET_BOARD_PLATFORM)
-endif
-endif
 endif
 
 ifneq ($(BALONG_INC),)
 LINUXINCLUDE       += $(BALONG_INC)
 endif
 
-LINUXINCLUDE	+= $(filter-out $(LINUXINCLUDE),$(USERINCLUDE))
+KBUILD_CPPFLAGS := -D__KERNEL__
 
-KBUILD_AFLAGS   := -D__ASSEMBLY__
 KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
-		   -fno-strict-aliasing -fno-common -fshort-wchar \
+		   -fno-strict-aliasing -fno-common \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
 		   -std=gnu89
-KBUILD_CPPFLAGS := -D__KERNEL__
+
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
+KBUILD_AFLAGS   := -D__ASSEMBLY__
 KBUILD_AFLAGS_MODULE  := -DMODULE
 KBUILD_CFLAGS_MODULE  := -DMODULE
 KBUILD_LDFLAGS_MODULE := -T $(srctree)/scripts/module-common.lds
-GCC_PLUGINS_CFLAGS :=
 
 # Read KERNELRELEASE from include/config/kernel.release (if it exists)
 KERNELRELEASE = $(shell cat include/config/kernel.release 2> /dev/null)
@@ -465,13 +438,13 @@ KBUILD_AFLAGS += -DDRV_BUILD_SEPARATE
 KBUILD_CPPFLAGS += -DDRV_BUILD_SEPARATE
 endif
 
+ifneq ($(BALONG_FAMA_FLAGS),)
+KBUILD_CFLAGS += $(BALONG_FAMA_FLAGS)
+endif
+
 #add SLT FEATURE to ap
 ifeq ($(strip $(hitest_type)),slt)
 KBUILD_CFLAGS += -D__SLT_FEATURE__
-endif
-
-ifneq ($(BALONG_FAMA_FLAGS),)
-KBUILD_CFLAGS += $(BALONG_FAMA_FLAGS)
 endif
 
 OBB_PRODUCT_NAME = hi6250
@@ -487,8 +460,7 @@ export MAKE AWK GENKSYMS INSTALLKERNEL PERL PYTHON UTS_MACHINE
 export HOSTCXX HOSTCXXFLAGS LDFLAGS_MODULE CHECK CHECKFLAGS
 
 export KBUILD_CPPFLAGS NOSTDINC_FLAGS LINUXINCLUDE OBJCOPYFLAGS LDFLAGS
-export KBUILD_CFLAGS CFLAGS_KERNEL CFLAGS_MODULE
-export CFLAGS_KASAN CFLAGS_KASAN_NOSANITIZE CFLAGS_UBSAN
+export KBUILD_CFLAGS CFLAGS_KERNEL CFLAGS_MODULE CFLAGS_GCOV CFLAGS_KCOV CFLAGS_KASAN CFLAGS_UBSAN
 export KBUILD_AFLAGS AFLAGS_KERNEL AFLAGS_MODULE
 export KBUILD_AFLAGS_MODULE KBUILD_CFLAGS_MODULE KBUILD_LDFLAGS_MODULE
 export KBUILD_AFLAGS_KERNEL KBUILD_CFLAGS_KERNEL
@@ -675,41 +647,11 @@ else
 include/config/auto.conf: ;
 endif # $(dot-config)
 
-# For the kernel to actually contain only the needed exported symbols,
-# we have to build modules as well to determine what those symbols are.
-# (this can be evaluated only once include/config/auto.conf has been included)
-ifdef CONFIG_TRIM_UNUSED_KSYMS
-  KBUILD_MODULES := 1
-endif
-
 # The all: target is the default when no target is given on the
 # command line.
 # This allow a user to issue only 'make' to build a kernel including modules
 # Defaults to vmlinux, but the arch makefile usually adds further targets
 all: vmlinux
-
-KBUILD_CFLAGS	+= $(call cc-option,-fno-PIE)
-KBUILD_AFLAGS	+= $(call cc-option,-fno-PIE)
-CFLAGS_GCOV	:= -fprofile-arcs -ftest-coverage \
-	$(call cc-option, -fno-tree-loop-im) \
-	$(call cc-disable-warning,maybe-uninitialized,)
-CFLAGS_KCOV	:= $(call cc-option,-fsanitize-coverage=trace-pc,)
-export CFLAGS_GCOV CFLAGS_KCOV
-
-# Make toolchain changes before including arch/$(SRCARCH)/Makefile to ensure
-# ar/cc/ld-* macros return correct values.
-ifdef CONFIG_LTO_CLANG
-CLANG_LIBS_PRE:=$(srctree)/../../prebuilts/clang/host/linux-x86/clang-4679922/lib64/
-# use GNU gold with LLVMgold for LTO linking, and LD for vmlinux_link
-LDFINAL_vmlinux := $(LD)
-LD		:= $(LDGOLD)
-LDFLAGS		+= -plugin $(CLANG_LIBS_PRE)LLVMgold.so
-# use llvm-ar for building symbol tables from IR files, and llvm-dis instead
-# of objdump for processing symbol versions and exports
-LLVM_AR		:= $(CLANG_CROSS_COMPILE_PRE)llvm-ar
-LLVM_DIS	:= $(CLANG_CROSS_COMPILE_PRE)llvm-dis
-export LLVM_AR LLVM_DIS
-endif
 
 # The arch Makefile can set ARCH_{CPP,A,C}FLAGS to override the default
 # values of the respective KBUILD_* variables
@@ -719,77 +661,17 @@ ARCH_CFLAGS :=
 include arch/$(SRCARCH)/Makefile
 
 KBUILD_CFLAGS	+= $(call cc-option,-fno-delete-null-pointer-checks,)
-KBUILD_CFLAGS	+= $(call cc-disable-warning,frame-address,)
-KBUILD_CFLAGS	+= $(call cc-disable-warning, format-truncation)
-KBUILD_CFLAGS	+= $(call cc-disable-warning, format-overflow)
-KBUILD_CFLAGS	+= $(call cc-disable-warning, int-in-bool-context)
-KBUILD_CFLAGS	+= $(call cc-disable-warning, attribute-alias)
-
-ifdef CONFIG_LD_DEAD_CODE_DATA_ELIMINATION
-KBUILD_CFLAGS	+= $(call cc-option,-ffunction-sections,)
-KBUILD_CFLAGS	+= $(call cc-option,-fdata-sections,)
-endif
-
-ifdef CONFIG_LTO_CLANG
-lto-clang-flags	:= -flto -fvisibility=hidden
-
-# allow disabling only clang LTO where needed
-DISABLE_LTO_CLANG := -fno-lto -fvisibility=default
-export DISABLE_LTO_CLANG
-endif
-
-ifdef CONFIG_LTO
-lto-flags	:= $(lto-clang-flags)
-KBUILD_CFLAGS	+= $(lto-flags)
-
-DISABLE_LTO	:= $(DISABLE_LTO_CLANG)
-export DISABLE_LTO
-
-# LDFINAL_vmlinux and LDFLAGS_FINAL_vmlinux can be set to override
-# the linker and flags for vmlinux_link.
-export LDFINAL_vmlinux LDFLAGS_FINAL_vmlinux
-endif
-
-ifdef CONFIG_CFI_CLANG
-cfi-clang-flags	+= -fsanitize=cfi
-DISABLE_CFI_CLANG := -fno-sanitize=cfi
-ifdef CONFIG_MODULES
-cfi-clang-flags	+= -fsanitize-cfi-cross-dso
-DISABLE_CFI_CLANG += -fno-sanitize-cfi-cross-dso
-endif
-ifdef CONFIG_CFI_PERMISSIVE
-cfi-clang-flags	+= -fsanitize-recover=cfi -fno-sanitize-trap=cfi
-endif
-
-# also disable CFI when LTO is disabled
-DISABLE_LTO_CLANG += $(DISABLE_CFI_CLANG)
-# allow disabling only clang CFI where needed
-export DISABLE_CFI_CLANG
-endif
-
-ifdef CONFIG_CFI
-# cfi-flags are re-tested in prepare-compiler-check
-cfi-flags	:= $(cfi-clang-flags)
-KBUILD_CFLAGS	+= $(cfi-flags)
-
-DISABLE_CFI	:= $(DISABLE_CFI_CLANG)
-DISABLE_LTO	+= $(DISABLE_CFI)
-export DISABLE_CFI
-endif
+KBUILD_CFLAGS	+= $(call cc-disable-warning,maybe-uninitialized,)
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
-KBUILD_CFLAGS	+= $(call cc-option,-Oz,-Os)
-KBUILD_CFLAGS	+= $(call cc-disable-warning,maybe-uninitialized,)
+KBUILD_CFLAGS	+= -Os
 else
 ifdef CONFIG_PROFILE_ALL_BRANCHES
-KBUILD_CFLAGS	+= -O2 $(call cc-disable-warning,maybe-uninitialized,)
+KBUILD_CFLAGS	+= -O2
 else
 KBUILD_CFLAGS   += -O2
 endif
 endif
-
-KBUILD_CFLAGS += $(call cc-ifversion, -lt, 0409, \
-			$(call cc-disable-warning,maybe-uninitialized,))
 
 # Tell gcc to never replace conditional load with a non-conditional one
 KBUILD_CFLAGS	+= $(call cc-option,--param=allow-store-data-races=0)
@@ -799,7 +681,6 @@ ifeq ($(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-goto.sh $(CC) $(KBUILD_CFLA
 	KBUILD_CFLAGS += -DCC_HAVE_ASM_GOTO
 	KBUILD_AFLAGS += -DCC_HAVE_ASM_GOTO
 endif
-
 
 ifdef CONFIG_READABLE_ASM
 # Disable optimizations that make assembler listings hard to read.
@@ -815,14 +696,6 @@ ifneq ($(CONFIG_FRAME_WARN),0)
 KBUILD_CFLAGS += $(call cc-option,-Wframe-larger-than=${CONFIG_FRAME_WARN})
 endif
 
-ifeq ($(use_hash_log),true)
-KBUILD_CFLAGS += -fplugin=$(srctree)/../../prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/libexec/gcc/aarch64-linux-android/4.9.x/hashlog.so
-KBUILD_CFLAGS += -fplugin-arg-hashlog-keyconfdir=$(srctree)/../../vendor/hisi/ap/build/core/kernel_hash_key_config.txt
-ifeq ($(gen_loghash_file),true)
-KBUILD_CFLAGS += -fplugin-arg-hashlog-genkeyfile
-endif
-endif
-
 #KBUILD_CFLAGS += -fplugin=$(srctree)/../../prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/libexec/gcc/aarch64-linux-android/4.9.x/cfi.so -fplugin-arg-cfi-logfault
 ifdef CONFIG_HUAWEI_CFI
 KBUILD_CFLAGS += -fplugin=$(srctree)/../../prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/libexec/gcc/aarch64-linux-android/4.9.x/cfi.so -fplugin-arg-cfi-abortfn=__cfi_report
@@ -831,92 +704,64 @@ ifeq ($(CONFIG_HUAWEI_CFI_DEBUG),y)
 KBUILD_CFLAGS += -DHW_SAVE_CFI_LOG
 endif
 endif
-## kernel struct layout randomize
-ifdef CONFIG_GCC_PLUGIN_RANDSTRUCT
-###!!!!!! only support 100 white list ,and etch item must less than 64 ,split by ,
-rand_struct_whitelist=/rand_struct_whitelist_do_nothing/
-#rand_struct_whitelist=/modem/,/hisi/,/connectivity/,/wifi/,drivers/spmi_hisi/,drivers/hwusb/,drivers/rphone/,drivers/media/,drivers/vcodec/
-KBUILD_CFLAGS += -fplugin=$(srctree)/../../prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/libexec/gcc/aarch64-linux-android/4.9.x/randomize_layout.so
-RANDSTRUCT_SEED_VALUE = $(shell cat $(srctree)/randomize_layout_seed)
-KBUILD_CFLAGS += -fplugin-arg-randomize_layout-seed=$(RANDSTRUCT_SEED_VALUE)
-KBUILD_CFLAGS += -fplugin-arg-randomize_layout-whitelist=$(rand_struct_whitelist)
 
-ifdef CONFIG_GCC_PLUGIN_RANDSTRUCT_PERFORMANCE
-KBUILD_CFLAGS += -fplugin-arg-randomize_layout-performance-mode
-endif
-#KBUILD_CFLAGS += -fplugin-arg-randomize_layout-check_duplicate
-
-ifneq ($(RANDSTRUCT_SEED_VALUE),)
-ifdef CONFIG_GCC_PLUGIN_RANDSTRUCT_OPERATIONS
-KBUILD_CFLAGS += -fplugin-arg-randomize_layout-include_operations_struct
-endif
-KBUILD_CFLAGS += -DRANDSTRUCT_PLUGIN
-endif
-
-endif
-
-ifdef CONFIG_GCC_PLUGIN_STRUCTLEAK
-KBUILD_CFLAGS += -fplugin=$(srctree)/../../prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/libexec/gcc/aarch64-linux-android/4.9.x/structleak.so
-KBUILD_CFLAGS += -fplugin-arg-structleak-verbose
-##byref-all means all struct should be forcibly initialized, default initialized struct copy to user
-##KBUILD_CFLAGS += -fplugin-arg-structleak-byref-all
-
-KBUILD_CFLAGS += -DSTRUCTLEAK_PLUGIN
-endif
-# This selects the stack protector compiler flag. Testing it is delayed
-# until after .config has been reprocessed, in the prepare-compiler-check
-# target.
+# Handle stack protector mode.
+#
+# Since kbuild can potentially perform two passes (first with the old
+# .config values and then with updated .config values), we cannot error out
+# if a desired compiler option is unsupported. If we were to error, kbuild
+# could never get to the second pass and actually notice that we changed
+# the option to something that was supported.
+#
+# Additionally, we don't want to fallback and/or silently change which compiler
+# flags will be used, since that leads to producing kernels with different
+# security feature characteristics depending on the compiler used. ("But I
+# selected CC_STACKPROTECTOR_STRONG! Why did it build with _REGULAR?!")
+#
+# The middle ground is to warn here so that the failed option is obvious, but
+# to let the build fail with bad compiler flags so that we can't produce a
+# kernel when there is a CONFIG and compiler mismatch.
+#
 ifdef CONFIG_CC_STACKPROTECTOR_REGULAR
   stackp-flag := -fstack-protector
-  stackp-name := REGULAR
+  ifeq ($(call cc-option, $(stackp-flag)),)
+    $(warning Cannot use CONFIG_CC_STACKPROTECTOR_REGULAR: \
+             -fstack-protector not supported by compiler)
+  endif
 else
 ifdef CONFIG_CC_STACKPROTECTOR_STRONG
   stackp-flag := -fstack-protector-strong
-  stackp-name := STRONG
+  ifeq ($(call cc-option, $(stackp-flag)),)
+    $(warning Cannot use CONFIG_CC_STACKPROTECTOR_STRONG: \
+	      -fstack-protector-strong not supported by compiler)
+  endif
 else
   # Force off for distro compilers that enable stack protector by default.
   stackp-flag := $(call cc-option, -fno-stack-protector)
 endif
 endif
-# Find arch-specific stack protector compiler sanity-checking script.
-ifdef CONFIG_CC_STACKPROTECTOR
-  stackp-path := $(srctree)/scripts/gcc-$(SRCARCH)_$(BITS)-has-stack-protector.sh
-  stackp-check := $(wildcard $(stackp-path))
-endif
 KBUILD_CFLAGS += $(stackp-flag)
 
+ifdef CONFIG_KCOV
+  ifeq ($(call cc-option, $(CFLAGS_KCOV)),)
+    $(warning Cannot use CONFIG_KCOV: \
+             -fsanitize-coverage=trace-pc is not supported by compiler)
+    CFLAGS_KCOV =
+  endif
+endif
 ifeq ($(cc-name),clang)
-ifneq ($(CROSS_COMPILE),)
-CLANG_TRIPLE    ?= $(CROSS_COMPILE)
-CLANG_TARGET	:= --target=$(notdir $(CLANG_TRIPLE:%-=%))
-GCC_TOOLCHAIN	:= $(realpath $(dir $(shell which $(LD)))/..)
-endif
-ifneq ($(GCC_TOOLCHAIN),)
-CLANG_GCC_TC	:= --gcc-toolchain=$(GCC_TOOLCHAIN)
-endif
-KBUILD_CFLAGS += $(CLANG_TARGET) $(CLANG_GCC_TC)
-KBUILD_AFLAGS += $(CLANG_TARGET) $(CLANG_GCC_TC)
 KBUILD_CPPFLAGS += $(call cc-option,-Qunused-arguments,)
+KBUILD_CPPFLAGS += $(call cc-option,-Wno-unknown-warning-option,)
 KBUILD_CFLAGS += $(call cc-disable-warning, unused-variable)
 KBUILD_CFLAGS += $(call cc-disable-warning, format-invalid-specifier)
 KBUILD_CFLAGS += $(call cc-disable-warning, gnu)
-KBUILD_CFLAGS += $(call cc-disable-warning, address-of-packed-member)
-KBUILD_CFLAGS += $(call cc-disable-warning, duplicate-decl-specifier)
 # Quiet clang warning: comparison of unsigned expression < 0 is always false
 KBUILD_CFLAGS += $(call cc-disable-warning, tautological-compare)
-
-ifeq ($(strip $(clang)), true)
-KBUILD_CFLAGS += -Wno-error=return-type
-KBUILD_CFLAGS += -Wno-error=unknown-warning-option
-endif
-
 # CLANG uses a _MergedGlobals as optimization, but this breaks modpost, as the
 # source of a reference will be _MergedGlobals and not on of the whitelisted names.
 # See modpost pattern 2
 KBUILD_CFLAGS += $(call cc-option, -mno-global-merge,)
 KBUILD_CFLAGS += $(call cc-option, -fcatch-undefined-behavior)
-KBUILD_CFLAGS += $(call cc-option, -no-integrated-as)
-KBUILD_AFLAGS += $(call cc-option, -no-integrated-as)
 else
 
 # These warnings generated too much noise in a regular build.
@@ -990,23 +835,8 @@ KBUILD_CFLAGS += $(call cc-option,-Wdeclaration-after-statement,)
 # disable pointer signed / unsigned warnings in gcc 4.0
 KBUILD_CFLAGS += $(call cc-disable-warning, pointer-sign)
 
-# disable stringop warnings in gcc 8+
-KBUILD_CFLAGS += $(call cc-disable-warning, stringop-truncation)
-
 # disable invalid "can't wrap" optimizations for signed / pointers
 KBUILD_CFLAGS	+= $(call cc-option,-fno-strict-overflow)
-
-# clang sets -fmerge-all-constants by default as optimization, but this
-# is non-conforming behavior for C and in fact breaks the kernel, so we
-# need to disable it here generally.
-KBUILD_CFLAGS	+= $(call cc-option,-fno-merge-all-constants)
-
-# for gcc -fno-merge-all-constants disables everything, but it is fine
-# to have actual conforming behavior enabled.
-KBUILD_CFLAGS	+= $(call cc-option,-fmerge-constants)
-
-# Make sure -fstack-check isn't enabled (like gentoo apparently did)
-KBUILD_CFLAGS  += $(call cc-option,-fno-stack-check,)
 
 # conserve stack if available
 KBUILD_CFLAGS   += $(call cc-option,-fconserve-stack)
@@ -1020,15 +850,8 @@ KBUILD_CFLAGS   += $(call cc-option,-Werror=strict-prototypes)
 # Prohibit date/time macros, which would make the build non-deterministic
 #KBUILD_CFLAGS   += $(call cc-option,-Werror=date-time)
 
-ifneq ($(strip $(clang)), true)
-# enforce correct pointer usage
-KBUILD_CFLAGS   += $(call cc-option,-Werror=incompatible-pointer-types)
-endif
-
 # use the deterministic mode of AR if available
 KBUILD_ARFLAGS := $(call ar-option,D)
-
-# check for 'asm goto'
 
 ifeq ($(SET_SYSTEM_PARTITION), oversea)
     KBUILD_CFLAGS += -DCONFIG_MARKET_OVERSEA
@@ -1036,11 +859,6 @@ endif
 ifeq ($(SET_SYSTEM_PARTITION), internal)
     KBUILD_CFLAGS += -DCONFIG_MARKET_INTERNAL
 endif
-
-ifeq ($(BUILD_WITH_HARMONY), true)
-    KBUILD_CFLAGS += -DCONFIG_HARMONY_PERFORMANCE
-endif
-
 include scripts/Makefile.kasan
 include scripts/Makefile.extrawarn
 include scripts/Makefile.ubsan
@@ -1057,12 +875,10 @@ LDFLAGS_BUILD_ID = $(patsubst -Wl$(comma)%,%,\
 KBUILD_LDFLAGS_MODULE += $(LDFLAGS_BUILD_ID)
 LDFLAGS_vmlinux += $(LDFLAGS_BUILD_ID)
 
-ifdef CONFIG_LD_DEAD_CODE_DATA_ELIMINATION
-LDFLAGS_vmlinux	+= $(call ld-option, --gc-sections,)
-endif
 ifeq ($(ARCH),arm64)
 LDFLAGS_vmlinux += --fix-cortex-a53-843419
 endif
+
 ifeq ($(CONFIG_STRIP_ASM_SYMS),y)
 LDFLAGS_vmlinux	+= $(call ld-option, -X,)
 endif
@@ -1185,34 +1001,25 @@ export KBUILD_ALLDIRS := $(sort $(filter-out arch/%,$(vmlinux-alldirs)) arch Doc
 
 vmlinux-deps := $(KBUILD_LDS) $(KBUILD_VMLINUX_INIT) $(KBUILD_VMLINUX_MAIN)
 
-# Include targets which we want to execute sequentially if the rest of the
-# kernel build went well. If CONFIG_TRIM_UNUSED_KSYMS is set, this might be
-# evaluated more than once.
-PHONY += vmlinux_prereq
-vmlinux_prereq: $(vmlinux-deps) FORCE
+# Final link of vmlinux
+      cmd_link-vmlinux = $(CONFIG_SHELL) $< $(LD) $(LDFLAGS) $(LDFLAGS_vmlinux)
+quiet_cmd_link-vmlinux = LINK    $@
+
+# Include targets which we want to
+# execute if the rest of the kernel build went well.
+vmlinux: scripts/link-vmlinux.sh $(vmlinux-deps) FORCE
 ifdef CONFIG_HEADERS_CHECK
 	$(Q)$(MAKE) -f $(srctree)/Makefile headers_check
+endif
+ifdef CONFIG_SAMPLES
+	$(Q)$(MAKE) $(build)=samples
+endif
+ifdef CONFIG_BUILD_DOCSRC
+	$(Q)$(MAKE) $(build)=Documentation
 endif
 ifdef CONFIG_GDB_SCRIPTS
 	$(Q)ln -fsn `cd $(srctree) && /bin/pwd`/scripts/gdb/vmlinux-gdb.py
 endif
-ifdef CONFIG_TRIM_UNUSED_KSYMS
-	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/adjust_autoksyms.sh \
-	  "$(MAKE) -f $(srctree)/Makefile vmlinux"
-endif
-
-# standalone target for easier testing
-include/generated/autoksyms.h: FORCE
-	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/adjust_autoksyms.sh true
-
-ARCH_POSTLINK := $(wildcard $(srctree)/arch/$(SRCARCH)/Makefile.postlink)
-
-# Final link of vmlinux with optional arch pass after final link
-    cmd_link-vmlinux =                                                 \
-	$(CONFIG_SHELL) $< $(LD) $(LDFLAGS) $(LDFLAGS_vmlinux) ;       \
-	$(if $(ARCH_POSTLINK), $(MAKE) -f $(ARCH_POSTLINK) $@, true)
-
-vmlinux: scripts/link-vmlinux.sh vmlinux_prereq $(vmlinux-deps) FORCE
 ifeq ($(OBB_PRINT_CMD), true)
 	$(call if_changed,link-vmlinux)
 else
@@ -1221,14 +1028,6 @@ ifeq ($(link_kernel),false)
 else
 	+$(call if_changed,link-vmlinux)
 endif
-endif
-#ifdef CONFIG_GCC_PLUGIN_RANDSTRUCT
-#	$(hide) $(PYTHON) $(srctree)/scripts/duplicated_struct_definition.py -s $(srctree) -w $(rand_struct_whitelist)
-#endif
-
-# Build samples along the rest of the kernel
-ifdef CONFIG_SAMPLES
-vmlinux-dirs += samples
 endif
 
 # The actual objects are generated when descending,
@@ -1245,9 +1044,15 @@ PHONY += $(vmlinux-dirs)
 $(vmlinux-dirs): prepare scripts
 	$(Q)$(MAKE) $(build)=$@
 
+ifneq ($(llt_mdrv), y)
 define filechk_kernel.release
 	echo "$(KERNELVERSION)$$($(CONFIG_SHELL) $(srctree)/scripts/setlocalversion $(srctree))"
 endef
+else
+define filechk_kernel.release
+	echo "$(KERNELVERSION)$$($(CONFIG_SHELL) $(srctree)/scripts/setlocalversion $(srctree) $(obb_llt_mdrv))"
+endef
+endif
 
 # Store (new) KERNELRELEASE string in include/config/kernel.release
 include/config/kernel.release: include/config/auto.conf FORCE
@@ -1276,10 +1081,8 @@ ifneq ($(KBUILD_SRC),)
 	fi;
 endif
 
-# prepare2 creates a makefile if using a separate output directory.
-# From this point forward, .config has been reprocessed, so any rules
-# that need to depend on updated CONFIG_* values can be checked here.
-prepare2: prepare3 prepare-compiler-check outputmakefile asm-generic
+# prepare2 creates a makefile if using a separate output directory
+prepare2: prepare3 outputmakefile asm-generic
 
 prepare1: prepare2 $(version_h) include/generated/utsrelease.h \
                    include/config/auto.conf
@@ -1291,69 +1094,7 @@ prepare0: archprepare
 	$(Q)$(MAKE) $(build)=.
 
 # All the preparing..
-prepare: vdso_prepare prepare0 prepare-objtool
-
-ifdef CONFIG_STACK_VALIDATION
-  has_libelf := $(call try-run,\
-		echo "int main() {}" | $(HOSTCC) -xc -o /dev/null -lelf -,1,0)
-  ifeq ($(has_libelf),1)
-    objtool_target := tools/objtool FORCE
-  else
-    $(warning "Cannot use CONFIG_STACK_VALIDATION, please install libelf-dev, libelf-devel or elfutils-libelf-devel")
-    SKIP_STACK_VALIDATION := 1
-    export SKIP_STACK_VALIDATION
-  endif
-endif
-
-PHONY += prepare-objtool
-prepare-objtool: $(objtool_target)
-
-# Check for CONFIG flags that require compiler support. Abort the build
-# after .config has been processed, but before the kernel build starts.
-#
-# For security-sensitive CONFIG options, we don't want to fallback and/or
-# silently change which compiler flags will be used, since that leads to
-# producing kernels with different security feature characteristics
-# depending on the compiler used. (For example, "But I selected
-# CC_STACKPROTECTOR_STRONG! Why did it build with _REGULAR?!")
-PHONY += prepare-compiler-check
-prepare-compiler-check: FORCE
-# Make sure we're using a supported toolchain with LTO_CLANG
-ifdef CONFIG_LTO_CLANG
-  ifneq ($(call clang-ifversion, -ge, 0500, y), y)
-	@echo Cannot use CONFIG_LTO_CLANG: requires clang 5.0 or later >&2 && exit 1
-  endif
-  ifneq ($(call gold-ifversion, -ge, 112000000, y), y)
-	@echo Cannot use CONFIG_LTO_CLANG: requires GNU gold 1.12 or later >&2 && exit 1
-  endif
-endif
-# Make sure compiler supports LTO flags
-ifdef lto-flags
-  ifeq ($(call cc-option, $(lto-flags)),)
-	@echo Cannot use CONFIG_LTO: $(lto-flags) not supported by compiler \
-		>&2 && exit 1
-  endif
-endif
-# Make sure compiler supports requested stack protector flag.
-ifdef stackp-name
-  ifeq ($(call cc-option, $(stackp-flag)),)
-	@echo Cannot use CONFIG_CC_STACKPROTECTOR_$(stackp-name): \
-		  $(stackp-flag) not supported by compiler >&2 && exit 1
-  endif
-endif
-# Make sure compiler does not have buggy stack-protector support.
-ifdef stackp-check
-  ifneq ($(shell $(CONFIG_SHELL) $(stackp-check) $(CC) $(KBUILD_CPPFLAGS) $(biarch)),y)
-	@echo Cannot use CONFIG_CC_STACKPROTECTOR_$(stackp-name): \
-                  $(stackp-flag) available but compiler is broken >&2 && exit 1
-  endif
-endif
-ifdef cfi-flags
-  ifeq ($(call cc-option, $(cfi-flags)),)
-	@echo Cannot use CONFIG_CFI: $(cfi-flags) not supported by compiler >&2 && exit 1
-  endif
-endif
-	@:
+prepare: prepare0
 
 # Generate some files
 # ---------------------------------------------------------------------------
@@ -1447,14 +1188,6 @@ kselftest:
 kselftest-clean:
 	$(Q)$(MAKE) -C tools/testing/selftests clean
 
-PHONY += kselftest-merge
-kselftest-merge:
-	$(if $(wildcard $(objtree)/.config),, $(error No .config exists, config your kernel first!))
-	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/kconfig/merge_config.sh \
-		-m $(objtree)/.config \
-		$(srctree)/tools/testing/selftests/*/config
-	+$(Q)$(MAKE) -f $(srctree)/Makefile olddefconfig
-
 # ---------------------------------------------------------------------------
 # Modules
 
@@ -1476,9 +1209,6 @@ modules: $(vmlinux-dirs) $(if $(KBUILD_BUILTIN),vmlinux) modules.builtin
 	@$(kecho) '  Building modules, stage 2.';
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modpost
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.fwinst obj=firmware __fw_modbuild
-#ifdef CONFIG_GCC_PLUGIN_RANDSTRUCT
-#	$(hide) $(PYTHON) $(srctree)/scripts/duplicated_struct_definition.py -s $(srctree) -w $(rand_struct_whitelist)
-#endif
 
 modules.builtin: $(vmlinux-dirs:%=%/modules.builtin)
 	$(Q)$(AWK) '!x[$$0]++' $^ > $(objtree)/modules.builtin
@@ -1489,7 +1219,7 @@ modules.builtin: $(vmlinux-dirs:%=%/modules.builtin)
 
 # Target to prepare building external modules
 PHONY += modules_prepare
-modules_prepare: prepare scripts vdso_prepare
+modules_prepare: prepare scripts
 
 # Target to install modules
 PHONY += modules_install
@@ -1528,8 +1258,7 @@ else # CONFIG_MODULES
 # Modules not configured
 # ---------------------------------------------------------------------------
 
-PHONY += modules modules_install
-modules modules_install:
+modules modules_install: FORCE
 	@echo >&2
 	@echo >&2 "The present kernel configuration has modules disabled."
 	@echo >&2 "Type 'make config' and enable loadable module support."
@@ -1570,7 +1299,6 @@ $(clean-dirs):
 
 vmlinuxclean:
 	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/link-vmlinux.sh clean
-	$(Q)$(if $(ARCH_POSTLINK), $(MAKE) -f $(ARCH_POSTLINK) clean)
 
 clean: archclean vmlinuxclean
 
@@ -1621,7 +1349,6 @@ boards := $(sort $(notdir $(boards)))
 board-dirs := $(dir $(wildcard $(srctree)/arch/$(SRCARCH)/configs/*/*_defconfig))
 board-dirs := $(sort $(notdir $(board-dirs:/=)))
 
-PHONY += help
 help:
 	@echo  'Cleaning targets:'
 	@echo  '  clean		  - Remove most generated files but keep the config and'
@@ -1641,8 +1368,6 @@ help:
 	@echo  '                    (default: $$(INSTALL_MOD_PATH)/lib/firmware)'
 	@echo  '  dir/            - Build all files in dir and below'
 	@echo  '  dir/file.[ois]  - Build specified target only'
-	@echo  '  dir/file.ll     - Build the LLVM assembly file'
-	@echo  '                    (requires compiler support for LLVM assembly generation)'
 	@echo  '  dir/file.lst    - Build specified mixed source/assembly target only'
 	@echo  '                    (requires a recent binutils and recent build (System.map))'
 	@echo  '  dir/file.ko     - Build module including final link'
@@ -1671,15 +1396,11 @@ help:
 	@echo  '                    Build, install, and boot kernel before'
 	@echo  '                    running kselftest on it'
 	@echo  '  kselftest-clean - Remove all generated kselftest files'
-	@echo  '  kselftest-merge - Merge all the config dependencies of kselftest to existed'
-	@echo  '                    .config.'
 	@echo  ''
 	@echo  'Kernel packaging:'
 	@$(MAKE) $(build)=$(package-dir) help
 	@echo  ''
 	@echo  'Documentation targets:'
-	@$(MAKE) -f $(srctree)/Documentation/Makefile.sphinx dochelp
-	@echo  ''
 	@$(MAKE) -f $(srctree)/Documentation/DocBook/Makefile dochelp
 	@echo  ''
 	@echo  'Architecture specific targets ($(SRCARCH)):'
@@ -1728,11 +1449,8 @@ $(help-board-dirs): help-%:
 
 # Documentation targets
 # ---------------------------------------------------------------------------
-DOC_TARGETS := xmldocs sgmldocs psdocs latexdocs pdfdocs htmldocs mandocs installmandocs epubdocs cleandocs
-PHONY += $(DOC_TARGETS)
-$(DOC_TARGETS): scripts_basic FORCE
+%docs: scripts_basic FORCE
 	$(Q)$(MAKE) $(build)=scripts build_docproc build_check-lc_ctype
-	$(Q)$(MAKE) $(build)=Documentation -f $(srctree)/Documentation/Makefile.sphinx $@
 	$(Q)$(MAKE) $(build)=Documentation/DocBook $@
 
 else # KBUILD_EXTMOD
@@ -1799,7 +1517,6 @@ $(clean-dirs):
 clean:	rm-dirs := $(MODVERDIR)
 clean: rm-files := $(KBUILD_EXTMOD)/Module.symvers
 
-PHONY += help
 help:
 	@echo  '  Building external modules.'
 	@echo  '  Syntax: make -C path/to/kernel/src M=$$PWD target'
@@ -1826,10 +1543,7 @@ clean: $(clean-dirs)
 		-o -name '.*.d' -o -name '.*.tmp' -o -name '*.mod.c' \
 		-o -name '*.symtypes' -o -name 'modules.order' \
 		-o -name modules.builtin -o -name '.tmp_*.o.*' \
-		-o -name '*.c.[012]*.*' \
-		-o -name '*.ll' \
-		-o -name '*.gcno' \
-		-o -name '*.*.symversions' \) -type f -print | xargs rm -f
+		-o -name '*.gcno' \) -type f -print | xargs rm -f
 
 # Generate tags for editors
 # ---------------------------------------------------------------------------
@@ -1932,8 +1646,6 @@ endif
 	$(Q)$(MAKE) $(build)=$(build-dir) $(target-dir)$(notdir $@)
 %.symtypes: %.c prepare scripts FORCE
 	$(Q)$(MAKE) $(build)=$(build-dir) $(target-dir)$(notdir $@)
-%.ll: %.c prepare scripts FORCE
-	$(Q)$(MAKE) $(build)=$(build-dir) $(target-dir)$(notdir $@)
 
 # Modules
 /: prepare scripts FORCE
@@ -1941,7 +1653,7 @@ endif
 	$(Q)$(MAKE) KBUILD_MODULES=$(if $(CONFIG_MODULES),1) \
 	$(build)=$(build-dir)
 # Make sure the latest headers are built for Documentation
-Documentation/ samples/: headers_install
+Documentation/: headers_install
 %/: prepare scripts FORCE
 	$(cmd_crmodverdir)
 	$(Q)$(MAKE) KBUILD_MODULES=$(if $(CONFIG_MODULES),1) \
@@ -1994,3 +1706,4 @@ do_pc_lint_all : $(vmlinux-all) FORCE
 	@:
 
 pc_lint_all : do_pc_lint_all
+

@@ -175,12 +175,13 @@ void f2fs_print_sbi_info(struct f2fs_sb_info *sbi)
 	f2fs_msg(sbi->sb, KERN_ALERT, "|       SBI(Real time dirty nodes/segments info)         |\n");
 	f2fs_msg(sbi->sb, KERN_ALERT, "+--------------------------------------------------------+\n");
 
-	f2fs_msg(sbi->sb, KERN_ALERT, "ndirty_node: %lld\n", get_pages(sbi, F2FS_DIRTY_NODES));
-	f2fs_msg(sbi->sb, KERN_ALERT, "ndirty_dent: %lld\n", get_pages(sbi, F2FS_DIRTY_DENTS));
-	f2fs_msg(sbi->sb, KERN_ALERT, "ndirty_meta: %lld\n", get_pages(sbi, F2FS_DIRTY_META));
-	f2fs_msg(sbi->sb, KERN_ALERT, "ndirty_data: %lld\n", get_pages(sbi, F2FS_DIRTY_DATA));
+	f2fs_msg(sbi->sb, KERN_ALERT, "ndirty_node: %d\n", get_pages(sbi, F2FS_DIRTY_NODES));
+	f2fs_msg(sbi->sb, KERN_ALERT, "ndirty_dent: %d\n", get_pages(sbi, F2FS_DIRTY_DENTS));
+	f2fs_msg(sbi->sb, KERN_ALERT, "ndirty_meta: %d\n", get_pages(sbi, F2FS_DIRTY_META));
+	f2fs_msg(sbi->sb, KERN_ALERT, "ndirty_data: %d\n", get_pages(sbi, F2FS_DIRTY_DATA));
 	f2fs_msg(sbi->sb, KERN_ALERT, "ndirty_files: %d\n", sbi->ndirty_inode[DIR_INODE]);
-	f2fs_msg(sbi->sb, KERN_ALERT, "inmem_pages: %lld\n", get_pages(sbi, F2FS_INMEM_PAGES));
+	f2fs_msg(sbi->sb, KERN_ALERT, "inmem_pages: %d\n", get_pages(sbi, F2FS_INMEM_PAGES));
+	f2fs_msg(sbi->sb, KERN_ALERT, "total_count: %d\n", ((unsigned int)sbi->user_block_count)/((unsigned int)sbi->blocks_per_seg));
 	if (likely(SM_I(sbi))) {
 		f2fs_msg(sbi->sb, KERN_ALERT, "rsvd_segs: %d\n", reserved_segments(sbi));
 		f2fs_msg(sbi->sb, KERN_ALERT, "overp_segs: %d\n", overprovision_segments(sbi));
@@ -195,7 +196,6 @@ void f2fs_print_sbi_info(struct f2fs_sb_info *sbi)
 		if (likely(SIT_I(sbi)))
 			f2fs_msg(sbi->sb, KERN_ALERT, "dirty_nats: %d\n", SIT_I(sbi)->dirty_sentries);
 	}
-	f2fs_msg(sbi->sb, KERN_ALERT, "total_count: %d\n", ((unsigned int)sbi->user_block_count)/((unsigned int)sbi->blocks_per_seg));
 	f2fs_msg(sbi->sb, KERN_ALERT, "valid_count: %d\n", valid_user_blocks(sbi));
 	/*lint -save -e529 -e438*/
 	f2fs_msg(sbi->sb, KERN_ALERT, "inline_attr: %d\n", atomic_read(&sbi->inline_xattr));

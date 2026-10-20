@@ -22,8 +22,6 @@
 #include "hisi_fb.h"
 #include "../hisi_fb_panel.h"
 
-#define TEST_ERROR_CHIP_INIT     BIT(16)
-
 static struct lp8556_backlight_information lp8556_bl_info;
 
 static struct gpio_desc lp8556_hw_en_on_cmds[] = {
@@ -62,7 +60,6 @@ static char *lp8556_dts_string[LP8556_RW_REG_MAX] = {
 	"lp8556_eprom_cfgE",
 	"lp8556_eprom_cfg9E",
 	"lp8556_led_enable",
-	"lp8556_eprom_cfg98",
 };
 
 static unsigned int lp8556_reg_addr[LP8556_RW_REG_MAX] = {
@@ -80,7 +77,6 @@ static unsigned int lp8556_reg_addr[LP8556_RW_REG_MAX] = {
 	LP8556_EPROM_CFGE,
 	LP8556_EPROM_CFG9E,
 	LP8556_LED_ENABLE,
-	LP8556_EPROM_CFG98,
 };
 
 struct class *lp8556_class = NULL;
@@ -100,33 +96,22 @@ static int lp8556_parse_dts(struct device_node *np)
 	int ret = 0;
 	int i = 0;
 
-	if(np == NULL){
-		LP8556_ERR("np is null pointer\n");
-		return -1;
-	}
-
 	for (i = 0;i < LP8556_RW_REG_MAX;i++ ) {
-		ret = of_property_read_u32(np, lp8556_dts_string[i], &lp8556_bl_info.lp8556_reg[i]);
+		ret |= of_property_read_u32(np, lp8556_dts_string[i], &lp8556_bl_info.lp8556_reg[i]);
 		if (ret < 0) {
-			lp8556_bl_info.lp8556_reg[i] = 0xffff;//init to invalid data
-			LP8556_INFO("can not find config:%s\n", lp8556_dts_string[i]);
+			LP8556_ERR("get lp8556 dts config failed\n");
+		} else {
+			LP8556_DEBUG("get %s from dts value = 0x%x\n", lp8556_dts_string[i],lp8556_bl_info.lp8556_reg[i]);
 		}
 	}
 
-	ret = of_property_read_u32(np, "lp8556_hw_en_gpio", &lp8556_bl_info.lp8556_hw_en_gpio);
+	ret |= of_property_read_u32(np, "lp8556_hw_en_gpio", &lp8556_bl_info.lp8556_hw_en_gpio);
+	ret |= of_property_read_u32(np, "bl_on_kernel_mdelay", &lp8556_bl_info.bl_on_kernel_mdelay);
 	if (ret < 0) {
-		LP8556_ERR("get lp8556_hw_en_gpio dts config failed\n");
+		LP8556_ERR("get lp8556 dts config failed\n");
 		return ret;
-	}
-	ret = of_property_read_u32(np, "bl_on_kernel_mdelay", &lp8556_bl_info.bl_on_kernel_mdelay);
-	if (ret < 0) {
-		LP8556_ERR("get bl_on_kernel_mdelay dts config failed\n");
-		return ret;
-	}
-	ret = of_property_read_u32(np, "bl_led_num", &lp8556_bl_info.bl_led_num);
-	if (ret < 0) {
-		LP8556_ERR("get bl_led_num dts config failed\n");
-		return ret;
+	} else {
+		LP8556_DEBUG("get %s from dts value = 0x%d\n", "lp8556_hw_en_gpio", lp8556_bl_info.lp8556_hw_en_gpio);
 	}
 
 	return ret;
@@ -138,19 +123,13 @@ static int lp8556_config_write(struct lp8556_chip_data *pchip,
 	int ret = 0;
 	unsigned int i = 0;
 
-	if((pchip == NULL) || (reg == NULL) || (val == NULL)){
-		LP8556_ERR("pchip or reg or val is null pointer\n");
-		return -1;
-	}
-
 	for(i = 0;i < size;i++) {
-		/*judge reg is invalid*/
-		if (val[i] != 0xffff) {
-			ret = regmap_write(pchip->regmap, reg[i], val[i]);
-			if (ret < 0) {
-				LP8556_ERR("write lp8556 backlight config register 0x%x failed\n",reg[i]);
-				goto exit;
-			}
+		ret = regmap_write(pchip->regmap, reg[i], val[i]);
+		if (ret < 0) {
+			LP8556_ERR("write lp8556 backlight config register 0x%x failed\n",reg[i]);
+			goto exit;
+		} else {
+			LP8556_INFO("register 0x%x value = 0x%x\n", reg[i], val[i]);
 		}
 	}
 
@@ -163,11 +142,6 @@ static int lp8556_config_read(struct lp8556_chip_data *pchip,
 {
 	int ret = 0;
 	unsigned int i = 0;
-
-	if((pchip == NULL) || (reg == NULL) || (val == NULL)){
-		LP8556_ERR("pchip or reg or val is null pointer\n");
-		return -1;
-	}
 
 	for(i = 0;i < size;i++) {
 		ret = regmap_read(pchip->regmap, reg[i],&val[i]);
@@ -187,12 +161,22 @@ exit:
 static int lp8556_chip_init(struct lp8556_chip_data *pchip)
 {
 	int ret = -1;
+	struct device_node *np = NULL;
 
 	LP8556_INFO("in!\n");
 
-	if(pchip == NULL){
-		LP8556_ERR("pchip is null pointer\n");
-		return -1;
+	memset(&lp8556_bl_info, 0, sizeof(struct lp8556_backlight_information));
+
+	np = of_find_compatible_node(NULL, NULL, DTS_COMP_LP8556);
+	if (!np) {
+		LP8556_ERR("NOT FOUND device node %s!\n", DTS_COMP_LP8556);
+		goto out;
+	}
+
+	ret = lp8556_parse_dts(np);
+	if (ret < 0) {
+		LP8556_ERR("parse lp8556 dts failed");
+		goto out;
 	}
 
 	ret = lp8556_config_write(pchip, lp8556_reg_addr, lp8556_bl_info.lp8556_reg, LP8556_RW_REG_MAX);
@@ -200,7 +184,15 @@ static int lp8556_chip_init(struct lp8556_chip_data *pchip)
 		LP8556_ERR("lp8556 config register failed");
 		goto out;
 	}
+
+	ret = lp8556_config_read(pchip, lp8556_reg_addr, lp8556_bl_info.lp8556_reg, LP8556_RW_REG_MAX);
+	if (ret < 0) {
+		LP8556_ERR("lp8556 config read failed");
+		goto out;
+	}
+
 	LP8556_INFO("ok!\n");
+
 	return ret;
 
 out:
@@ -233,13 +225,20 @@ ssize_t lp8556_set_backlight_init(uint32_t bl_level)
 	if (false == lp8556_init_status && bl_level > 0) {
 		mdelay(lp8556_bl_info.bl_on_kernel_mdelay);
 		gpio_cmds_tx(lp8556_hw_en_on_cmds, ARRAY_SIZE(lp8556_hw_en_on_cmds));
+
 		/* chip initialize */
 		ret = lp8556_chip_init(lp8556_g_chip);
 		if (ret < 0) {
 			LP8556_ERR("lp8556_chip_init fail!\n");
 			goto out;
 		}
+
 		lp8556_init_status = true;
+	} else if (true == lp8556_init_status && 0 == bl_level) {
+		gpio_cmds_tx(lp8556_hw_en_disable_cmds, ARRAY_SIZE(lp8556_hw_en_disable_cmds));
+		gpio_cmds_tx(lp8556_hw_en_free_cmds, ARRAY_SIZE(lp8556_hw_en_free_cmds));
+
+		lp8556_init_status = false;
 	} else {
 		LP8556_DEBUG("lp8556_chip_init %u, 0: already off; else : already init!\n", bl_level);
 	}
@@ -322,10 +321,6 @@ static ssize_t lp8556_reg_store(struct device *dev,
 	}
 
 	pchip = dev_get_drvdata(dev);
-	if(!pchip){
-		LP8556_ERR("pchip is null\n");
-		return ret;
-	}
 
 	ret = sscanf(buf, "reg=0x%x, mask=0x%x, val=0x%x", &reg, &mask, &val);
 	if (ret < 0) {
@@ -369,23 +364,14 @@ static const struct regmap_config lp8556_regmap = {
 	.val_bits = 8,
 	.reg_stride = 1,
 };
-
-
 static int lp8556_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
-	struct i2c_adapter *adapter = NULL;
+	struct i2c_adapter *adapter = client->adapter;
 	struct lp8556_chip_data *pchip = NULL;
 	int ret = -1;
-	struct device_node *np = NULL;
 
 	LP8556_INFO("in!\n");
-
-	if(!client){
-		LP8556_ERR("client is null pointer\n");
-		return -1;
-	}
-	adapter = client->adapter;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_I2C)) {
 		dev_err(&client->dev, "i2c functionality check fail.\n");
@@ -422,20 +408,6 @@ static int lp8556_probe(struct i2c_client *client,
 			goto err_sysfs;
 	}
 
-	memset(&lp8556_bl_info, 0, sizeof(struct lp8556_backlight_information));
-
-	np = of_find_compatible_node(NULL, NULL, DTS_COMP_LP8556);
-	if (!np) {
-		LP8556_ERR("NOT FOUND device node %s!\n", DTS_COMP_LP8556);
-		goto err_sysfs;
-	}
-
-	ret = lp8556_parse_dts(np);
-	if (ret < 0) {
-		LP8556_ERR("parse lp8556 dts failed");
-		goto err_sysfs;
-	}
-
 	return ret;
 
 err_sysfs:
@@ -448,11 +420,6 @@ err_out:
 
 static int lp8556_remove(struct i2c_client *client)
 {
-	if(!client){
-		LP8556_ERR("client is null pointer\n");
-		return -1;
-	}
-
 	sysfs_remove_group(&client->dev.kobj, &lp8556_group);
 
 	return 0;

@@ -208,9 +208,7 @@ static ssize_t sec_ts_enter_recovery_store(struct device *dev, struct device_att
 		enable_irq(ts->client->irq);
 	}
 
-	ret = sec_ts_read_information(ts);
-	if (ret < 0)
-		TS_LOG_ERR("%s: fail to read information %d\n", __func__, ret);
+	sec_ts_read_information(ts);
 
 	return size;
 }
@@ -238,15 +236,10 @@ int sec_ts_raw_device_init(struct sec_ts_data *ts)
 {
 	int ret;
 
-	if (IS_ERR_OR_NULL(ts)) {
-		TS_LOG_ERR("%s: fail - invalid param\n", __func__);
-		return -EINVAL;
-	}
-
 	sec_class = class_create(THIS_MODULE, "sec");
-	if (IS_ERR(sec_class)) {
+
+	if (sec_class < 0) {
 		TS_LOG_ERR("%s:fail - class_create\n", __func__);
-		return -EIO;
 	}
 	ts->dev = device_create(sec_class, NULL, 0, ts, "sec_ts");
 

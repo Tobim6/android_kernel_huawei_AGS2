@@ -13,7 +13,6 @@
 
 #include <linux/types.h>
 #include <linux/hisi/rdr_pub.h>
-#include "rdr_inner.h"
 
 #define RDR_TIME_LEN            16
 
@@ -25,8 +24,8 @@
 #endif
 
 #define RDR_PRODUCT "PRODUCT_NAME"	/* "hi3630_udp" */
-#define RDR_VERSION             ((RDR_SMP_FLAG << 16) | (0x204 << 0))
-						    /* v2.04 2018.12.05 */
+#define RDR_VERSION             ((RDR_SMP_FLAG << 16) | (0x200 << 0))
+						    /* v2.00 2014.9.14 */
 #define RDR_BASEINFO_SIZE  0x200
 
 enum RDR_AREA_LIST {
@@ -44,10 +43,7 @@ enum RDR_AREA_LIST {
 	RDR_AREA_REGULATOR = 0xB,
 	RDR_AREA_BFM = 0xC,
 	RDR_AREA_HISEE = 0xD,
-	RDR_AREA_NPU   = 0xE,
-	RDR_AREA_CONN  = 0xF,
-	RDR_AREA_EXCEPTION_TRACE = 0x10,
-	RDR_AREA_MAXIMUM = 0x11
+	RDR_AREA_MAXIMUM = 0xE
 };
 
 struct rdr_base_info_s {
@@ -56,7 +52,6 @@ struct rdr_base_info_s {
 	u32 arg2;
 	u32 e_core;
 	u32 e_type;
-	u32 e_subtype;
 	u32 start_flag;
 	u32 savefile_flag;
 	u32 reboot_flag;
@@ -82,22 +77,14 @@ struct rdr_area_s {
 	u32 length;	/* unit is bytes */
 };
 
-struct rdr_cleartext_s {
-	u8 savefile_flag;
-	u8 aucResv[3];
-};
-
-#pragma pack(4)
 struct rdr_struct_s {
 	struct rdr_top_head_s top_head;
 	struct rdr_base_info_s base_info;
 	struct rdr_area_s area_info[RDR_AREA_MAXIMUM];
-	struct rdr_cleartext_s cleartext_info;
 	u8 padding2[RDR_BASEINFO_SIZE - sizeof(struct rdr_top_head_s)
 		    - sizeof(struct rdr_area_s) * RDR_AREA_MAXIMUM
-		    - sizeof(struct rdr_base_info_s) - sizeof(struct rdr_cleartext_s)];
+		    - sizeof(struct rdr_base_info_s)];
 };
-#pragma pack()
 
 /* (RDR_AREA_RES - sizeof(struct rdr_area_head_s))/sizeof(u32) */
 /* TYPE,reference for parser: */
@@ -145,7 +132,7 @@ int rdr_field_init(void);
 void rdr_set_area_info(int index, u32 size);
 void rdr_save_args(u32 modid, u32 arg1, u32 arg2);
 void rdr_show_base_info(int flag);
-void rdr_fill_edata(struct rdr_exception_info_s *e,const char *date);
+void rdr_fill_edata(struct rdr_exception_info_s *e, char *date);
 int rdr_get_areainfo(enum RDR_AREA_LIST area,
 		     struct rdr_register_module_result *retinfo);
 #endif /* End #define __BB_FIELD_H__ */

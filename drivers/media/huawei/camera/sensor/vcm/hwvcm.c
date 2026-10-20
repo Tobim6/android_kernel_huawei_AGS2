@@ -216,9 +216,13 @@ int hw_vcm_register(struct platform_device *pdev,
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	v4l2_set_subdevdata(subdev, pdev);
 
-	init_subdev_media_entity(subdev,hw_vcm_info->index ? HWCAM_SUBDEV_VCM1 : HWCAM_SUBDEV_VCM0);
-	hwcam_cfgdev_register_subdev(subdev,hw_vcm_info->index ? HWCAM_SUBDEV_VCM1 : HWCAM_SUBDEV_VCM0);
-    intf->subdev = subdev;
+	media_entity_init(&subdev->entity, 0, NULL, 0);
+	subdev->entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
+	subdev->entity.group_id = hw_vcm_info->index ? HWCAM_SUBDEV_VCM1
+			: HWCAM_SUBDEV_VCM0;
+	subdev->entity.name = subdev->name;
+
+	hwcam_cfgdev_register_subdev(subdev);
 	hw_vcm->intf = intf;
 	hw_vcm->vcm_info = hw_vcm_info;
 	hw_vcm->pdev = pdev;
@@ -227,15 +231,18 @@ register_fail:
 	return rc;
 }
 
-void hw_vcm_unregister(struct v4l2_subdev* subdev)
+#define Intf2Hwvcm(si) container_of(si, hw_vcm_t, intf)
+void hw_vcm_unregister(hw_vcm_intf_t *intf)
 {
-    hw_vcm_t* hw_vcm = SD2Vcm(subdev);
+	struct v4l2_subdev* subdev = NULL;
+	hw_vcm_t* hw_vcm = Intf2Hwvcm(intf);
 
-    media_entity_cleanup(&subdev->entity);
-    hwcam_cfgdev_unregister_subdev(subdev);
+	subdev = &hw_vcm->subdev;
+	media_entity_cleanup(&subdev->entity);
+	hwcam_cfgdev_unregister_subdev(subdev);
 
-    kzfree(hw_vcm->vcm_info);
-    kzfree(hw_vcm);
+	kzfree(hw_vcm->vcm_info);
+	kzfree(hw_vcm);
 }
 
 //lint -restore

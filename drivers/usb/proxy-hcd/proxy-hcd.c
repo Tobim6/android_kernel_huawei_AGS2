@@ -88,7 +88,7 @@ static int phcd_get_frame_number(struct usb_hcd *hcd)
 	return 123;
 }
 
-static unsigned int phcd_get_ep_index(u32 pipe)
+unsigned int phcd_get_ep_index(u32 pipe)
 {
 	unsigned int index;
 	if (usb_pipecontrol(pipe)) /*lint !e650 */
@@ -114,7 +114,7 @@ static int phcd_get_ep_index_from_desc(struct usb_endpoint_descriptor *desc)
 	return index;
 }
 
-static struct proxy_hcd_urb* find_urb_by_buf(struct list_head *head, const void *buf)
+static struct proxy_hcd_urb* find_urb_by_buf(struct list_head *head, void *buf)
 {
 	struct proxy_hcd_urb *pos;
 
@@ -151,46 +151,6 @@ static struct proxy_hcd_urb *find_phcd_urb(struct proxy_hcd *phcd,
 	}
 
 	return phcd_urb;
-}
-
-/*
- * Return true means the device is not a usbaudio device.
- */
-static bool non_usbaudio_monitor(struct usb_hcd *hcd, struct urb *urb)
-{
-	struct usb_device *udev = urb->dev;
-	struct usb_ctrlrequest *ctrl;
-	int configuration;
-
-	if (!udev->parent)
-		return false;
-
-	if (udev->parent->parent)
-		return false;
-
-	if (!usb_endpoint_xfer_control(&urb->ep->desc))
-		return false;
-
-	ctrl = (struct usb_ctrlrequest *)urb->setup_packet;
-	if (!ctrl) {
-		ERR("req NULL\n");
-		return false;
-	}
-
-	configuration = le16_to_cpu(ctrl->wValue);
-	if (configuration <= 0)
-		return false;
-
-	if ((ctrl->bRequest == USB_REQ_SET_CONFIGURATION)
-				&& (ctrl->bRequestType == 0)) {
-		INFO("to check_non_usbaudio_device, configuration %d\n", configuration);
-		if (stop_hifi_usb_when_non_usbaudio(udev, configuration)) {
-			DBG("non-usbaudio device using hifiusb\n");
-			return true;
-		}
-	}
-
-	return false;
 }
 
 int phcd_urb_complete(struct proxy_hcd *phcd, struct urb_msg *urb_msg)
@@ -248,7 +208,7 @@ int phcd_urb_complete(struct proxy_hcd *phcd, struct urb_msg *urb_msg)
 	}
 
 	/* copy the data */
-	if (usb_urb_dir_in(urb) && (urb->actual_length != 0) && urb_msg->buf)
+	if (usb_urb_dir_in(urb) && (urb->actual_length != 0))
 		memcpy(urb->transfer_buffer, urb_msg->buf, urb->actual_length);
 
 	list_del_init(&phcd_urb->urb_list);
@@ -281,7 +241,7 @@ error:
  */
 static void fill_phcd_urb_comm(struct urb_msg *urb_msg, struct urb *urb)
 {
-	urb_msg->urb_magic 			= __cpu_to_le64((__u64)(uintptr_t)urb);
+	urb_msg->urb_magic 			= __cpu_to_le64((__u64)urb);
 	urb_msg->slot_id 			= __cpu_to_le32(urb->dev->slot_id);
 	urb_msg->pipe 				= __cpu_to_le32(urb->pipe);
 
@@ -461,13 +421,6 @@ static int phcd_urb_enqueue(struct usb_hcd *hcd, struct urb *urb, gfp_t mem_flag
 		return ret;
 	else if (ret > 0)
 		return 0;
-
-	/*
-	 * monitor device by configuration descriptor.
-	 * if device is not usbaudio, switch USB Host Controller.
-	 */
-	if (non_usbaudio_monitor(hcd, urb))
-		return -ENODEV; /* usbaudio monitor issured, stop enumeration */
 
 	phcd_urb = kzalloc(sizeof(*phcd_urb), mem_flags);
 	if (!phcd_urb) {
@@ -762,7 +715,7 @@ static int phcd_alloc_dev(struct usb_hcd *hcd, struct usb_device *udev)
 	return 1;
 }
 
-void phcd_giveback_all_urbs(struct proxy_hcd_client *client)
+void phcd_giveback_all_unlinked_urbs(struct proxy_hcd_client *client)
 {
 	struct proxy_hcd *phcd = client_to_phcd(client);
 	struct usb_hcd *hcd;
@@ -795,7 +748,7 @@ void phcd_giveback_all_urbs(struct proxy_hcd_client *client)
 			if (urb->unlinked) {
 				DBG("ep %d urb %pK unlinked, giveback\n", i, urb);
 			} else {
-				DBG("ep %d urb %pK not unlinked, giveback\n", i, urb);
+				DBG("ep %d urb %pK not unlinked, don't giveback\n", i, urb);
 			}
 			list_del_init(&phcd_urb->urb_list);
 			usb_hcd_unlink_urb_from_ep(hcd, urb);
@@ -906,18 +859,6 @@ void phcd_mark_all_endpoint_dropped(struct proxy_hcd *phcd)
 	DBG("-\n");
 
 	return;
-}
-
-__u32 phcd_current_port_status(struct proxy_hcd *phcd)
-{
-	unsigned long flags;
-	__u32 status;
-
-	spin_lock_irqsave(&phcd->lock, flags);
-	status = phcd->port_status[0] & PHCD_PORT_STATUS_MASK;
-	spin_unlock_irqrestore(&phcd->lock, flags);
-
-	return status;
 }
 
 static int phcd_drop_endpoint(struct usb_hcd *hcd, struct usb_device *udev,
@@ -1056,6 +997,7 @@ static int phcd_update_hub_device(struct usb_hcd *hcd, struct usb_device *hdev,
 	DBG("+\n");
 	if (!hdev->parent)
 		return 0;
+	WARN_ON(1);
 	DBG("-\n");
 	return -ENODEV;
 }
@@ -1329,9 +1271,7 @@ static int phcd_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, /*lint
 		/* update phcd->port_status[i] by status */
 		phcd_update_port_status(phcd, wIndex, status);
 
-		/*lint -save -e131 -e689 */
-		put_unaligned(cpu_to_le32(phcd->port_status[wIndex - 1]), (__le32 *) buf);
-		/*lint -restore */
+		put_unaligned(cpu_to_le32(phcd->port_status[wIndex - 1]), (__le32 *) buf);/*line !e131 !e689 */
 		DBG("Get port status: 0x%x\n", phcd->port_status[wIndex - 1]);
 
 		break;
@@ -1642,7 +1582,7 @@ enum hibernation_policy phcd_get_hibernation_policy(struct proxy_hcd_client *cli
 	const char *hibernation_policy;
 	int err;
 
-	err = device_property_read_string(&pdev->dev, "hibernation-policy", &hibernation_policy);
+	err = device_property_read_string(&pdev->dev, "maximum-speed", &hibernation_policy);
 	if (err < 0)
 		return HIFI_USB_HIBERNATION_ALLOW;
 
@@ -1780,7 +1720,7 @@ static int phcd_plat_resume(struct device *dev)
 	struct usb_hcd *hcd = dev_get_drvdata(dev);
 	struct proxy_hcd *phcd = hcd_to_phcd(hcd);
 
-	INFO("+\n");
+	DBG("+\n");
 
 	/* barrier from alloc_dev and free_dev */
 	mutex_lock(&phcd->mutex);
@@ -1788,7 +1728,7 @@ static int phcd_plat_resume(struct device *dev)
 		phcd->client->client_resume(phcd->client);
 	mutex_unlock(&phcd->mutex);
 
-	INFO("-\n");
+	DBG("-\n");
 	return 0;
 }
 

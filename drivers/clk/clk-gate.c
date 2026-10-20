@@ -16,10 +16,6 @@
 #include <linux/err.h>
 #include <linux/string.h>
 
-#ifdef CONFIG_HISI_CLK_DEBUG
-#include "hisi-clk-debug.h"
-#endif
-
 /**
  * DOC: basic gatable clock which can gate and ungate it's ouput
  *
@@ -29,6 +25,8 @@
  * rate - inherits rate from parent.  No clk_set_rate support
  * parent - fixed parent.  No clk_set_parent support
  */
+
+#define to_clk_gate(_hw) container_of(_hw, struct clk_gate, hw)
 
 /*
  * It works on following logic:
@@ -114,24 +112,14 @@ static int clk_gate_is_enabled(struct clk_hw *hw)
 	return reg ? 1 : 0;
 }
 #ifdef CONFIG_HISI_CLK_DEBUG
-static int hi3xxx_dumpgt(struct clk_hw *hw, char* buf, struct seq_file *s)
+static int hi3xxx_dumpgt(struct clk_hw *hw, char* buf)
 {
 	u32 reg;
-	long unsigned int clk_base_addr = 0;
-	unsigned int clk_bit = 0;
 	struct clk_gate *gate = to_clk_gate(hw);
 
-	if (gate->reg && buf && !s) {
+	if (gate->reg && buf) {
 		reg = clk_readl(gate->reg);
-		snprintf(buf, DUMP_CLKBUFF_MAX_SIZE, "[%s] : regAddress = 0x%pK, regval = 0x%x\n",  \
-			__clk_get_name(hw->clk), gate->reg, reg);
-	}
-	if(gate->reg && !buf && s) {
-		clk_base_addr = (uintptr_t)gate->reg & CLK_ADDR_HIGH_MASK;
-		clk_bit = (uintptr_t)gate->reg & CLK_ADDR_LOW_MASK;
-		seq_printf(s, "    %-15s    %-15s    0x%03X    bit-%-u", hs_base_addr_transfer(clk_base_addr), \
-			"himask-gate", clk_bit, gate->bit_idx);
-
+		snprintf(buf, DUMP_CLKBUFF_MAX_SIZE, "[%s] : regAddress = 0x%pK, regval = 0x%x\n", __clk_get_name(hw->clk), gate->reg, reg);
 	}
 	return 0;
 }
@@ -147,7 +135,7 @@ const struct clk_ops clk_gate_ops = {
 EXPORT_SYMBOL_GPL(clk_gate_ops);
 
 /**
- * clk_hw_register_gate - register a gate clock with the clock framework
+ * clk_register_gate - register a gate clock with the clock framework
  * @dev: device that is registering this clock
  * @name: name of this clock
  * @parent_name: name of this clock's parent
@@ -157,15 +145,14 @@ EXPORT_SYMBOL_GPL(clk_gate_ops);
  * @clk_gate_flags: gate-specific flags for this clock
  * @lock: shared register lock for this clock
  */
-struct clk_hw *clk_hw_register_gate(struct device *dev, const char *name,
+struct clk *clk_register_gate(struct device *dev, const char *name,
 		const char *parent_name, unsigned long flags,
 		void __iomem *reg, u8 bit_idx,
 		u8 clk_gate_flags, spinlock_t *lock)
 {
 	struct clk_gate *gate;
-	struct clk_hw *hw;
+	struct clk *clk;
 	struct clk_init_data init;
-	int ret;
 
 	if (clk_gate_flags & CLK_GATE_HIWORD_MASK) {
 		if (bit_idx > 15) {
@@ -192,29 +179,12 @@ struct clk_hw *clk_hw_register_gate(struct device *dev, const char *name,
 	gate->lock = lock;
 	gate->hw.init = &init;
 
-	hw = &gate->hw;
-	ret = clk_hw_register(dev, hw);
-	if (ret) {
+	clk = clk_register(dev, &gate->hw);
+
+	if (IS_ERR(clk))
 		kfree(gate);
-		hw = ERR_PTR(ret);
-	}
 
-	return hw;/*lint !e593 */
-}
-EXPORT_SYMBOL_GPL(clk_hw_register_gate);
-
-struct clk *clk_register_gate(struct device *dev, const char *name,
-		const char *parent_name, unsigned long flags,
-		void __iomem *reg, u8 bit_idx,
-		u8 clk_gate_flags, spinlock_t *lock)
-{
-	struct clk_hw *hw;
-
-	hw = clk_hw_register_gate(dev, name, parent_name, flags, reg,
-				  bit_idx, clk_gate_flags, lock);
-	if (IS_ERR(hw))
-		return ERR_CAST(hw);
-	return hw->clk;
+	return clk; /*lint !e593 */
 }
 EXPORT_SYMBOL_GPL(clk_register_gate);
 
@@ -233,14 +203,3 @@ void clk_unregister_gate(struct clk *clk)
 	kfree(gate);
 }
 EXPORT_SYMBOL_GPL(clk_unregister_gate);
-
-void clk_hw_unregister_gate(struct clk_hw *hw)
-{
-	struct clk_gate *gate;
-
-	gate = to_clk_gate(hw);
-
-	clk_hw_unregister(hw);
-	kfree(gate);
-}
-EXPORT_SYMBOL_GPL(clk_hw_unregister_gate);

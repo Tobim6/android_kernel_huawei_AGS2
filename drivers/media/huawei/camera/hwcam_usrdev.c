@@ -14,7 +14,6 @@
 #include <media/v4l2-fh.h>
 #include <media/v4l2-ioctl.h>
 #include <media/videobuf2-core.h>
-#include "securec.h"
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
 #include <media/videobuf2-v4l2.h>
 #endif
@@ -186,10 +185,11 @@ s_vtbl_hwcam_user =
 static int
 hwcam_user_vb2q_queue_setup(
         struct vb2_queue* q,
+        const void* para,
         unsigned int* num_buffers,
         unsigned int* num_planes,
         unsigned int sizes[],
-        struct device* alloc_ctxs[])
+        void* alloc_ctxs[])
 {
     int i = 0;
     hwcam_user_t* user = NULL;
@@ -201,7 +201,7 @@ hwcam_user_vb2q_queue_setup(
     *num_planes = user->format.fmt.pix_mp.num_planes;
     for (; i != user->format.fmt.pix_mp.num_planes; i++) {
         sizes[i] = user->format.fmt.pix_mp.plane_fmt[i].sizeimage;
-        alloc_ctxs[i] = (struct device*)user;
+        alloc_ctxs[i] = user;
     }
 
     return 0;
@@ -292,7 +292,7 @@ hwcam_user_vb2q_buf_queue(
         hwcam_cfgstream_intf_buf_queue(user->stream, buf);
     }
 }
-#pragma GCC visibility push(default)
+
 static struct vb2_ops
 s_qops_hwcam_vbuf =
 {
@@ -309,10 +309,10 @@ s_qops_hwcam_vbuf =
 
     .buf_queue = hwcam_user_vb2q_buf_queue,
 };
-#pragma GCC visibility pop
+
 static void*
 hwcam_user_vb2q_get_userptr(
-        struct device* alloc_ctx,      //  hwcam_user_t*
+        void* alloc_ctx,      //  hwcam_user_t*
         unsigned long vaddr,  //  fdIon
         unsigned long size,
         enum dma_data_direction dma_dir)
@@ -325,14 +325,14 @@ hwcam_user_vb2q_put_userptr(
         void* buf_priv)
 {
 }
-#pragma GCC visibility push(default)
+
 static struct vb2_mem_ops
 s_mops_hwcam_vbuf =
 {
     .get_userptr = hwcam_user_vb2q_get_userptr,
     .put_userptr = hwcam_user_vb2q_put_userptr,
 };
-#pragma GCC visibility pop
+
 static int
 hwcam_dev_vo_querycap(
         struct file* filep,
@@ -827,7 +827,14 @@ hwcam_dev_vo_s_parm(
     if (user->stream) {
         return 0;
     }
+#if 0  //dead code
+    else {
+        HWCAM_CFG_ERR("failed to install stream! \n");
+        return -ENOMEM;
+    }
+#else
 	return 0;
+#endif
 }
 
 static int
@@ -844,6 +851,68 @@ hwcam_dev_vo_unsubscribe_event(
         const struct v4l2_event_subscription* sub)
 {
 	return v4l2_event_unsubscribe(fh, sub);
+}
+
+static long
+hwcam_dev_vo_mount_buf(
+        hwcam_dev_t* cam,
+        hwcam_user_t* user,
+        void* arg)
+{
+    long rc = -EINVAL;
+    hwcam_buf_info_t* bi = arg;
+    switch (bi->kind)
+    {
+    case HWCAM_BUF_KIND_PIPELINE_CAPABILITY:
+    case HWCAM_BUF_KIND_PIPELINE_PARAM:
+        if (user->f_pipeline_owner) {
+            rc = hwcam_cfgpipeline_intf_mount_buf(
+                    cam->pipeline, &user->intf, bi);
+        }
+        break;
+    case HWCAM_BUF_KIND_STREAM_PARAM:
+    case HWCAM_BUF_KIND_STREAM:
+        if (user->stream) {
+            rc = hwcam_cfgstream_intf_mount_buf(
+                    user->stream, bi);
+        }
+        break;
+    default:
+        HWCAM_CFG_ERR("invalid buffer kind(%d)! \n", bi->kind);
+        break;
+    }
+    return rc;
+}
+
+static long
+hwcam_dev_vo_unmount_buf(
+        hwcam_dev_t* cam,
+        hwcam_user_t* user,
+        void* arg)
+{
+    long rc = -EINVAL;
+    hwcam_buf_info_t* bi = arg;
+    switch (bi->kind)
+    {
+    case HWCAM_BUF_KIND_PIPELINE_CAPABILITY:
+    case HWCAM_BUF_KIND_PIPELINE_PARAM:
+        if (user->f_pipeline_owner) {
+            rc = hwcam_cfgpipeline_intf_unmount_buf(
+                    cam->pipeline, &user->intf, bi);
+        }
+        break;
+    case HWCAM_BUF_KIND_STREAM_PARAM:
+    case HWCAM_BUF_KIND_STREAM:
+        if (user->stream) {
+            rc = hwcam_cfgstream_intf_unmount_buf(
+                    user->stream, bi);
+        }
+        break;
+    default:
+        HWCAM_CFG_ERR("invalid buffer kind(%d)! \n", bi->kind);
+        break;
+    }
+    return rc;
 }
 
 static long
@@ -865,6 +934,24 @@ hwcam_dev_vo_ioctl_default(
 
     switch (cmd)
     {
+    case HWCAM_V4L2_IOCTL_MOUNT_BUF:
+        rc = hwcam_dev_vo_mount_buf(cam, user, arg);
+        break;
+    case HWCAM_V4L2_IOCTL_UNMOUNT_BUF:
+        rc = hwcam_dev_vo_unmount_buf(cam, user, arg);
+        break;
+    case HWCAM_V4L2_IOCTL_MOUNT_GRAPHIC_BUF:
+        if (user->stream) {
+            rc = hwcam_cfgstream_intf_mount_graphic_buf(
+                    user->stream, arg);
+        }
+        break;
+    case HWCAM_V4L2_IOCTL_UNMOUNT_GRAPHIC_BUF:
+        if (user->stream) {
+            rc = hwcam_cfgstream_intf_unmount_graphic_buf(
+                    user->stream, *((int*)arg));
+        }
+        break;
     default:
         HWCAM_CFG_ERR("invalid IOCTL CMD(%d)! \n", cmd);
         break;
@@ -1116,8 +1203,6 @@ hwcam_dev_create(
         int* dev_num)
 {
 	int rc = 0;
-	int name_len = 0;
-	char media_prefix[10];
     struct v4l2_device* v4l2 = NULL;
     struct video_device* vdev = NULL;
     struct media_device* mdev = NULL;
@@ -1141,21 +1226,15 @@ hwcam_dev_create(
 		rc = -ENOMEM;
 		goto media_alloc_fail;
 	}
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
-    media_device_init(mdev);
-#endif
-    strlcpy(mdev->model, HWCAM_MODEL_USER, sizeof(mdev->model));
-    mdev->dev = dev;
-    rc = media_device_register(mdev);
-    if (rc < 0) {
-        goto media_register_fail;
+
+	strlcpy(mdev->model, HWCAM_MODEL_USER, sizeof(mdev->model));
+	mdev->dev = dev;
+	rc = media_device_register(mdev);
+	if (rc < 0) {
+		goto media_register_fail;
     }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
-	rc = media_entity_pads_init(&vdev->entity,0,NULL);
-#else
-	rc = media_entity_init(&vdev->entity,0,NULL,0);
-#endif
+	rc = media_entity_init(&vdev->entity, 0, NULL, 0);
 	if (rc < 0) {
 		goto entity_init_fail;
     }
@@ -1167,16 +1246,9 @@ hwcam_dev_create(
 		goto v4l2_register_fail;
     }
 
-    gen_media_prefix(media_prefix,HWCAM_DEVICE_GROUP_ID, sizeof(media_prefix));
-    snprintf_s(vdev->name, sizeof(vdev->name), sizeof(vdev->name) - 1, "%s", media_prefix);
-    strlcpy(vdev->name + strlen(vdev->name), "hwcam-userdev", sizeof(vdev->name) - strlen(vdev->name));
-    name_len = strlen(vdev->name);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
-	vdev->entity.obj_type = MEDIA_ENTITY_TYPE_VIDEO_DEVICE;
-#else
+	strlcpy(vdev->name, "hwcam-userdev", sizeof(vdev->name));
 	vdev->entity.type = MEDIA_ENT_T_DEVNODE_V4L;
 	vdev->entity.group_id = HWCAM_DEVICE_GROUP_ID;
-#endif
 	vdev->v4l2_dev = v4l2;
 	vdev->release = video_device_release;
 	vdev->fops = &s_fops_hwcam_dev;
@@ -1186,51 +1258,43 @@ hwcam_dev_create(
 	vdev->minor = -1;
 	vdev->vfl_type = VFL_TYPE_GRABBER;
 	vdev->vfl_dir = VFL_DIR_TX;
-        rc = video_register_device(vdev, VFL_TYPE_GRABBER, -1);
-        if (rc < 0) {
-        goto video_register_fail;
+    rc = video_register_device(vdev, VFL_TYPE_GRABBER, -1);
+	if (rc < 0) {
+		goto video_register_fail;
     }
-    cam_debug("video dev name %s %s",vdev->dev.kobj.name,vdev->name);
+	cam_debug("video dev name %s %s",vdev->dev.kobj.name,vdev->name);
     mutex_init(&cam->lock);
     mutex_init(&cam->devlock);
     vdev->lock = &cam->lock;
-    rc = snprintf(vdev->name + strlen(vdev->name),sizeof(vdev->name) - strlen(vdev->name),"%s",video_device_node_name(vdev));
-    if(rc > AVAIL_NAME_LENGTH - name_len){
-      HWCAM_CFG_ERR("Truncation Occurred\n");
-      snprintf(vdev->name,sizeof(vdev->name),"%s",media_prefix);
-      snprintf(vdev->name + strlen(vdev->name),sizeof(vdev->name) - strlen(vdev->name),"%s",video_device_node_name(vdev));
-      rc = 0;
-    }
-    rc = 0;
-    vdev->entity.name = vdev->name;
-    video_set_drvdata(vdev, cam);
+	vdev->entity.name = video_device_node_name(vdev);
+	video_set_drvdata(vdev, cam);
     cam->vdev = vdev;
     cam->mdev = mdev;
     cam->intf.vtbl = &s_vtbl_hwcam_dev;
     *dev_num = vdev->num;
 
-    goto init_end;
+	goto init_end;
 
 video_register_fail:
-    v4l2_device_unregister(v4l2);
+	v4l2_device_unregister(v4l2);
 
 v4l2_register_fail:
-    media_entity_cleanup(&vdev->entity);
+	media_entity_cleanup(&vdev->entity);
 
 entity_init_fail:
-    media_device_unregister(mdev);
+	media_device_unregister(mdev);
 
 media_register_fail:
     kzfree(mdev);
 
 media_alloc_fail:
-    video_device_release(vdev);
+	video_device_release(vdev);
 
 video_alloc_fail:
-    kzfree(cam);
+	kzfree(cam);
 
 init_end:
-    return rc;
+	return rc;
 }
 //lint -restore
 

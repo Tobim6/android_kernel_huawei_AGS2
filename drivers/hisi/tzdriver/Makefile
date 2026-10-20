@@ -1,29 +1,17 @@
 KCOV_INSTRUMENT := n
-CONFIG_TEE_SMP := y
 
 ifneq ($(TARGET_BUILD_VARIANT),user)
 ccflags-y += -DDEBUG_TUI
 ccflags-y += -DDEF_ENG
 endif
 
-ccflags-y +=-DDYNAMIC_ION
-ifeq ($(CONFIG_TEE_SMP), y)
-ccflags-y += -DCONFIG_TEE_SMP
-obj-$(CONFIG_TZDRIVER) += smc_smp.o
-else
-obj-$(CONFIG_TZDRIVER) += smc.o
-endif
-
 obj-$(CONFIG_TZDRIVER) += tc_client_driver.o teek_client_api.o mailbox_mempool.o
-obj-$(CONFIG_TZDRIVER) += security_auth_enhance.o agent.o gp_ops.o mem.o cmdmonitor.o tzdebug.o tz_spi_notify.o  dynamic_mem.o
+obj-$(CONFIG_TZDRIVER) += security_auth_enhance.o smc.o agent.o gp_ops.o mem.o
 obj-$(CONFIG_TEELOG) += tlogger.o tee_rdr_register.o
 ifeq ($(CONFIG_TZDRIVER), y)
 obj-$(CONFIG_HISI_MMC_SECURE_RPMB) += agent_rpmb.o
-obj-$(CONFIG_HISI_RPMB) += agent_rpmb.o
 endif
-
 obj-$(CONFIG_TEE_TUI) += tui.o
-
 obj-$(CONFIG_TEE_LIBHWSECUREC) += libhwsecurec/
 
 obj-$(CONFIG_TEE_CFC) += cfc_data.o cfc_coresight.o
@@ -42,13 +30,3 @@ ccflags-y += 	-Idrivers/video/hisi/dss \
 ifdef CONFIG_TEE_CFC
   rename-text-section-to := .cfc.text
 endif
-
-# gp_ops.c includes "ion_client.h" (from the D5500_DRM vcodec tree)
-# unconditionally, regardless of whether CONFIG_IMAGINATION_D5500_DRM_VCODEC
-# is enabled -- so this include path/define must not be gated on it either.
-ifeq ($(wildcard drivers/staging/android/ion/ion.h),)
-  ccflags-y += -DIMG_KERNEL_ION_HEADER="<linux/ion.h>"
-else
-  ccflags-y += -DIMG_KERNEL_ION_HEADER="<$(srctree)/drivers/staging/android/ion/ion.h>"
-endif
-ccflags-y += -Idrivers/vcodec/imagination/D5500_DRM/imgvideo/platform/include

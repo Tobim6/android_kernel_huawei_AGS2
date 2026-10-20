@@ -39,17 +39,7 @@
 #include <chipset_common/bfmr/bfm/core/bfm_core.h>
 #include <chipset_common/bfmr/bfm/chipsets/bfm_chipsets.h>
 #include <chipset_common/bfmr/bfm/core/bfm_timer.h>
-#include <chipset_common/bfmr/bfm/core/bfm_stage_info.h>
 #include <chipset_common/bfmr/bfr/core/bfr_core.h>
-#include <chipset_common/bfmr/abns/abns_shutdown.h>
-#include <linux/rtc.h>
-#include <linux/cpu.h>
-#ifdef CONFIG_HUAWEI_DYNAMIC_BRD
-#include <chipset_common/storage_rofa/dynbrd_public.h>
-#endif
-#ifdef CONFIG_HUAWEI_STORAGE_ROFA
-#include <chipset_common/storage_rofa/storage_rofa.h>
-#endif
 
 
 /*----local macroes------------------------------------------------------------------*/
@@ -63,36 +53,31 @@
 #define BFM_LOG_END_TAG_PER_LINE "\r\n"
 #define BFM_BYTES_REDUNDANT_ON_LOG_PART (4 * 1024)
 #define BFM_DONE_FILE_NAME "DONE"
-#define BFM_TIME_FIELD_NAME "time:"
 #define BFM_BFI_FILE_CONTENT_FORMAT \
-    "time%s:%s\r\n" \
-    "bootFailErrno%s:%s\r\n" \
-    "boot_stage%s:%s_%s\r\n" \
-    "isSystemRooted%s:%d\r\n" \
-    "isUserPerceptible%s:%d\r\n" \
-    "SpaceLeftOnData%s:%lldMB [%lld%%]\r\n" \
-    "iNodesUsedOnData%s:%lld [%lld%%]\r\n" \
+    "time:%s\r\n" \
+    "bootFailErrno:%s_%s_%s\r\n" \
+    "boot_stage:%s_%s\r\n" \
+    "isSystemRooted:%d\r\n" \
+    "isUserPerceptible:%d\r\n" \
+    "SpaceLeftOnData:%lldMB [%lld%%]\r\n" \
+    "iNodesUsedOnData:%lld [%lld%%]\r\n" \
     "\r\n" \
-    "time%s:0x%llx\r\n" \
-    "bootFailErrno%s:0x%x\r\n" \
-    "boot_stage%s:0x%x\r\n" \
-    "isSystemRooted%s:%d\r\n" \
-    "isUserPerceptible%s:%d\r\n"\
-    "dmdErrNo%s:%d\r\n"\
-    "bootFailDetail%s:%s\r\n"\
+    "time:0x%llx\r\n" \
+    "bootFailErrno:0x%x\r\n" \
+    "boot_stage:0x%x\r\n" \
+    "isSystemRooted:%d\r\n" \
+    "isUserPerceptible:%d\r\n"\
+    "dmdErrNo:%d\r\n"\
     "bootup_time:%dS\r\n" \
-    "isBootUpSuccessfully%s:%s\r\n" \
-    "RebootType%s:0x%x\r\n" \
     "\r\n"\
     "the bootlock field in cmdline is: [%s] this time\r\n"
 
 #define BFM_RCV_FILE_CONTENT_FORMAT \
-    "rcvMethod%s:%s\r\n" \
-    "rcvResult%s:%s\r\n" \
+    "rcvMethod:%s\r\n" \
+    "rcvResult:%s\r\n" \
     "\r\n" \
-    "rcvMethod%s:%d\r\n" \
-    "rcvResult%s:%d\r\n" \
-    "selfHealChain%s:%s\r\n"
+    "rcvMethod:%d\r\n" \
+    "rcvResult:%d\r\n"
 
 #define BFM_RECOVERY_SUCCESS_STR "success"
 #define BFM_RECOVERY_SUCCESS_INT_VALUE 1
@@ -127,22 +112,9 @@
 #define BFMR_RECOVERT_MODE_KEYWORD_1 "rebooting into recovery mode"
 #define BFMR_RECOVERT_MODE_KEYWORD_2 "exited 4 times in 4 minutes"
 #define BFM_WAIT_DATA_PART_TIME_OUT (5)
-#define BFM_TEXT_LOG_SEPRATOR_WITHOUT_FIRST_NEWLINE "================time:%s================\r\n"
-#define BFM_TEXT_LOG_SEPRATOR_WITH_FIRST_NEWLINE "\n" BFM_TEXT_LOG_SEPRATOR_WITHOUT_FIRST_NEWLINE
-#define BFM_USER_NOT_SENSIBLE_BOOTFAIL_MAX_COUNT (2)
-#define BFM_USER_MAX_TOLERANT_BOOTTIME_IN_SECOND (60)
 #define BFM_BOOTUP_SLOWLY_THRESHOLD_IN_SECOND (5 * 60)
 
-#define SIG_TO_INIT      40
-#define SIG_INT_VALUE 1234
 
-#define BFM_TEXT_LOG_SEPRATOR_ADD_TIME \
-	"starttime:%s\r\n" \
-	"endtime:%lld\r\n" \
-	"%s"
-
-#define BFM_SELF_HEAL_CHAIN_MAX_LEN (256)
-#define BFM_SELF_HEAL_STAGE_OFF_LEN 24
 /*----local prototypes----------------------------------------------------------------*/
 
 typedef struct
@@ -173,17 +145,24 @@ typedef struct
 
 /*----local function prototypes---------------------------------------------------------*/
 
+static int __init early_parse_bfmr_enable_flag(char *p);
 static long bfmr_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 static int bfmr_open(struct inode *inode, struct file *file);
 static ssize_t bfmr_read(struct file *file, char __user *buf, size_t count, loff_t *pos);
 static ssize_t bfmr_write(struct file *file, const char *data, size_t len, loff_t *ppos);
 static int bfmr_release(struct inode *inode, struct file *file);
 static int bfm_update_info_for_each_log(void);
+static int bfm_update_recovery_result(char *precovery_info_file_path,
+    int real_recovery_method,
+    bool boot_success);
 static int bfm_notify_boot_success(void *param);
 static int bfm_lookup_dir_by_create_time(const char *root,
     char *log_path,
     size_t log_path_len,
     int find_oldest_log);
+static int bfm_read_recovery_info(const char *precovery_info_file_path,
+    char *data_buf, long data_buf_len);
+static int bfm_find_newest_log(char *log_path, size_t log_path_len);
 static void bfm_wait_for_compeletion_of_processing_boot_fail(void);
 
 static void bfm_delete_oldest_log(long long bytes_need_this_time);
@@ -210,9 +189,10 @@ static int bfm_capture_and_save_native_bootfail_log(bfmr_log_dst_t *pdst,
 static int bfm_capture_and_save_framework_bootfail_log(bfmr_log_dst_t *pdst,
     bfmr_log_src_t *psrc,
     bfm_process_bootfail_param_t *pparam);
-static bool bfm_is_log_existed(unsigned long long rtc_time, unsigned int bootfail_errno);
+static bool bfm_is_log_existed(unsigned long long rtc_time, unsigned int bootfaiL_errno);
 static int bfm_capture_and_save_bootfail_log(bfm_process_bootfail_param_t *pparam);
 static void bfm_process_after_save_bootfail_log(void);
+static char* bfm_get_boot_stage_name(unsigned int boot_stage);
 static char* bfm_get_boot_fail_no_desc(bfmr_bootfail_errno_e bootfail_errno, bfm_process_bootfail_param_t *pparam);
 static int bfm_save_bootfail_info_txt(bfmr_log_dst_t *pdst,
     bfmr_log_src_t *psrc,
@@ -237,12 +217,8 @@ static int bfmr_capture_and_save_bottom_layer_boot_fail_log(void);
 */
 static int bfmr_capture_and_save_log(bfmr_log_src_t *src, bfmr_log_dst_t *dst, bfm_process_bootfail_param_t *pparam);
 static unsigned long long bfm_get_system_time(void);
+static void bfmr_get_critical_process_name(const char *kmsg, size_t kmsg_size, char *pbuf, size_t buf_size);
 static int bfm_get_fs_state(const char *pmount_point, struct statfs *pstatfsbuf);
-static bool bfm_is_user_sensible_boot_fail(bfm_bootfail_log_info_t *pbootfail_log_info);
-static void bfm_merge_bootfail_logs(bfm_bootfail_log_info_t *pbootfail_log_info);
-static void bfm_delete_user_unsensible_bootfail_logs(bfm_bootfail_log_info_t *pbootfail_log_info);
-static int bfm_traverse_log_root_dir(bfm_bootfail_log_info_t *pbootfail_log_info);
-static void bfm_user_space_process_read_its_own_file(bfm_process_bootfail_param_t *pparam);
 
 
 /*----local variables-----------------------------------------------------------------*/
@@ -250,9 +226,6 @@ static void bfm_user_space_process_read_its_own_file(bfm_process_bootfail_param_
 static const struct file_operations s_bfmr_fops = {
     .owner	 = THIS_MODULE,
     .unlocked_ioctl = bfmr_ioctl,
-#ifdef CONFIG_COMPAT
-    .compat_ioctl = bfmr_ioctl,
-#endif
     .open = bfmr_open,
     .read = bfmr_read,
     .write = bfmr_write,
@@ -270,342 +243,6 @@ static struct miscdevice s_bfmr_miscdev = {
 static DEFINE_MUTEX(s_process_boot_stage_mutex);
 static DEFINE_MUTEX(s_process_boot_fail_mutex);
 static DECLARE_COMPLETION(s_process_boot_fail_comp);
-
-static bfmr_recovery_method_maptable_t s_bfmr_recovery_method_maptable[] = {
-    /* Map Table for BL1 Stage */
-    {
-        FRM_DO_NOTHING,
-        BL1_STAGE_START,
-        SH_BL1_SELFHEAL
-    },
-    {
-        FRM_REBOOT,
-        BL1_STAGE_START,
-        SH_BL1_REBOOT
-    },
-    {
-        FRM_ENTER_SAFE_MODE,
-        BL1_STAGE_START,
-        SH_BL1_SAFE_MODE
-    },
-    {
-        FRM_GOTO_ERECOVERY_FACTORY_RESET,
-        BL1_STAGE_START,
-        SH_BL1_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_FORMAT_DATA_PART,
-        BL1_STAGE_START,
-        SH_BL1_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_LOWLEVEL_FORMAT_DATA,
-        BL1_STAGE_START,
-        SH_BL1_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY,
-        BL1_STAGE_START,
-        SH_BL1_DOWNLOAD_VERSION
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_DEL_FILES,
-        BL1_STAGE_START,
-        SH_BL1_DOWNLOAD_VERSION
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_FACTORY_RESET,
-        BL1_STAGE_START,
-        SH_BL1_DOWNLOAD_VERSION
-    },
-    {
-        FRM_FACTORY_RESET_AFTER_DOWNLOAD_RECOVERY,
-        BL1_STAGE_START,
-        SH_BL1_FACTORY_RESET
-    },
-    /* Map Table for BL2 Stage */
-    {
-        FRM_DO_NOTHING,
-        BL2_STAGE_START,
-        SH_BL2_SELFHEAL
-    },
-    {
-        FRM_REBOOT,
-        BL2_STAGE_START,
-        SH_BL2_REBOOT
-    },
-    {
-        FRM_ENTER_SAFE_MODE,
-        BL2_STAGE_START,
-        SH_BL2_SAFE_MODE
-    },
-    {
-        FRM_GOTO_ERECOVERY_FACTORY_RESET,
-        BL2_STAGE_START,
-        SH_BL2_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_FORMAT_DATA_PART,
-        BL2_STAGE_START,
-        SH_BL2_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_LOWLEVEL_FORMAT_DATA,
-        BL2_STAGE_START,
-        SH_BL2_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY,
-        BL2_STAGE_START,
-        SH_BL2_DOWNLOAD_VERSION
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_DEL_FILES,
-        BL2_STAGE_START,
-        SH_BL2_DOWNLOAD_VERSION
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_FACTORY_RESET,
-        BL2_STAGE_START,
-        SH_BL2_DOWNLOAD_VERSION
-    },
-    {
-        FRM_FACTORY_RESET_AFTER_DOWNLOAD_RECOVERY,
-        BL2_STAGE_START,
-        SH_BL2_FACTORY_RESET
-    },
-
-    /* Map Table for Kernel Stage */
-    {
-        FRM_DO_NOTHING,
-        KERNEL_STAGE_START,
-        SH_KERNEL_SELFHEAL
-    },
-    {
-        FRM_REBOOT,
-        KERNEL_STAGE_START,
-        SH_KERNEL_REBOOT
-    },
-    {
-        FRM_ENTER_SAFE_MODE,
-        KERNEL_STAGE_START,
-        SH_KERNEL_SAFE_MODE
-    },
-    {
-        FRM_GOTO_ERECOVERY_FACTORY_RESET,
-        KERNEL_STAGE_START,
-        SH_KERNEL_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_FORMAT_DATA_PART,
-        KERNEL_STAGE_START,
-        SH_KERNEL_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_LOWLEVEL_FORMAT_DATA,
-        KERNEL_STAGE_START,
-        SH_KERNEL_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY,
-        KERNEL_STAGE_START,
-        SH_KERNEL_DOWNLOAD_VERSION
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_DEL_FILES,
-        KERNEL_STAGE_START,
-        SH_KERNEL_DOWNLOAD_VERSION
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_FACTORY_RESET,
-        KERNEL_STAGE_START,
-        SH_KERNEL_DOWNLOAD_VERSION
-    },
-    {
-        FRM_FACTORY_RESET_AFTER_DOWNLOAD_RECOVERY,
-        KERNEL_STAGE_START,
-        SH_KERNEL_FACTORY_RESET
-    },
-    {
-        FRM_BOPD,
-        KERNEL_STAGE_START,
-        SH_KERNEL_BOPD
-    },
-    {
-        FRM_STORAGE_RDONLY_BOPD,
-        KERNEL_STAGE_START,
-        SH_KERNEL_STORAGE_RDONLY_BOPD
-    },
-    {
-        FRM_HARDWARE_DEGRADE_BOPD,
-        KERNEL_STAGE_START,
-        SH_KERNEL_HARDWARE_DEGRADE_BOPD
-    },
-    {
-        FRM_BOPD_AFTER_DOWNLOAD,
-        KERNEL_STAGE_START,
-        SH_KERNEL_BOPD_AFTER_DOWNLOAD
-    },
-    {
-        FRM_HARDWARE_DEGRADE_BOPD_AFTER_DOWNLOAD,
-        KERNEL_STAGE_START,
-        SH_KERNEL_HARDWARE_DEGRADE_BOPD_AFTER_DOWNLOAD
-    },
-    /* Map Table for Native Stage */
-    {
-        FRM_DO_NOTHING,
-        NATIVE_STAGE_START,
-        SH_NATIVE_SELFHEAL
-    },
-    {
-        FRM_REBOOT,
-        NATIVE_STAGE_START,
-        SH_NATIVE_REBOOT
-    },
-    {
-        FRM_ENTER_SAFE_MODE,
-        NATIVE_STAGE_START,
-        SH_NATIVE_SAFE_MODE
-    },
-    {
-        FRM_GOTO_ERECOVERY_FACTORY_RESET,
-        NATIVE_STAGE_START,
-        SH_NATIVE_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_FORMAT_DATA_PART,
-        NATIVE_STAGE_START,
-        SH_NATIVE_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_LOWLEVEL_FORMAT_DATA,
-        NATIVE_STAGE_START,
-        SH_NATIVE_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY,
-        NATIVE_STAGE_START,
-        SH_NATIVE_DOWNLOAD_VERSION
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_DEL_FILES,
-        NATIVE_STAGE_START,
-        SH_NATIVE_DOWNLOAD_VERSION
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_FACTORY_RESET,
-        NATIVE_STAGE_START,
-        SH_NATIVE_DOWNLOAD_VERSION
-    },
-    {
-        FRM_FACTORY_RESET_AFTER_DOWNLOAD_RECOVERY,
-        NATIVE_STAGE_START,
-        SH_NATIVE_FACTORY_RESET
-    },
-    {
-        FRM_BOPD,
-        NATIVE_STAGE_START,
-        SH_NATIVE_BOPD
-    },
-    {
-        FRM_STORAGE_RDONLY_BOPD,
-        NATIVE_STAGE_START,
-        SH_NATIVE_STORAGE_RDONLY_BOPD
-    },
-    {
-        FRM_HARDWARE_DEGRADE_BOPD,
-        NATIVE_STAGE_START,
-        SH_NATIVE_HARDWARE_DEGRADE_BOPD
-    },
-    {
-        FRM_BOPD_AFTER_DOWNLOAD,
-        NATIVE_STAGE_START,
-        SH_NATIVE_BOPD_AFTER_DOWNLOAD
-    },
-    {
-        FRM_HARDWARE_DEGRADE_BOPD_AFTER_DOWNLOAD,
-        NATIVE_STAGE_START,
-        SH_NATIVE_HARDWARE_DEGRADE_BOPD_AFTER_DOWNLOAD
-    },
-
-    /* Map Table for Framework Stage */
-    {
-        FRM_DO_NOTHING,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_SELFHEAL
-    },
-    {
-        FRM_REBOOT,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_REBOOT
-    },
-    {
-        FRM_ENTER_SAFE_MODE,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_SAFE_MODE
-    },
-    {
-        FRM_GOTO_ERECOVERY_FACTORY_RESET,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_FORMAT_DATA_PART,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_LOWLEVEL_FORMAT_DATA,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_FACTORY_RESET
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_DOWNLOAD_VERSION
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_DEL_FILES,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_DOWNLOAD_VERSION
-    },
-    {
-        FRM_GOTO_ERECOVERY_DOWNLOAD_RECOVERY_AND_FACTORY_RESET,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_DOWNLOAD_VERSION
-    },
-    {
-        FRM_FACTORY_RESET_AFTER_DOWNLOAD_RECOVERY,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_FACTORY_RESET
-    },
-    {
-        FRM_BOPD,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_BOPD
-    },
-    {
-        FRM_STORAGE_RDONLY_BOPD,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_STORAGE_RDONLY_BOPD
-    },
-    {
-        FRM_HARDWARE_DEGRADE_BOPD,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_HARDWARE_DEGRADE_BOPD
-    },
-    {
-        FRM_BOPD_AFTER_DOWNLOAD,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_BOPD_AFTER_DOWNLOAD
-    },
-    {
-        FRM_HARDWARE_DEGRADE_BOPD_AFTER_DOWNLOAD,
-        ANDROID_FRAMEWORK_STAGE_START,
-        SH_FRAMEWORK_HARDWARE_DEGRADE_BOPD_AFTER_DOWNLOAD
-    },
-};
-
 
 /* modifiy this array if you add new log type */
 static bfm_log_type_buffer_info_t s_log_type_buffer_info[LOG_TYPE_MAX_COUNT] = {
@@ -703,7 +340,6 @@ static bfm_boot_fail_no_desc_t s_bootfail_errno_desc[] =
     {BL2_FASTBOOT_S_LOADLPMCU_FAIL, "bl2 load lpmcu failed"},
     {BL2_FASTBOOT_S_IMG_VERIFY_FAIL, "bl2 image verify failed"},
     {BL2_FASTBOOT_S_SOC_TEMP_ERR, "bl2 soc tmp err"},
-    {BL2_PL1_BAT_LOW_POWER, "battery low power"},
     {KERNEL_AP_PANIC, "kernel ap panic"},
     {KERNEL_EMMC_INIT_FAIL, "kernel emm init failed"},
     {KERNEL_AP_WDT, "kernel ap wdt"},
@@ -760,210 +396,74 @@ static bfm_boot_fail_no_desc_t s_bootfail_errno_desc[] =
     {KERNLE_AP_S_SCHARGER, "kernel charger abnormal"},
     {SYSTEM_MOUNT_FAIL, "system part mount failed"},
     {SECURITY_FAIL, "security failed"},
-    {CRITICAL_SERVICE_FAIL_TO_START, "critical service start failed"},
+    {CRITICAL_SERVICE_FAIL_TO_START, "zygote or system_server start failed"},
     {DATA_MOUNT_FAILED_AND_ERASED, "data part mount failed"},
     {DATA_MOUNT_RO, "data part mounted ro"},
     {DATA_NOSPC, "no space on data part"},
     {VENDOR_MOUNT_FAIL, "vendor part mount failed"},
     {NATIVE_PANIC, "native critical fail"},
-    {MAPLE_ESCAPE_DLOPEN_MRT, "maple escape dlopen mrt fail"},
-    {MAPLE_ESCAPE_CRITICAL_CRASH, "maple escape critical crash fail"},
-    {MAPLE_CRITICAL_CRASH_MYGOTE_DATA, "maple critical crash mygote data fail"},
-    {MAPLE_CRITICAL_CRASH_SYSTEMSERVER_DATA, "maple critical crash systemserver data fail"},
     {SYSTEM_SERVICE_LOAD_FAIL, "system service load failed"},
     {PREBOOT_BROADCAST_FAIL, "preboot broadcast failed"},
     {VM_OAT_FILE_DAMAGED, "ota file damaged"},
     {PACKAGE_MANAGER_SETTING_FILE_DAMAGED, "package manager setting file damaged"},
-    {BFM_HARDWARE_FAULT, "hardware-fault"},
     {BOOTUP_SLOWLY, "bootup slowly"},
-    {POWEROFF_ABNORMAL, "power off abnormally"},
-};
-
-static bfmr_bootfail_errno_e s_sensible_bootfail_with_reboot_recovery[] = {
-    KERNEL_PRESS10S,
-    KERNEL_BOOT_TIMEOUT,
-    CRITICAL_SERVICE_FAIL_TO_START,
-    POWEROFF_ABNORMAL,
-    KERNEL_AP_WDT,
-    KERNEL_LPM3_S_GLOBALWDT,
-    KERNEL_LPM3_S_LPMCURST,
-    BL2_WDT,
-};
-
-static char *s_valid_log_name[] = {
-    BFM_BFI_FILE_NAME,
-    BFM_RECOVERY_FILE_NAME,
-    BFM_CRITICAL_PROCESS_CRASH_LOG_NAME,
-    BFM_TOMBSTONE_LOG_NAME,
-    BFM_SYSTEM_SERVER_CRASH_LOG_NAME,
-    BFM_SYSTEM_SERVER_WATCHDOG_LOG_NAME,
-    BFM_BL1_LOG_FILENAME,
-    BFM_BL2_LOG_FILENAME,
-    BFM_KERNEL_LOG_FILENAME,
-    BFM_ALT_BL1_LOG_FILENAME,
-    BFM_ALT_BL2_LOG_FILENAME,
-    BFM_ALT_KERNEL_LOG_FILENAME,
-    BFM_FRAMEWORK_BOOTFAIL_LOG_FILE_NAME,
-    BFM_PMSG_LOG_FILENAME,
 };
 
 static bool s_is_bootup_successfully = false;
-static bool s_is_process_boot_success = false;
-
 
 /*----function definitions--------------------------------------------------------------*/
 
-static bfmr_selfheal_code_e bfm_get_selfheal_code(bfr_recovery_method_e recovery_method, bfmr_detail_boot_stage_e boot_stage)
+static void bfmr_get_critical_process_name(const char *kmsg, size_t kmsg_size, char *pbuf, size_t buf_size)
 {
-    int i = 0;
-    int count = sizeof(s_bfmr_recovery_method_maptable) / sizeof(s_bfmr_recovery_method_maptable[0]);
-
-    if (boot_stage == STAGE_BOOT_SUCCESS) {
-        boot_stage = ANDROID_FRAMEWORK_STAGE_START;
-    }
-
-    for (i = 0; i < count; i++) {
-        if (recovery_method == s_bfmr_recovery_method_maptable[i].recovery_method) {
-            if ((boot_stage >> BFM_SELF_HEAL_STAGE_OFF_LEN) == (s_bfmr_recovery_method_maptable[i].boot_stage >> BFM_SELF_HEAL_STAGE_OFF_LEN))
-            {
-                return s_bfmr_recovery_method_maptable[i].selfheal_code;
-            }
-        }
-    }
-
-    return SH_UNKNOW;
-}
-
-
-static void bfm_update_bootfail_logs(bfm_bootfail_log_info_t *pbootfail_log_info)
-{
-    char *src_file_path = NULL;
-    char *pdata = NULL;
-    long src_file_len = 0L;
-    long buf_len = 0L;
-    char start_time[BFM_MAX_INT_NUMBER_LEN] = {0};
     char *ptemp = NULL;
-    unsigned long long end_time = 0;
-    char *temp_str = NULL;
-	int log_dir_cnt = 0;
+    char *pstart = NULL;
+    int useless_num = 0;
+    int kmsg_header_size = bfm_get_kmsg_log_header_size();
 
-    if (unlikely(NULL == pbootfail_log_info)) {
-        BFMR_PRINT_INVALID_PARAMS("pbootfail_log_info.\n");
-        return;
-    }
-
-	log_dir_cnt = pbootfail_log_info->log_dir_count;
-	if (log_dir_cnt == 0) {
-		BFMR_PRINT_ERR("log_dir_count=0!\n");
-		return;
-	}
-
-    src_file_path = bfmr_malloc(BFMR_MAX_PATH);
-    if (NULL == src_file_path) {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
+    if (unlikely((NULL == kmsg) || (NULL == pbuf) || (kmsg_header_size > kmsg_size)))
+    {
+        BFMR_PRINT_INVALID_PARAMS("kmsg: %p, pbuf: %p, kmsg_size:%d\n", kmsg, pbuf, (int)kmsg_size);
         goto __out;
     }
 
-    memset(src_file_path, 0, BFMR_MAX_PATH);
-    snprintf(src_file_path, BFMR_MAX_PATH - 1, "%s/%s", pbootfail_log_info->bootfail_logs[0].log_dir, BFM_BFI_FILE_NAME);
-
-    /* continue if the src file doesn't exist */
-    if (!bfmr_is_file_existed(src_file_path)) {
-         goto __out;
-    }
-
-    /* get file length of src file */
-    src_file_len = bfmr_get_file_length(src_file_path);
-    if (src_file_len <= 0L) {
-        BFMR_PRINT_ERR("the length of [%s] is :%ld\n", src_file_path, src_file_len);
-        goto __out;
-    }
-
-    /* allocate mem */
-    buf_len = src_file_len + BFM_SELF_HEAL_CHAIN_MAX_LEN + 1;
-    pdata = (char *)bfmr_malloc(buf_len);
-    if (NULL == pdata) {
-        BFMR_PRINT_ERR("bfmr_malloc pdata failed!\n");
-        goto __out;
-    }
-    memset(pdata, 0, buf_len);
-
-    temp_str = (char *)bfmr_malloc(buf_len);
-    if (NULL == temp_str) {
-        BFMR_PRINT_ERR("bfmr_malloc temp_str failed!\n");
-        goto __out;
-    }
-    memset(temp_str, 0, buf_len);
-
-    /* read src file */
-    src_file_len = bfmr_full_read_with_file_path(src_file_path, pdata, src_file_len);
-    if (src_file_len <= 0) {
-        BFMR_PRINT_ERR("read [%s] failed!\n", src_file_path);
-        goto __out;
-    }
-
-    end_time = bfm_get_system_time();
-	snprintf(start_time, sizeof(start_time) - 1, "%u",
-		pbootfail_log_info->real_recovery_info.
-			boot_fail_rtc_time[log_dir_cnt - 1]);
-
-	BFMR_PRINT_ERR("TONYZXB  starttime %s; endtime %llu\n",
-			start_time, end_time);
-
-    ptemp =bfmr_reverse_find_string(pdata,"RebootType");
-    if (NULL == ptemp) {
-        BFMR_PRINT_ERR("Can not find RebootType\n");
-
-        snprintf(temp_str, BFM_SELF_HEAL_CHAIN_MAX_LEN - 1, BFM_TEXT_LOG_SEPRATOR_ADD_TIME, start_time, end_time, "");
-        buf_len = strlen(temp_str);
-        if (0 != buf_len) {
-            bfmr_save_log(pbootfail_log_info->bootfail_logs[0].log_dir, BFM_BFI_FILE_NAME, temp_str, buf_len, 1);
+    ptemp = strstr(kmsg + kmsg_header_size, BFMR_RECOVERT_MODE_KEYWORD_1);
+    if (NULL == ptemp)
+    {
+        BFMR_PRINT_ERR("Can not find: [%s]\n", BFMR_RECOVERT_MODE_KEYWORD_1);
+        ptemp = strstr(kmsg + kmsg_header_size, BFMR_RECOVERT_MODE_KEYWORD_2);
+        if (NULL == ptemp)
+        {
+            BFMR_PRINT_ERR("Can not find: [%s]\n", BFMR_RECOVERT_MODE_KEYWORD_2);
+            goto __out;
         }
     }
-    else {
-        strncpy(temp_str, ptemp, BFM_SELF_HEAL_CHAIN_MAX_LEN - 1);
-        snprintf(ptemp, BFM_SELF_HEAL_CHAIN_MAX_LEN + strlen(temp_str) -1, BFM_TEXT_LOG_SEPRATOR_ADD_TIME, start_time, end_time, temp_str);
-        bfmr_save_log(pbootfail_log_info->bootfail_logs[0].log_dir, BFM_BFI_FILE_NAME, pdata, buf_len, 0);
+
+    while (((--ptemp) >= kmsg) && ('\'' != *ptemp))
+    {
+        ;
+    }
+
+    pstart = --ptemp;
+    if (pstart <= kmsg)
+    {
+        BFMR_PRINT_ERR("Invalid kmsg data!\n");
+        goto __out;
+    }
+
+    while (((--pstart) >= kmsg) && ('\'' != *pstart))
+    {
+        ;
+    }
+
+    pstart++;
+    ptemp++;
+    if (pstart >= kmsg)
+    {
+        strncpy(pbuf, pstart, BFMR_MIN(ptemp - pstart, buf_size - 1));
     }
 
 __out:
-    if (pdata) {
-        bfmr_free(pdata);
-    }
-    if (temp_str) {
-        bfmr_free(temp_str);
-    }
-    if (src_file_path) {
-        bfmr_free(src_file_path);
-    }
-}
-
-void bfm_send_signal_to_init(void)
-{
-    int pid = 1;
-    int ret;
-    struct siginfo info;
-    struct task_struct *t;
-
-    info.si_signo = SIG_TO_INIT;
-    info.si_code = SI_QUEUE;
-    info.si_int = SIG_INT_VALUE;
-
-    rcu_read_lock();
-    t = find_task_by_vpid(pid);
-    if (t == NULL) {
-        BFMR_PRINT_ERR("Init dump: no such pid\n");
-        rcu_read_unlock();
-    }
-    else {
-        rcu_read_unlock();
-        ret = send_sig_info(SIG_TO_INIT, &info, t);
-        if (ret < 0) {
-            BFMR_PRINT_ERR("Init dump: error sending signal\n");
-        } else {
-            BFMR_PRINT_ERR("Init dump: sending signal success\n");
-        }
-    }
+    return;
 }
 
 
@@ -974,8 +474,13 @@ static char* bfm_get_boot_fail_no_desc(bfmr_bootfail_errno_e bootfail_errno, bfm
 
     if (unlikely(NULL == pparam))
     {
-        BFMR_PRINT_INVALID_PARAMS("pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pparam: %p\n", pparam);
         return "unknown";
+    }
+
+    if (CRITICAL_SERVICE_FAIL_TO_START == bootfail_errno)
+    {
+        return pparam->critical_process_name;
     }
 
     for (i = 0; i < count; i++)
@@ -989,6 +494,44 @@ static char* bfm_get_boot_fail_no_desc(bfmr_bootfail_errno_e bootfail_errno, bfm
     return "unknown";
 }
 
+
+static char* bfm_get_boot_stage_name(unsigned int boot_stage)
+{
+    char *boot_stage_name = NULL;
+
+    if (bfmr_is_bl1_stage(boot_stage))
+    {
+        boot_stage_name = "BL1";
+    }
+    else if (bfmr_is_bl2_stage(boot_stage))
+    {
+        boot_stage_name = "BL2";
+    }
+    else if (bfmr_is_kernel_stage(boot_stage))
+    {
+        boot_stage_name = "kernel";
+    }
+    else if (bfmr_is_native_stage(boot_stage))
+    {
+            boot_stage_name = "native";
+    }
+    else if (bfmr_is_android_framework_stage(boot_stage))
+    {
+        boot_stage_name = "framework";
+    }
+    else if (bfmr_is_boot_success(boot_stage))
+    {
+        boot_stage_name = "boot-success";
+    }
+    else
+    {
+        boot_stage_name = "unknown";
+    }
+
+    return boot_stage_name;
+}
+
+
 static int bfm_get_fs_state(const char *pmount_point, struct statfs *pstatfsbuf)
 {
     mm_segment_t old_fs;
@@ -996,7 +539,7 @@ static int bfm_get_fs_state(const char *pmount_point, struct statfs *pstatfsbuf)
 
     if (unlikely((NULL == pmount_point) || (NULL == pstatfsbuf)))
     {
-        BFMR_PRINT_INVALID_PARAMS("pmount_point or pstatfsbuf.\n");
+        BFMR_PRINT_INVALID_PARAMS("pmount_point: %p, pstatfsbuf: %p\n", pmount_point, pstatfsbuf);
         return -1;
     }
 
@@ -1009,17 +552,16 @@ static int bfm_get_fs_state(const char *pmount_point, struct statfs *pstatfsbuf)
     return ret;
 }
 
+
 static int bfm_save_bootfail_info_txt(bfmr_log_dst_t *pdst, bfmr_log_src_t *psrc, bfm_process_bootfail_param_t *pparam)
 {
     int ret = -1;
-    size_t bytes_formatted = 0;
     char *pdata = NULL;
     struct statfs statfsbuf = {0};
-    char record_count_str[BFM_MAX_INT_NUMBER_LEN] = {'\0'};
 
     if (unlikely(NULL == pparam))
     {
-        BFMR_PRINT_INVALID_PARAMS("pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pparam: %p\n", pparam);
         return -1;
     }
 
@@ -1036,72 +578,59 @@ static int bfm_save_bootfail_info_txt(bfmr_log_dst_t *pdst, bfmr_log_src_t *psrc
     {
         ret = bfm_get_fs_state("/data", &statfsbuf);
     }
-	if (pparam->bootfail_log_info.log_dir_count == 0) {
-		snprintf(record_count_str,
-			sizeof(record_count_str) - 1, "%s", "");
-	} else {
-		snprintf(record_count_str, sizeof(record_count_str) - 1,
-			"_%d", pparam->bootfail_log_info.log_dir_count + 1);
-	}
-    bytes_formatted = snprintf(pdata, BFMR_TEMP_BUF_LEN - 1, BFM_BFI_FILE_CONTENT_FORMAT,
-        record_count_str, bfmr_convert_rtc_time_to_asctime(pparam->bootfail_time),
-        record_count_str, bfm_get_boot_fail_no_desc(pparam->bootfail_errno, pparam),
-        record_count_str, bfm_get_platform_name(),
+
+    (void)snprintf(pdata, BFMR_TEMP_BUF_LEN - 1, BFM_BFI_FILE_CONTENT_FORMAT,
+        bfmr_convert_rtc_time_to_asctime(pparam->bootfail_time),
+        bfm_get_platform_name(),
         bfm_get_boot_stage_name((unsigned int)pparam->boot_stage),
-        record_count_str, pparam->is_system_rooted,
-        record_count_str, pparam->is_user_sensible,
-        record_count_str, (0 == ret) ? ((long long)(statfsbuf.f_bavail * statfsbuf.f_bsize) / (long long)(BFMR_SIZE_1K * BFMR_SIZE_1K)) : (0L),
+        bfm_get_boot_fail_no_desc(pparam->bootfail_errno, pparam),
+        bfm_get_platform_name(),
+        bfm_get_boot_stage_name((unsigned int)pparam->boot_stage),
+        pparam->is_system_rooted,
+        pparam->is_user_sensible,
+        (0 == ret) ? ((long long)(statfsbuf.f_bavail * statfsbuf.f_bsize) / (long long)(BFMR_SIZE_1K * BFMR_SIZE_1K)) : (0L),
         (0 == ret) ? ((statfsbuf.f_blocks <= 0) ? (0LL) : ((long long)(100 * statfsbuf.f_bavail) / (long long)statfsbuf.f_blocks)) : (0LL),
-        record_count_str, (0 == ret) ? ((long long)(statfsbuf.f_files - statfsbuf.f_ffree)) : (0L),
+        (0 == ret) ? ((long long)(statfsbuf.f_files - statfsbuf.f_ffree)) : (0L),
         (0 == ret) ? ((statfsbuf.f_files <= 0) ? (0LL) : ((long long)(100 * (statfsbuf.f_files - statfsbuf.f_ffree)) / (long long)statfsbuf.f_files)): (0LL),
-        record_count_str, pparam->bootfail_time,
-        record_count_str, (unsigned int)pparam->bootfail_errno,
-        record_count_str, (unsigned int)pparam->boot_stage,
-        record_count_str, pparam->is_system_rooted,
-        record_count_str, pparam->is_user_sensible,
-        record_count_str, pparam->dmd_num,
-        record_count_str, pparam->excepInfo,
+        pparam->bootfail_time,
+        (unsigned int)pparam->bootfail_errno,
+        (unsigned int)pparam->boot_stage,
+        pparam->is_system_rooted,
+        pparam->is_user_sensible,
+        pparam->dmd_num,
         (unsigned int)pparam->bootup_time,
-        record_count_str, pparam->is_bootup_successfully ? "yes" : "no",
-        record_count_str, pparam->reboot_type,
         bfm_get_bootlock_value_from_cmdline());
 
-    if ((bytes_formatted < (BFMR_TEMP_BUF_LEN - 1)) &&
-        ((BOOTUP_SLOWLY == pparam->bootfail_errno) || (KERNEL_BOOT_TIMEOUT == pparam->bootfail_errno)))
-    {
-        BFMR_PRINT_KEY_INFO("Record boot stages information.\n");
-        bytes_formatted += bfm_save_stages_info_txt((char*)(pdata + bytes_formatted), (BFMR_TEMP_BUF_LEN - bytes_formatted));
-    }
-
-    switch (pdst->type)
-    {
-    case DST_FILE:
+        switch (pdst->type)
         {
-            ret = bfmr_save_log(pparam->bootfail_log_dir, BFM_BFI_FILE_NAME, (void *)pdata, bytes_formatted, 0);
-            if (0 != ret)
+        case DST_FILE:
             {
-                BFMR_PRINT_ERR("save [%s] failed!\n", BFM_BFI_FILE_NAME);
+                ret = bfmr_save_log(pparam->bootfail_log_dir, BFM_BFI_FILE_NAME, (void *)pdata, strlen(pdata), 0);
+                if (0 != ret)
+                {
+                    BFMR_PRINT_ERR("save [%s] failed!\n", BFM_BFI_FILE_NAME);
+                }
+                break;
             }
-            break;
+        case DST_RAW_PART:
+            {
+                bfmr_save_log_to_raw_part(pdst->dst_info.raw_part.raw_part_name,
+                                          pdst->dst_info.raw_part.offset,
+                                          (void *)pdata, strlen(pdata));
+                psrc->log_type = LOG_TYPE_BFM_BFI_LOG;
+                strncpy(psrc->src_log_file_path, BFM_BFI_FILE_NAME, BFMR_MAX_PATH);
+                bfmr_update_raw_log_info(psrc, pdst, strlen(pdata));
+                break;
+            }
+        case DST_MEMORY_BUFFER:
+        default:
+            {
+                bfmr_save_log_to_mem_buffer(pdst->dst_info.buffer.addr, pdst->dst_info.buffer.len, (void *)pdata, strlen(pdata));
+                break;
+            }
         }
-    case DST_RAW_PART:
-        {
-            bfmr_save_log_to_raw_part(pdst->dst_info.raw_part.raw_part_name,
-                pdst->dst_info.raw_part.offset,
-                (void *)pdata, bytes_formatted);
-            psrc->log_type = LOG_TYPE_BFM_BFI_LOG;
-            strncpy(psrc->src_log_file_path, BFM_BFI_FILE_NAME, BFMR_MAX_PATH);
-            bfmr_update_raw_log_info(psrc, pdst, bytes_formatted);
-            break;
-        }
-    case DST_MEMORY_BUFFER:
-    default:
-        {
-            bfmr_save_log_to_mem_buffer(pdst->dst_info.buffer.addr, pdst->dst_info.buffer.len, (void *)pdata, bytes_formatted);
-            break;
-        }
-    }
 
+__out:
     bfmr_free(pdata);
 
     return ret;
@@ -1122,12 +651,10 @@ static int bfm_save_recovery_info_txt(bfmr_log_dst_t *pdst,
 {
     int ret = -1;
     char *pdata = NULL;
-    char record_count_str[BFM_MAX_INT_NUMBER_LEN] = {'\0'};
-    bfmr_selfheal_code_e selfheal_code = SH_UNKNOW;
 
     if (unlikely(NULL == pparam))
     {
-        BFMR_PRINT_INVALID_PARAMS("pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pparam: %p\n", pparam);
         return -1;
     }
 
@@ -1139,51 +666,43 @@ static int bfm_save_recovery_info_txt(bfmr_log_dst_t *pdst,
     }
     memset(pdata, 0, BFMR_TEMP_BUF_LEN);
 
-    selfheal_code = bfm_get_selfheal_code(pparam->recovery_method, pparam->boot_stage);
-	if (pparam->suggested_recovery_method == DO_NOTHING) {
-		snprintf(record_count_str,
-			sizeof(record_count_str) - 1, "%s", "");
-	} else {
-		snprintf(record_count_str, sizeof(record_count_str) - 1,
-			"_%d", pparam->bootfail_log_info.log_dir_count + 1);
-	}
     (void)snprintf(pdata, BFMR_TEMP_BUF_LEN - 1, BFM_RCV_FILE_CONTENT_FORMAT,
-        record_count_str, bfr_get_recovery_method_desc(pparam->recovery_method),
-        record_count_str, (BFM_RECOVERY_SUCCESS_INT_VALUE == bfm_get_recovery_result(pparam->suggested_recovery_method))
+        bfr_get_recovery_method_desc(pparam->recovery_method),
+        (BFM_RECOVERY_SUCCESS_INT_VALUE == bfm_get_recovery_result(pparam->suggested_recovery_method))
         ?  BFM_RECOVERY_SUCCESS_STR : BFM_RECOVERY_FAIL_STR,
-        record_count_str, selfheal_code,
-        record_count_str, bfm_get_recovery_result(pparam->suggested_recovery_method),
-        record_count_str, "");
+        pparam->recovery_method,
+        bfm_get_recovery_result(pparam->suggested_recovery_method));
 
-    switch (pdst->type)
-    {
-    case DST_FILE:
+        switch (pdst->type)
         {
-            ret = bfmr_save_log(pparam->bootfail_log_dir, BFM_RECOVERY_FILE_NAME, (void *)pdata, strlen(pdata), 0);
-            if (0 != ret)
+        case DST_FILE:
             {
-                BFMR_PRINT_ERR("save [%s] failed!\n", BFM_RECOVERY_FILE_NAME);
+                ret = bfmr_save_log(pparam->bootfail_log_dir, BFM_RECOVERY_FILE_NAME, (void *)pdata, strlen(pdata), 0);
+                if (0 != ret)
+                {
+                    BFMR_PRINT_ERR("save [%s] failed!\n", BFM_RECOVERY_FILE_NAME);
+                }
+                break;
             }
-            break;
+        case DST_RAW_PART:
+            {
+                bfmr_save_log_to_raw_part(pdst->dst_info.raw_part.raw_part_name,
+                                          pdst->dst_info.raw_part.offset,
+                                          (void *)pdata, strlen(pdata));
+                psrc->log_type = LOG_TYPE_BFM_RECOVERY_LOG;
+                strncpy(psrc->src_log_file_path, BFM_RECOVERY_FILE_NAME, BFMR_MAX_PATH);
+                bfmr_update_raw_log_info(psrc, pdst, strlen(pdata));
+                break;
+            }
+        case DST_MEMORY_BUFFER:
+        default:
+            {
+                bfmr_save_log_to_mem_buffer(pdst->dst_info.buffer.addr, pdst->dst_info.buffer.len, (void *)pdata, strlen(pdata));
+                break;
+            }
         }
-    case DST_RAW_PART:
-        {
-            bfmr_save_log_to_raw_part(pdst->dst_info.raw_part.raw_part_name,
-                pdst->dst_info.raw_part.offset,
-                (void *)pdata, strlen(pdata));
-            psrc->log_type = LOG_TYPE_BFM_RECOVERY_LOG;
-            strncpy(psrc->src_log_file_path, BFM_RECOVERY_FILE_NAME, BFMR_MAX_PATH);
-            bfmr_update_raw_log_info(psrc, pdst, strlen(pdata));
-            break;
-        }
-    case DST_MEMORY_BUFFER:
-    default:
-        {
-            bfmr_save_log_to_mem_buffer(pdst->dst_info.buffer.addr, pdst->dst_info.buffer.len, (void *)pdata, strlen(pdata));
-            break;
-        }
-    }
 
+__out:
     bfmr_free(pdata);
 
     return ret;
@@ -1202,7 +721,7 @@ int bfm_get_log_count(char *bfmr_log_root_path)
 
     if (unlikely((NULL == bfmr_log_root_path)))
     {
-        BFMR_PRINT_INVALID_PARAMS("bfmr_log_root_path.\n");
+        BFMR_PRINT_INVALID_PARAMS("bfmr_log_root_path: %p\n", bfmr_log_root_path);
         return 0;
     }
 
@@ -1252,7 +771,7 @@ int bfm_get_log_count(char *bfmr_log_root_path)
             ret = bfm_sys_lstat(full_path, &st);
             if ((0 == ret)
                 && (S_ISDIR(st.st_mode))
-                && (0 != strcmp(dirp->d_name, BFM_UPLOADING_DIR_NAME)))/*lint !e421 */
+                && (0 != strcmp(dirp->d_name, BFM_UPLOADING_DIR_NAME)))
             {
                 log_count++;
             }
@@ -1292,7 +811,7 @@ void bfm_delete_dir(char *log_path)
     mm_segment_t oldfs;
 
     oldfs = get_fs();
-    set_fs(KERNEL_DS);/*lint !e501 */
+    set_fs(KERNEL_DS);
     fd = sys_open(log_path, O_RDONLY, 0);
     if (fd < 0)
     {
@@ -1328,7 +847,7 @@ void bfm_delete_dir(char *log_path)
             memset(full_path, 0, BFMR_MAX_PATH);
             memset((void *)&st, 0, sizeof(bfm_stat_t));
             snprintf(full_path, BFMR_MAX_PATH - 1, "%s/%s", log_path, dirp->d_name);
-            if ((0 != strcmp(dirp->d_name, ".")) && (0 != strcmp(dirp->d_name, "..")))/*lint !e421 */
+            if ((0 != strcmp(dirp->d_name, ".")) && (0 != strcmp(dirp->d_name, "..")))
             {
                 ret = bfm_sys_lstat(full_path, &st);
                 if (0 == ret)
@@ -1443,20 +962,20 @@ static long long bfm_get_extra_space_for_each_bootfail_log(bfm_process_bootfail_
 
     if (unlikely(NULL == pparam))
     {
-        BFMR_PRINT_INVALID_PARAMS("pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pparam: %p\n", pparam);
         return 0LL;
     }
 
-    if (0 != strcmp(pparam->addl_info.log_path, BFM_FRAMEWORK_BOOTFAIL_LOG_PATH))
+    if (0 != strcmp(pparam->user_log_path, BFM_FRAMEWORK_BOOTFAIL_LOG_PATH))
     {
         bytes_need = (long long)(bfmr_get_file_length(BFM_LOGCAT_FILE_PATH)
             + bfmr_get_file_length(BFM_FRAMEWORK_BOOTFAIL_LOG_PATH)
-            + bfmr_get_file_length(pparam->addl_info.log_path));
+            + bfmr_get_file_length(pparam->user_log_path));
     }
     else
     {
         bytes_need = (long long)(bfmr_get_file_length(BFM_LOGCAT_FILE_PATH)
-            + bfmr_get_file_length(pparam->addl_info.log_path)); 
+            + bfmr_get_file_length(pparam->user_log_path)); 
     }
 
     return bytes_need;
@@ -1472,7 +991,7 @@ static int bfm_save_extra_bootfail_logs(bfmr_log_dst_t *pdst,
 
     if (unlikely((NULL == pdst) || (NULL == psrc) || (NULL == pparam)))
     {
-        BFMR_PRINT_INVALID_PARAMS("pdst or psrc or pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pdst: %p, psrc: %p, pparam: %p\n", pdst, psrc, pparam);
         return -1;
     }
 
@@ -1483,14 +1002,14 @@ static int bfm_save_extra_bootfail_logs(bfmr_log_dst_t *pdst,
     if (bfm_get_symbol_link_path(BFM_LOGCAT_FILE_PATH, src_path, sizeof(src_path)))
     {
         (void)snprintf(pparam->bootfail_log_path, sizeof(pparam->bootfail_log_path) - 1,
-            "%s/%s.gz", pparam->bootfail_log_dir, BFM_LOGCAT_FILE_NAME_KEYWORD);
+            "%s/%s", pparam->bootfail_log_dir, BFM_LOGCAT_GZ_FILE_NAME);
     }
     psrc->log_type = LOG_TYPE_BETA_APP_LOGCAT;
     ret = bfmr_capture_and_save_log(psrc, pdst, pparam);
 
     /* 2. save framework bootfail log */
     if ((pparam->boot_stage >= ANDROID_FRAMEWORK_STAGE_START)
-        && (0 != strcmp(pparam->addl_info.log_path, BFM_FRAMEWORK_BOOTFAIL_LOG_PATH)))
+        && (0 != strcmp(pparam->user_log_path, BFM_FRAMEWORK_BOOTFAIL_LOG_PATH)))
     {
         memset((void *)pparam->bootfail_log_path, 0, sizeof(pparam->bootfail_log_path));
         (void)snprintf(pparam->bootfail_log_path, sizeof(pparam->bootfail_log_path) - 1,
@@ -1511,7 +1030,7 @@ static int bfm_capture_and_save_bl1_bootfail_log(bfmr_log_dst_t *pdst,
 {
     if (unlikely((NULL == pdst) || (NULL == psrc) || (NULL == pparam)))
     {
-        BFMR_PRINT_INVALID_PARAMS("pdst or psrc or pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pdst: %p, psrc: %p, pparam: %p\n", pdst, psrc, pparam);
         return -1;
     }
 
@@ -1530,7 +1049,7 @@ static int bfm_capture_and_save_bl2_bootfail_log(bfmr_log_dst_t *pdst,
 {
     if (unlikely((NULL == pdst) || (NULL == psrc) || (NULL == pparam)))
     {
-        BFMR_PRINT_INVALID_PARAMS("pdst or psrc or pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pdst: %p, psrc: %p, pparam: %p\n", pdst, psrc, pparam);
         return -1;
     }
 
@@ -1551,18 +1070,18 @@ static int bfm_capture_and_save_kernel_bootfail_log(bfmr_log_dst_t *pdst,
 
     if (unlikely((NULL == pdst) || (NULL == psrc) || (NULL == pparam)))
     {
-        BFMR_PRINT_INVALID_PARAMS("pdst or psrc or pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pdst: %p, psrc: %p, pparam: %p\n", pdst, psrc, pparam);
         return -1;
     }
 
     /* capture last kmsg of zip type on Beta version */
     memset((void *)pparam->bootfail_log_path, 0, sizeof(pparam->bootfail_log_path));
     file_existed = bfmr_is_file_existed(BFM_BETA_KMSG_LOG_PATH);
-    BFMR_PRINT_KEY_INFO("[%s] %s!\n", BFM_BETA_KMSG_LOG_PATH, (file_existed) ? ("exists") : ("doesn't exist"));
+    BFMR_PRINT_KEY_INFO("[%s] %s!\n", BFM_BETA_KMSG_LOG_PATH, (file_existed) ? ("exists") : ("dosen't exist"));
     if (bfm_is_beta_version() && file_existed)
     {
         (void)snprintf(pparam->bootfail_log_path, sizeof(pparam->bootfail_log_path) - 1,
-            "%s/%s.gz", pparam->bootfail_log_dir, BFM_KERNEL_LOG_GZ_FILENAME_KEYWORD);
+            "%s/%s.android.gz", pparam->bootfail_log_dir, bfm_get_kernel_bootfail_log_name());
         psrc->log_type = LOG_TYPE_ANDROID_KMSG;
         (void)bfmr_capture_and_save_log(psrc, pdst, pparam);
     }
@@ -1583,7 +1102,7 @@ static int bfm_capture_and_save_ramoops_bootfail_log(bfmr_log_dst_t *pdst,
 {
     if (unlikely((NULL == pdst) || (NULL == psrc) || (NULL == pparam)))
     {
-        BFMR_PRINT_INVALID_PARAMS("pdst or psrc or pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pdst: %p, psrc: %p, pparam: %p\n", pdst, psrc, pparam);
         return -1;
     }
 
@@ -1602,7 +1121,7 @@ static char *bfm_get_file_name(char *file_full_path)
 
     if (unlikely((NULL == file_full_path)))
     {
-        BFMR_PRINT_INVALID_PARAMS("file_full_path.\n");
+        BFMR_PRINT_INVALID_PARAMS("file_full_path: %p\n", file_full_path);
         return NULL;
     }
 
@@ -1624,11 +1143,11 @@ static int bfm_capture_and_save_native_bootfail_log(bfmr_log_dst_t *pdst,
 
     if (unlikely((NULL == pdst) || (NULL == psrc) || (NULL == pparam)))
     {
-        BFMR_PRINT_INVALID_PARAMS("pdst, psrc, pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pdst: %p, psrc: %p, pparam: %p\n", pdst, psrc, pparam);
         return -1;
     }
 
-    if (0 == strlen(pparam->addl_info.log_path))
+    if (0 == strlen(pparam->user_log_path))
     {
         BFMR_PRINT_KEY_INFO("user log path hasn't been set!\n");
         return -1;
@@ -1636,28 +1155,22 @@ static int bfm_capture_and_save_native_bootfail_log(bfmr_log_dst_t *pdst,
     else
     {
         memset((void *)pparam->bootfail_log_path, 0, sizeof(pparam->bootfail_log_path));
-        if (NULL != strstr(pparam->addl_info.log_path, BFM_TOMBSTONE_FILE_NAME_TAG))
+        (void)snprintf(pparam->bootfail_log_path, sizeof(pparam->bootfail_log_path) - 1,
+            "%s/%s", pparam->bootfail_log_dir, bfm_get_file_name(pparam->user_log_path));
+        if (NULL != strstr(pparam->user_log_path, BFM_TOMBSTONE_FILE_NAME_TAG))
         {
-            (void)snprintf(pparam->bootfail_log_path, sizeof(pparam->bootfail_log_path) - 1,
-                "%s/%s", pparam->bootfail_log_dir, BFM_TOMBSTONE_LOG_NAME);
             psrc->log_type = LOG_TYPE_VM_TOMBSTONES;
         }
-        else if (NULL != strstr(pparam->addl_info.log_path, BFM_SYSTEM_SERVER_CRASH_FILE_NAME_TAG))
+        else if (NULL != strstr(pparam->user_log_path, BFM_SYSTEM_SERVER_CRASH_FILE_NAME_TAG))
         {
-            (void)snprintf(pparam->bootfail_log_path, sizeof(pparam->bootfail_log_path) - 1,
-                "%s/%s", pparam->bootfail_log_dir, BFM_SYSTEM_SERVER_CRASH_LOG_NAME);
             psrc->log_type = LOG_TYPE_VM_CRASH;
         }
-        else if (NULL != strstr(pparam->addl_info.log_path, BFM_SYSTEM_SERVER_WATCHDOG_FILE_NAME_TAG))
+        else if (NULL != strstr(pparam->user_log_path, BFM_SYSTEM_SERVER_WATCHDOG_FILE_NAME_TAG))
         {
-            (void)snprintf(pparam->bootfail_log_path, sizeof(pparam->bootfail_log_path) - 1,
-                "%s/%s", pparam->bootfail_log_dir, BFM_SYSTEM_SERVER_WATCHDOG_LOG_NAME);
             psrc->log_type = LOG_TYPE_VM_WATCHDOG;
         }
-        else if (NULL != strstr(pparam->addl_info.log_path, BFM_CRITICAL_PROCESS_CRASH_LOG_NAME))
+        else if (NULL != strstr(pparam->user_log_path, BFM_CRITICAL_PROCESS_CRASH_LOG_NAME))
         {
-            (void)snprintf(pparam->bootfail_log_path, sizeof(pparam->bootfail_log_path) - 1,
-                "%s/%s", pparam->bootfail_log_dir, BFM_CRITICAL_PROCESS_CRASH_LOG_NAME);
             psrc->log_type = LOG_TYPE_CRITICAL_PROCESS_CRASH;
         }
         else
@@ -1668,12 +1181,12 @@ static int bfm_capture_and_save_native_bootfail_log(bfmr_log_dst_t *pdst,
     }
 
     ret = bfmr_capture_and_save_log(psrc, pdst, pparam);
-    bfmr_change_file_ownership(pparam->addl_info.log_path, pparam->user_space_log_uid, pparam->user_space_log_gid);
+    bfmr_change_file_ownership(pparam->user_log_path, pparam->user_space_log_uid, pparam->user_space_log_gid);
 
     /* remove critical process crash log in /cache */
-    if (NULL != strstr(pparam->addl_info.log_path, BFM_CRITICAL_PROCESS_CRASH_LOG_NAME))
+    if (NULL != strstr(pparam->user_log_path, BFM_CRITICAL_PROCESS_CRASH_LOG_NAME))
     {
-        bfmr_unlink_file(pparam->addl_info.log_path);
+        bfmr_unlink_file(pparam->user_log_path);
     }
 
     return ret;
@@ -1688,11 +1201,11 @@ static int bfm_capture_and_save_framework_bootfail_log(bfmr_log_dst_t *pdst,
 
     if (unlikely((NULL == pdst) || (NULL == psrc) || (NULL == pparam)))
     {
-        BFMR_PRINT_INVALID_PARAMS("pdst or psrc or pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pdst: %p, psrc: %p, pparam: %p\n", pdst, psrc, pparam);
         return -1;
     }
 
-    if (0 == strlen(pparam->addl_info.log_path))
+    if (0 == strlen(pparam->user_log_path))
     {
         BFMR_PRINT_KEY_INFO("user log path hasn't been set!\n");
         return -1;
@@ -1700,16 +1213,16 @@ static int bfm_capture_and_save_framework_bootfail_log(bfmr_log_dst_t *pdst,
 
     memset((void *)pparam->bootfail_log_path, 0, sizeof(pparam->bootfail_log_path));
     (void)snprintf(pparam->bootfail_log_path, sizeof(pparam->bootfail_log_path) - 1,
-        "%s/%s", pparam->bootfail_log_dir, bfm_get_file_name(pparam->addl_info.log_path));
+        "%s/%s", pparam->bootfail_log_dir, bfm_get_file_name(pparam->user_log_path));
     psrc->log_type = LOG_TYPE_NORMAL_FRAMEWORK_BOOTFAIL_LOG;
     ret = bfmr_capture_and_save_log(psrc, pdst, pparam);
-    bfmr_change_file_ownership(pparam->addl_info.log_path, pparam->user_space_log_uid, pparam->user_space_log_gid);
+    bfmr_change_file_ownership(pparam->user_log_path, pparam->user_space_log_uid, pparam->user_space_log_gid);
 
     return ret;
 }
 
 
-static bool bfm_is_log_existed(unsigned long long rtc_time, unsigned int bootfail_errno)
+static bool bfm_is_log_existed(unsigned long long rtc_time, unsigned int bootfaiL_errno)
 {
     char *log_full_path = NULL;
     bool ret = false;
@@ -1723,7 +1236,7 @@ static bool bfm_is_log_existed(unsigned long long rtc_time, unsigned int bootfai
     memset((void *)log_full_path, 0, BFMR_MAX_PATH);
 
     snprintf(log_full_path, BFMR_MAX_PATH - 1, "%s/" BFM_BOOTFAIL_LOG_DIR_NAME_FORMAT,
-        bfm_get_bfmr_log_root_path(), bfmr_convert_rtc_time_to_asctime(rtc_time), bootfail_errno);
+        bfm_get_bfmr_log_root_path(), bfmr_convert_rtc_time_to_asctime(rtc_time), bootfaiL_errno);
     ret = bfmr_is_dir_existed(log_full_path);
     BFMR_PRINT_KEY_INFO("[%s] %s\n", log_full_path, (ret) ? ("exists!") : ("does't exist!"));
 
@@ -1742,7 +1255,7 @@ static int bfm_capture_and_save_bootfail_log(bfm_process_bootfail_param_t *ppara
 
     if (unlikely(NULL == pparam))
     {
-        BFMR_PRINT_INVALID_PARAMS("pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("pparam: %p\n", pparam);
         return -1;
     }
 
@@ -1755,7 +1268,7 @@ static int bfm_capture_and_save_bootfail_log(bfm_process_bootfail_param_t *ppara
     case DST_FILE:
         {
             dst.dst_info.filename = pparam->bootfail_log_path;
-            src.src_log_file_path = pparam->addl_info.log_path;
+            src.src_log_file_path = pparam->user_log_path;
             src.log_save_context = pparam->log_save_context;
             if (!bfmr_is_part_mounted_rw(bfm_get_bfmr_log_part_mount_point()))
             {
@@ -1776,7 +1289,7 @@ static int bfm_capture_and_save_bootfail_log(bfm_process_bootfail_param_t *ppara
                 goto __out;
             }
 
-            /* delete oldest log */
+            /* delet oldest log */
             if (0 == pparam->save_bottom_layer_bootfail_log)
             {
                 bfm_delete_oldest_log(bfm_get_basic_space_for_each_bootfail_log(pparam->bootfail_errno)
@@ -1786,9 +1299,6 @@ static int bfm_capture_and_save_bootfail_log(bfm_process_bootfail_param_t *ppara
             {
                 bfm_delete_oldest_log(bfm_get_basic_space_for_each_bootfail_log(pparam->bootfail_errno));    
             }
-
-            /* traverse all the bootfail logs */
-            bfm_traverse_log_root_dir(&(pparam->bootfail_log_info));
 
             /* create boot fail log dir */
             (void)snprintf(pparam->bootfail_log_dir, sizeof(pparam->bootfail_log_dir) - 1,
@@ -1802,7 +1312,7 @@ static int bfm_capture_and_save_bootfail_log(bfm_process_bootfail_param_t *ppara
         {
             dst.dst_info.raw_part.raw_part_name = bfm_get_raw_part_name();
             dst.dst_info.raw_part.offset += bfm_get_raw_part_offset();
-            src.src_log_file_path = pparam->addl_info.log_path;
+            src.src_log_file_path = pparam->user_log_path;
             (void)snprintf(pparam->bootfail_log_dir, sizeof(pparam->bootfail_log_dir) - 1,
                 "%s/" BFM_BOOTFAIL_LOG_DIR_NAME_FORMAT, bfm_get_bfmr_log_root_path(),
                 bfmr_convert_rtc_time_to_asctime(pparam->bootfail_time), (unsigned int)pparam->bootfail_errno);
@@ -1820,12 +1330,6 @@ static int bfm_capture_and_save_bootfail_log(bfm_process_bootfail_param_t *ppara
             goto __out;
         }
     }
-
-    /* save bootFail_info.txt */
-    bfm_save_bootfail_info_txt(&dst, &src, pparam);
-
-    /* save recovery_info.txt */
-    bfm_save_recovery_info_txt(&dst, &src, pparam);
 
     ret = 0;
     switch (bfmr_get_boot_stage_from_bootfail_errno(pparam->bootfail_errno))
@@ -1890,6 +1394,12 @@ static int bfm_capture_and_save_bootfail_log(bfm_process_bootfail_param_t *ppara
         bfm_save_extra_bootfail_logs(&dst, &src, pparam);
     }
 
+    /* save bootFail_info.txt */
+    bfm_save_bootfail_info_txt(&dst, &src, pparam);
+
+    /* save recovery_info.txt */
+    bfm_save_recovery_info_txt(&dst, &src, pparam);
+
     if (DST_RAW_PART == dst.type)
     {
         bfmr_save_and_free_raw_log_info(pparam);
@@ -1902,15 +1412,16 @@ __out:
 
 static int bfm_process_upper_layer_boot_fail(void *param)
 {
-    bfm_process_bootfail_param_t *pparam =  (bfm_process_bootfail_param_t*)param;
+    bfm_process_bootfail_param_t *pparam = NULL;
 
     if (unlikely(NULL == param))
     {
-        BFMR_PRINT_INVALID_PARAMS("param.\n");
+        BFMR_PRINT_INVALID_PARAMS("param: %p\n", param);
         goto __out;
     }
+    pparam = (bfm_process_bootfail_param_t*)param;
 
-    if ((0 != strlen(pparam->addl_info.log_path)) && (pparam->user_space_log_read_len <= 0))
+    if ((0 != strlen(pparam->user_log_path)) && (pparam->user_space_read_len <= 0))
     {
         uid_t uid = 0;
         gid_t gid = 0;
@@ -1919,7 +1430,7 @@ static int bfm_process_upper_layer_boot_fail(void *param)
         if ((0 == bfmr_get_uid_gid(&uid, &gid)) && (-1 != (int)pparam->user_space_log_uid)
             && (-1 != (int)pparam->user_space_log_gid))
         {
-            bfmr_change_file_ownership(pparam->addl_info.log_path, uid, gid);
+            bfmr_change_file_ownership(pparam->user_log_path, uid, gid);
         }
     }
 
@@ -1944,18 +1455,17 @@ static int bfm_process_upper_layer_boot_fail(void *param)
     }
 
 __out:
-
-    if (NULL != pparam)
+    if (NULL != pparam->user_space_log_buf)
     {
-        if (NULL != pparam->user_space_log_buf)
-        {
-            bfmr_free(pparam->user_space_log_buf);
-        }
+        bfmr_free(pparam->user_space_log_buf);
+    }
+
+    if (NULL != param)
+    {
         bfmr_free(param);
     }
     msleep(BFM_SAVE_LOG_INTERVAL_FOR_EACH_LOG);
     complete(&s_process_boot_fail_comp);
-
     return 0;
 }
 
@@ -1969,50 +1479,15 @@ static void bfm_wait_for_compeletion_of_processing_boot_fail(void)
 }
 
 
-static void bfm_user_space_process_read_its_own_file(bfm_process_bootfail_param_t *pparam)
-{
-    if (unlikely(NULL == pparam))
-    {
-        BFMR_PRINT_INVALID_PARAMS("pparam.\n");
-        return;
-    }
-
-    pparam->user_space_log_len = bfmr_get_file_length(pparam->addl_info.log_path);
-    if (pparam->user_space_log_len > 0)
-    {
-        pparam->user_space_log_buf = (char *)bfmr_malloc(pparam->user_space_log_len + 1);
-        if (NULL != pparam->user_space_log_buf)
-        {
-            memset(pparam->user_space_log_buf, 0, pparam->user_space_log_len + 1);
-            pparam->user_space_log_read_len = bfmr_full_read_with_file_path(pparam->addl_info.log_path,
-                pparam->user_space_log_buf, pparam->user_space_log_len);
-            BFMR_PRINT_KEY_INFO("Read file [%s] [%ld] Bytes successsfully, its length is [%ld] Bytes!\n",
-                pparam->addl_info.log_path, pparam->user_space_log_read_len, pparam->user_space_log_len);
-        }
-    }
-}
-
-
-static bfmr_detail_boot_stage_e bfm_correct_boot_stage(bfmr_detail_boot_stage_e boot_stage, bfmr_bootfail_errno_e bootfail_errno)
-{
-    if (bfmr_get_boot_stage_from_detail_stage(boot_stage) < bfmr_get_boot_stage_from_bootfail_errno(bootfail_errno))
-    {
-        return (((bfmr_get_boot_stage_from_bootfail_errno(bootfail_errno)) << 24) + 1);
-    }
-
-    return boot_stage;
-}
-
-
 /**
     @function: int boot_fail_err(bfmr_bootfail_errno_e bootfail_errno,
         bfr_suggested_recovery_method_e suggested_recovery_method,
-        bfmr_bootfail_addl_info_t *paddl_info)
+        char *log_path)
     @brief: save the log and do proper recovery actions when meet with error during system booting process.
 
     @param: bootfail_errno [in], boot fail error no.
     @param: suggested_recovery_method [in], suggested recovery method, if you don't know, please transfer NO_SUGGESTION for it
-    @param: paddl_info [in], saving additional info such as log path and so on.
+    @param: log_path [in], path of log file, if an additional log file existed and need to be saved.
 
     @return: 0 - succeeded; -1 - failed.
 
@@ -2020,7 +1495,7 @@ static bfmr_detail_boot_stage_e bfm_correct_boot_stage(bfmr_detail_boot_stage_e 
 */
 int boot_fail_err(bfmr_bootfail_errno_e bootfail_errno,
     bfr_suggested_recovery_method_e suggested_recovery_method,
-    bfmr_bootfail_addl_info_t *paddl_info)
+    char *log_path)
 {
     bfmr_detail_boot_stage_e boot_stage;
     bfm_process_bootfail_param_t *pparam = NULL;
@@ -2039,13 +1514,10 @@ int boot_fail_err(bfmr_bootfail_errno_e bootfail_errno,
         complete(&s_process_boot_fail_comp);
         s_is_comp_init = true;
     }
-
     bfmr_get_boot_stage(&boot_stage);
     if (bfmr_is_boot_success(boot_stage))
     {
-        if ((CRITICAL_SERVICE_FAIL_TO_START != bootfail_errno) && (BOOTUP_SLOWLY != bootfail_errno)
-            && (!(bootfail_errno >= MAPLE_ESCAPE_DLOPEN_MRT && bootfail_errno <= MAPLE_CRITICAL_CRASH_SYSTEMSERVER_DATA))
-            && (BFM_HARDWARE_FAULT != bootfail_errno))
+        if ((CRITICAL_SERVICE_FAIL_TO_START != bootfail_errno) && (BOOTUP_SLOWLY != bootfail_errno))
         {
             BFMR_PRINT_ERR("Error: can't set errno [%x] after device boot success!\n", (unsigned int)bootfail_errno);
             goto __out;
@@ -2053,12 +1525,6 @@ int boot_fail_err(bfmr_bootfail_errno_e bootfail_errno,
 
         BFMR_PRINT_KEY_INFO("%s", (CRITICAL_SERVICE_FAIL_TO_START == bootfail_errno)
             ? ("critical process work abnormally after boot success") : ("bootup slowly!\n"));
-    }
-
-    if (!bfr_has_been_enabled())
-    {
-        BFMR_PRINT_ERR("BFR has been disabled, so set suggested_recovery_method = DO_NOTHING!\n");
-        suggested_recovery_method = DO_NOTHING;
     }
 
     if (DO_NOTHING == suggested_recovery_method)
@@ -2083,31 +1549,37 @@ int boot_fail_err(bfmr_bootfail_errno_e bootfail_errno,
     memset((void *)pparam, 0, sizeof(bfm_process_bootfail_param_t));
 
     pparam->bootfail_errno = bootfail_errno;
-    pparam->boot_stage = bfm_correct_boot_stage(boot_stage, bootfail_errno);
+    pparam->boot_stage = boot_stage;
     pparam->is_user_sensible = (suggested_recovery_method != DO_NOTHING) ? (1) : (0);
     pparam->bootfail_errno = bootfail_errno;
     pparam->suggested_recovery_method = suggested_recovery_method;
     pparam->user_space_log_uid = (uid_t)-1;
     pparam->user_space_log_gid = (gid_t)-1;
-    pparam->is_bootup_successfully = s_is_bootup_successfully;
-    if (NULL != paddl_info)
+    if (NULL != log_path)
     {
-        memcpy(&pparam->addl_info, paddl_info, sizeof(pparam->addl_info));
-        (void)bfmr_get_file_ownership(pparam->addl_info.log_path, &pparam->user_space_log_uid, &pparam->user_space_log_gid);
-        bfm_user_space_process_read_its_own_file(pparam);
+        strncpy(pparam->user_log_path, log_path, BFMR_MIN(sizeof(pparam->user_log_path) - 1, strlen(log_path)));
+        (void)bfmr_get_file_ownership(pparam->user_log_path, &pparam->user_space_log_uid, &pparam->user_space_log_gid);
+        pparam->user_space_log_len = bfmr_get_file_length(pparam->user_log_path);
+        if (pparam->user_space_log_len > 0)
+        {
+            pparam->user_space_log_buf = (char *)bfmr_malloc(pparam->user_space_log_len + 1);
+            if (NULL != pparam->user_space_log_buf)
+            {
+                memset(pparam->user_space_log_buf, 0, pparam->user_space_log_len + 1);
+                pparam->user_space_read_len = bfmr_full_read_with_file_path(pparam->user_log_path,
+                    pparam->user_space_log_buf, pparam->user_space_log_len);
+                BFMR_PRINT_KEY_INFO("Read file [%s] [%ld] Bytes successsfully, its length is [%ld] Bytes!\n",
+                    pparam->user_log_path, pparam->user_space_read_len, pparam->user_space_log_len);
+            }
+        }
     }
     pparam->bootfail_time = bfm_get_system_time();
     pparam->bootup_time = bfmr_get_bootup_time();
     pparam->is_user_sensible = bfm_is_user_sensible_bootfail(pparam->bootfail_errno, pparam->suggested_recovery_method),
     pparam->is_system_rooted = bfm_is_system_rooted();
     pparam->bootfail_can_only_be_processed_in_platform = 0;
-    pparam->capture_and_save_bootfail_log = bfm_capture_and_save_bootfail_log;
+    pparam->capture_and_save_bootfail_log = (void *)bfm_capture_and_save_bootfail_log;
     kthread_run(bfm_process_upper_layer_boot_fail, (void *)pparam, "bfm_process_upper_layer_boot_fail");
-    if (!bfr_has_been_enabled())
-    {
-        wait_for_completion(&s_process_boot_fail_comp);
-        complete(&s_process_boot_fail_comp);
-    }
 
     if (DO_NOTHING != suggested_recovery_method)
     {
@@ -2117,7 +1589,7 @@ __out:
     mutex_unlock(&s_process_boot_fail_mutex);
     BFMR_PRINT_EXIT();
 
-    return 0;/*lint !e429 */
+    return 0;
 }
 
 
@@ -2135,18 +1607,6 @@ int bfmr_set_boot_stage(bfmr_detail_boot_stage_e boot_stage)
 {
     mutex_lock(&s_process_boot_stage_mutex);
     (void)bfm_set_boot_stage(boot_stage);
-
-    //record the start time of boot stage, only before bootup successful
-    if (false == s_is_bootup_successfully)
-    {
-        bfm_stage_info_t stage_info = {0};
-
-        stage_info.stage      = boot_stage;
-        stage_info.start_time = bfmr_get_bootup_time();
-
-        bfm_add_stage_info(&stage_info);
-    }
-
     if (bfmr_is_boot_success(boot_stage))
     {
         BFMR_PRINT_KEY_INFO("boot success!\n");
@@ -2183,301 +1643,37 @@ int bfmr_get_boot_stage(bfmr_detail_boot_stage_e *pboot_stage)
 }
 
 
-static int bfm_update_bootfail_info_for_each_log(bfm_bootfail_log_info_t *pbootfail_log_info)
+static int bfm_update_info_for_each_log(void)
 {
-    bfm_update_bootfail_logs(pbootfail_log_info);
-    return 0;
-}
-
-
-static int bfm_update_recovery_info_for_each_log(bfm_bootfail_log_info_t *pbootfail_log_info)
-{
-    char *pdata = NULL;
-    char record_count_str[BFM_MAX_INT_NUMBER_LEN] = {'\0'};
-    char time[BFM_MAX_INT_NUMBER_LEN] = {'\0'};
-    int i = 0;
-    int bytes_formatted = 0;
-    char c = '\0';
-    bfmr_selfheal_code_e selfheal_code = SH_UNKNOW;
-    char selfheal_chain_str[BFM_SELF_HEAL_CHAIN_MAX_LEN] = {'\0'};
-    int selfheal_chain_len = 0;
-
-    if (unlikely(NULL == pbootfail_log_info))
-    {
-        BFMR_PRINT_INVALID_PARAMS("preal_recovery_info.\n");
-        return -1;
-    }
-
-    pdata = bfmr_malloc(BFMR_SIZE_4K + sizeof(char));
-    if (NULL == pdata)
-    {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        goto __out;
-    }
-    memset(pdata, 0, BFMR_SIZE_4K + sizeof(char));
-
-    /* format the recovery info */
-    for (i = 0; i < pbootfail_log_info->real_recovery_info.record_count; i++)
-    {
-        char* chain_str = "";
-
-        selfheal_code = bfm_get_selfheal_code(pbootfail_log_info->real_recovery_info.recovery_method[i], pbootfail_log_info->real_recovery_info.boot_fail_stage[i]);
-        selfheal_chain_len += snprintf(selfheal_chain_str + selfheal_chain_len, BFM_SELF_HEAL_CHAIN_MAX_LEN - selfheal_chain_len - 1, 
-                   "%d, ", selfheal_code);
-
-        if ((pbootfail_log_info->real_recovery_info.record_count == (i + 1))
-            || (bfmr_is_boot_success(pbootfail_log_info->real_recovery_info.boot_fail_stage[i])))
-        {
-            chain_str = selfheal_chain_str;
-        }
-		if (pbootfail_log_info->real_recovery_info.record_count ==
-								(i + 1)) {
-			snprintf(record_count_str,
-				sizeof(record_count_str) - 1, "%s", "");
-		} else {
-			snprintf(record_count_str, sizeof(record_count_str) - 1,
-				"_%d", (i + 1));
-		}
-        snprintf(time, sizeof(time) - 1, "0x%08x", pbootfail_log_info->real_recovery_info.boot_fail_rtc_time[i]);
-        bytes_formatted += snprintf(pdata + bytes_formatted, BFMR_SIZE_4K - bytes_formatted, (1 == pbootfail_log_info->real_recovery_info.record_count)
-            ? ("%s" BFM_RCV_FILE_CONTENT_FORMAT) : (BFM_TEXT_LOG_SEPRATOR_WITHOUT_FIRST_NEWLINE BFM_RCV_FILE_CONTENT_FORMAT),
-            (1 == pbootfail_log_info->real_recovery_info.record_count) ? ("") : (time),
-            record_count_str, bfr_get_recovery_method_desc(pbootfail_log_info->real_recovery_info.recovery_method[i]),
-            record_count_str, (((pbootfail_log_info->real_recovery_info.record_count == (i + 1))
-            || (bfmr_is_boot_success(pbootfail_log_info->real_recovery_info.boot_fail_stage[i])))
-            ? BFM_RECOVERY_SUCCESS_STR : BFM_RECOVERY_FAIL_STR),
-            record_count_str, selfheal_code,
-            record_count_str, (((pbootfail_log_info->real_recovery_info.record_count == (i + 1))
-            || (bfmr_is_boot_success(pbootfail_log_info->real_recovery_info.boot_fail_stage[i])))
-            ? (BFM_RECOVERY_SUCCESS_INT_VALUE) : (BFM_RECOVERY_FAIL_INT_VALUE)),
-            record_count_str, chain_str);
-    }
-
-    /* save recovery info */
-    if (0 != bfmr_save_log(pbootfail_log_info->bootfail_logs[0].log_dir, BFM_RECOVERY_FILE_NAME, (void *)pdata, strlen(pdata), 0))
-    {
-        BFMR_PRINT_ERR("Failed to update recovery_info.txt!\n");
-    }
-
-    /* Create DONE file for each file */
-    bfmr_save_log(pbootfail_log_info->bootfail_logs[0].log_dir, BFM_DONE_FILE_NAME, (void *)&c, sizeof(char), 0);
-
-__out:
-    bfmr_free(pdata);
-
-    return 0;
-}
-
-
-static bool bfm_is_user_sensible_boot_fail(bfm_bootfail_log_info_t *pbootfail_log_info)
-{
-    int i = 0;
-    int j = 0;
-    int count = (int)(sizeof(s_sensible_bootfail_with_reboot_recovery) / sizeof(s_sensible_bootfail_with_reboot_recovery[0]));
-
-    if ((0 == pbootfail_log_info->real_recovery_info.record_count) && (pbootfail_log_info->log_dir_count > 0))
-    {
-        /* Maybe DO_NOTHING log */
-        return true;
-    }
-
-    /* 2, if bootfail times > 2, it must be a user sensible bootfail */
-    if (pbootfail_log_info->real_recovery_info.record_count > BFM_USER_NOT_SENSIBLE_BOOTFAIL_MAX_COUNT)
-    {
-        return true;
-    }
-
-    /* 3, if the recovery method of bootfail is not REBOOT, it must be user sensible */
-    for (i = 0; i < pbootfail_log_info->real_recovery_info.record_count; i++)
-    {
-        if (FRM_REBOOT != pbootfail_log_info->real_recovery_info.recovery_method_original[i])
-        {
-            BFMR_PRINT_KEY_INFO("The original recovery method of bootfail [%x] is: %d, not \"FRM_REBOOT\"!, it is user sensible\n",
-                pbootfail_log_info->real_recovery_info.boot_fail_no[i], pbootfail_log_info->real_recovery_info.recovery_method_original[i]);
-            return true;
-        }
-    }
-
-    /* 4, some time even if the recovery method is FRM_REBOOT, it is also user sensible such as: PRESS10S */
-    for (i = 0; i < count; i++)
-    {
-        for (j = 0; j < pbootfail_log_info->real_recovery_info.record_count; j++)
-        {
-            if ((unsigned int)s_sensible_bootfail_with_reboot_recovery[i] == pbootfail_log_info->real_recovery_info.boot_fail_no[j])
-            {
-                BFMR_PRINT_KEY_INFO("The bootfail [%x] is user sensible!\n", pbootfail_log_info->real_recovery_info.boot_fail_no[j]);
-                return true;
-            }
-        }
-    }
-
-    /* 5, if the bootfail occurs @ NATIVE/FRAMEWORK stage, it maybe a user sensible bootfail with high probability */
-    for (i = 0; i < pbootfail_log_info->real_recovery_info.record_count; i++)
-    {
-        if (NATIVE_STAGE_START <= pbootfail_log_info->real_recovery_info.boot_fail_stage[i])
-        {
-            BFMR_PRINT_KEY_INFO("The bootfail [%x] occurs @%x stage, it is user sensible!\n",
-                pbootfail_log_info->real_recovery_info.boot_fail_no[i], pbootfail_log_info->real_recovery_info.boot_fail_stage[i]);
-            return true;
-        }
-    }
-
-    /* 6, if the bootfail occurs @ NATIVE/FRAMEWORK stage, it maybe a user sensible bootfail with high probability */
-    for (i = 0; i < pbootfail_log_info->real_recovery_info.record_count; i++)
-    {
-        if (BFM_USER_MAX_TOLERANT_BOOTTIME_IN_SECOND < pbootfail_log_info->real_recovery_info.boot_fail_time[i])
-        {
-            BFMR_PRINT_KEY_INFO("The bootfail [%x] occurs @%u second, it is user sensible!\n",
-                pbootfail_log_info->real_recovery_info.boot_fail_no[i], pbootfail_log_info->real_recovery_info.boot_fail_time[i]);
-            return true;
-        }
-    }
-
-    return false;
-}
-
-
-static void bfm_merge_bootfail_logs(bfm_bootfail_log_info_t *pbootfail_log_info)
-{
-    int i = 0;
-    int j = 0;
-    int log_count = (int)(sizeof(s_valid_log_name) / sizeof(s_valid_log_name[0]));
-    char *dst_file_path = NULL;
-    char *src_file_path = NULL;
-    char *pdata = NULL;
-    char *pstart = NULL;
-    long src_file_len = 0L;
-    long offset = 0L;
-    long buf_len = 0L;
-    char time[BFM_MAX_INT_NUMBER_LEN] = {0};
-
-    if (unlikely(NULL == pbootfail_log_info))
-    {
-        BFMR_PRINT_INVALID_PARAMS("pbootfail_log_info.\n");
-        return;
-    }
-
-    if (1 >= pbootfail_log_info->log_dir_count)
-    {
-        return;
-    }
-
-    dst_file_path = bfmr_malloc(BFMR_MAX_PATH);
-    if (NULL == dst_file_path)
-    {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        goto __out;
-    }
-
-    src_file_path = bfmr_malloc(BFMR_MAX_PATH);
-    if (NULL == src_file_path)
-    {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        goto __out;
-    }
-
-    for (i = 0; i < pbootfail_log_info->log_dir_count; i++)
-    {
-        for (j = 0; j < log_count; j++)
-        {
-            memset(dst_file_path, 0, BFMR_MAX_PATH);
-            memset(src_file_path, 0, BFMR_MAX_PATH);
-            snprintf(dst_file_path, BFMR_MAX_PATH - 1, "%s/%s", pbootfail_log_info->bootfail_logs[0].log_dir, s_valid_log_name[j]);
-            snprintf(src_file_path, BFMR_MAX_PATH - 1, "%s/%s", pbootfail_log_info->bootfail_logs[i].log_dir, s_valid_log_name[j]);
-
-            /* continue if the src file doesn't exist */
-            if (!bfmr_is_file_existed(src_file_path))
-            {
-                continue;
-            }
-
-            /* get file length of src file */
-            src_file_len = bfmr_get_file_length(src_file_path);
-            if (src_file_len <= 0L)
-            {
-                BFMR_PRINT_ERR("the length of [%s] is :%ld\n", src_file_path, src_file_len);
-                continue;
-            }
-
-            /* allocate mem */
-            buf_len = src_file_len + strlen(BFM_TEXT_LOG_SEPRATOR_WITH_FIRST_NEWLINE) + strlen(time) + 1;
-            pdata = (char *)bfmr_malloc(buf_len);
-            if (NULL == pdata)
-            {
-                BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-                continue;
-            }
-            memset(pdata, 0, buf_len);
-
-            /* read src file */
-            snprintf(time, sizeof(time) - 1, "0x%08x", pbootfail_log_info->real_recovery_info.boot_fail_rtc_time[i]);
-            offset = snprintf(pdata, buf_len, BFM_TEXT_LOG_SEPRATOR_WITH_FIRST_NEWLINE, time);
-            src_file_len = bfmr_full_read_with_file_path(src_file_path, pdata + offset, src_file_len);
-            if (src_file_len <= 0)
-            {
-                BFMR_PRINT_ERR("read [%s] failed!\n", src_file_path);
-                bfmr_free(pdata);
-                continue;
-            }
-            pstart = ((('\n' == pdata[offset + src_file_len - 1]) || (0 == i)) ? (pdata + 1) : (pdata));
-            buf_len = ((('\n' == pdata[offset + src_file_len - 1]) || (0 == i)) ? (offset + src_file_len - 1) : (offset + src_file_len));
-            bfmr_save_log(pbootfail_log_info->bootfail_logs[0].log_dir, s_valid_log_name[j], pstart, buf_len, (0 == i) ? (0) : 1);
-            bfmr_free(pdata);
-        }
-
-        if (i > 0)
-        {
-            bfm_delete_dir(pbootfail_log_info->bootfail_logs[i].log_dir);
-        }
-    }
-
-__out:
-    bfmr_free(dst_file_path);
-    bfmr_free(src_file_path);
-}
-
-
-static void bfm_delete_user_unsensible_bootfail_logs(bfm_bootfail_log_info_t *pbootfail_log_info)
-{
-    int i = 0;
-
-    if (unlikely(NULL == pbootfail_log_info))
-    {
-        BFMR_PRINT_INVALID_PARAMS("pbootfail_log_info.\n");
-        return;
-    }
-
-    for (i = 0; i < pbootfail_log_info->log_dir_count; i++)
-    {
-        bfm_delete_dir(pbootfail_log_info->bootfail_logs[i].log_dir);
-    }
-}
-
-
-static int bfm_traverse_log_root_dir(bfm_bootfail_log_info_t *pbootfail_log_info)
-{
-    int i = 0;
+    int ret = -1;
     int fd = -1;
-    int num;
-    size_t log_idx = 0;
-    size_t log_max_count = 0;
     void *buf = NULL;
     char *full_path = NULL;
+    char *target_file_path = NULL;
     struct linux_dirent64 *dirp;
+    int num;
     mm_segment_t oldfs;
-
-    if (unlikely(NULL == pbootfail_log_info))
-    {
-        BFMR_PRINT_INVALID_PARAMS("pbootfail_log_info.\n");
-        return -1;
-    }
-
+    char c = '\0';
+    char *bfmr_log_root_path = bfm_get_bfmr_log_root_path();
+    bfr_real_recovery_info_t real_recovery_info = {0};
+    int log_count = bfm_get_log_count(bfm_get_bfmr_log_root_path());
+    int index = 0;
+    int offset = 0;
+    bool get_real_recovery_info_successfully = false;
+    
     oldfs = get_fs();
     set_fs(KERNEL_DS);
-    fd = sys_open(bfm_get_bfmr_log_root_path(), O_RDONLY, 0);
+
+    if (0 == strlen(bfmr_log_root_path))
+    {
+        BFMR_PRINT_ERR("get root path of bfmr log failed!\n");
+        goto __out;
+    }
+
+    fd = sys_open(bfmr_log_root_path, O_RDONLY, 0);
     if (fd < 0)
     {
-        BFMR_PRINT_ERR("open [%s] failed!\n", bfm_get_bfmr_log_root_path());
+        BFMR_PRINT_ERR("open [%s] failed!\n", bfmr_log_root_path);
         goto __out;
     }
 
@@ -2488,64 +1684,97 @@ static int bfm_traverse_log_root_dir(bfm_bootfail_log_info_t *pbootfail_log_info
         goto __out;
     }
 
-    full_path = bfmr_malloc(BFMR_MAX_PATH);
+    full_path = (char *)bfmr_malloc(BFMR_MAX_PATH);
     if (NULL == full_path)
     {
         BFMR_PRINT_ERR("bfmr_malloc failed!\n");
         goto __out;
     }
 
-    log_max_count = sizeof(pbootfail_log_info->bootfail_logs) / sizeof(pbootfail_log_info->bootfail_logs[0]);
+    target_file_path = (char *)bfmr_malloc(BFMR_MAX_PATH);
+    if (NULL == target_file_path)
+    {
+        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
+        goto __out;
+    }
+
+    /* get the real recovery info firstly */
+    memset((void *)&real_recovery_info, 0, sizeof(real_recovery_info));
+    get_real_recovery_info_successfully = (0 == bfr_get_real_recovery_info(&real_recovery_info)) ? (true) : (false);
+    log_count = (log_count <= 0) ? (0) : (log_count);
+    offset = (get_real_recovery_info_successfully) ? ((log_count > real_recovery_info.record_count)
+        ? (log_count - real_recovery_info.record_count) : (real_recovery_info.record_count - log_count)) : (-1);
+
     dirp = buf;
     num = sys_getdents64(fd, dirp, BFMR_MAX_PATH);
     while (num > 0)
     {
-        while ((num > 0) && (log_idx < log_max_count))
+        while (num > 0)
         {
             bfm_stat_t st;
             int ret;
 
-            if ((0 == strcmp(dirp->d_name, ".")) || (0 == strcmp(dirp->d_name, ".."))
-                || (0 == strcmp(dirp->d_name, BFM_UPLOADING_DIR_NAME)))/*lint !e421 */
-            {
-                goto __continue;
-            }
-
-            memset(pbootfail_log_info->bootfail_logs[log_idx].log_dir, 0, sizeof(pbootfail_log_info->bootfail_logs[log_idx].log_dir));
-            snprintf(pbootfail_log_info->bootfail_logs[log_idx].log_dir, sizeof(pbootfail_log_info->bootfail_logs[log_idx].log_dir) - 1,
-                "%s/%s", bfm_get_bfmr_log_root_path(), dirp->d_name);
-            memset((void *)&st, 0, sizeof(bfm_stat_t));
-            ret = bfm_sys_lstat(pbootfail_log_info->bootfail_logs[log_idx].log_dir, &st);
-            if ((0 != ret) || (!S_ISDIR(st.st_mode)))
-            {
-                BFMR_PRINT_ERR("newlstat %s failed or %s isn't a dir!\n", pbootfail_log_info->bootfail_logs[log_idx].log_dir,
-                    pbootfail_log_info->bootfail_logs[log_idx].log_dir);
-                goto __continue;
-            }
-
-            /* check if the log belongs to the last bootfail or not */
             memset(full_path, 0, BFMR_MAX_PATH);
-            snprintf(full_path, BFMR_MAX_PATH - 1, "%s/%s", pbootfail_log_info->bootfail_logs[log_idx].log_dir, BFM_DONE_FILE_NAME);
+            snprintf(full_path, BFMR_MAX_PATH - 1, "%s/%s", bfmr_log_root_path, dirp->d_name);
+            if ((0 == strcmp(dirp->d_name, ".")) || (0 == strcmp(dirp->d_name, "..")))
+            {
+                goto __continue;
+            }
+
+            memset((void *)&st, 0, sizeof(bfm_stat_t));
             ret = bfm_sys_lstat(full_path, &st);
-            log_idx = (0 == ret) ? (log_idx) : (log_idx + 1);
+            if (0 != ret)
+            {
+                BFMR_PRINT_ERR("newlstat %s failed!\n", full_path);
+                goto __continue;
+            }
+
+            if (!S_ISDIR(st.st_mode))
+            {
+                BFMR_PRINT_ERR("%s is not a dir!\n", full_path);
+                goto __continue;
+            }
+
+            /* Note: We must exclude the uploaded dir */
+            if (0 == strcmp(dirp->d_name, BFM_UPLOADING_DIR_NAME))
+            {
+                BFMR_PRINT_ERR("%s must be excluded!\n", full_path);
+                goto __continue;
+            }
+
+            /* 1. update the recovery method for each log */
+            memset((void *)target_file_path, 0, BFMR_MAX_PATH);
+            snprintf(target_file_path, BFMR_TEMP_BUF_LEN - 1, "%s/%s", full_path, BFM_RECOVERY_FILE_NAME);
+            if (log_count >= real_recovery_info.record_count)
+            {
+                bfm_update_recovery_result(target_file_path, get_real_recovery_info_successfully
+                    ? ((index >= offset) ? (real_recovery_info.recovery_method[index - offset]) : (-1)) : (-1),
+                    (index == (log_count - 1)) ? (true) : (false));
+            }
+            else
+            {
+                  bfm_update_recovery_result(target_file_path, get_real_recovery_info_successfully
+                    ? (real_recovery_info.recovery_method[index + offset]) : (-1),
+                    (index == (log_count - 1)) ? (true) : (false));      
+            }
+
+            /* 2. create done file for each log */
+            memset((void *)target_file_path, 0, BFMR_MAX_PATH);
+            snprintf(target_file_path, BFMR_MAX_PATH - 1, "%s/%s", full_path, BFM_DONE_FILE_NAME);
+            if (!bfmr_is_file_existed(target_file_path))
+            {
+                (void)bfmr_save_log(full_path, BFM_DONE_FILE_NAME, (void *)&c, sizeof(char), 0);
+            }
+            index++;
 
 __continue:
             num -= dirp->d_reclen;
             dirp = (void *)dirp + dirp->d_reclen;
         }
-
-        if (log_idx >= log_max_count)
-        {
-            BFMR_PRINT_ERR("extent max count: %d!\n", (int)log_max_count);
-            break;
-        }
         dirp = buf;
         memset(buf, 0, BFMR_MAX_PATH);
         num = sys_getdents64(fd, dirp, BFMR_MAX_PATH);
     }
-
-    /* save log count */
-    pbootfail_log_info->log_dir_count = log_idx;
 
 __out:
     if (fd >= 0)
@@ -2553,58 +1782,12 @@ __out:
         sys_close(fd);
     }
     set_fs(oldfs);
+
     bfmr_free(buf);
     bfmr_free(full_path);
-    BFMR_PRINT_ERR("There're %d valid bootfail logs:\n", pbootfail_log_info->log_dir_count);
-    for (i = 0; i < pbootfail_log_info->log_dir_count; i++)
-    {
-        BFMR_PRINT_SIMPLE_INFO("%s\n", pbootfail_log_info->bootfail_logs[i].log_dir);
-    }
+    bfmr_free(target_file_path);
 
-    return 0;
-}
-
-
-static int bfm_update_info_for_each_log(void)
-{
-    bfm_bootfail_log_info_t *pbootfail_log_info = NULL;
-
-    pbootfail_log_info = (bfm_bootfail_log_info_t *)bfmr_malloc(sizeof(bfm_bootfail_log_info_t));
-    if (NULL == pbootfail_log_info)
-    {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        goto __out;
-    }
-    memset(pbootfail_log_info, 0, sizeof(bfm_bootfail_log_info_t));
-
-    /* traverse the log dir and save the path of valid bootfail log */
-    bfm_traverse_log_root_dir(pbootfail_log_info);
-
-    /* get real recovery info */
-    if (0 != bfr_get_real_recovery_info(&(pbootfail_log_info->real_recovery_info)))
-    {
-        BFMR_PRINT_ERR("get real recovery info failed!\n");
-        goto __out;
-    }
-
-    /* delete the user unsensible bootfail log */
-    if (!bfm_is_user_sensible_boot_fail(pbootfail_log_info))
-    {
-        BFMR_PRINT_KEY_INFO("[%s] is a user unsensible bootfail log!\n", pbootfail_log_info->bootfail_logs[0].log_dir);
-        (void)bfm_delete_user_unsensible_bootfail_logs(pbootfail_log_info);
-        goto __out;
-    }
-
-    /* update bootfail info for each usefull log */
-    bfm_merge_bootfail_logs(pbootfail_log_info);
-    bfm_update_platform_logs(pbootfail_log_info);
-    (void)bfm_update_bootfail_info_for_each_log(pbootfail_log_info);
-    (void)bfm_update_recovery_info_for_each_log(pbootfail_log_info);
-
-__out:
-    bfmr_free(pbootfail_log_info);
-
-    return 0;
+    return ret;
 }
 
 
@@ -2625,12 +1808,12 @@ static int bfm_lookup_dir_by_create_time(const char *root,
 
     if (unlikely(NULL == log_path))
     {
-        BFMR_PRINT_INVALID_PARAMS("log_path.\n");
+        BFMR_PRINT_INVALID_PARAMS("log_path: %p\n", log_path);
         return -1;
     }
 
     oldfs = get_fs();
-    set_fs(KERNEL_DS);/*lint !e501 */
+    set_fs(KERNEL_DS);
 
     memset((void *)log_path, 0, log_path_len);
     fd = sys_open(root, O_RDONLY, 0);
@@ -2665,7 +1848,7 @@ static int bfm_lookup_dir_by_create_time(const char *root,
 
             memset(full_path, 0, BFMR_MAX_PATH);
             snprintf(full_path, BFMR_MAX_PATH - 1, "%s/%s", root, dirp->d_name);
-            if ((0 == strcmp(dirp->d_name, ".")) || (0 == strcmp(dirp->d_name, "..")))/*lint !e421*/
+            if ((0 == strcmp(dirp->d_name, ".")) || (0 == strcmp(dirp->d_name, "..")))
             {
                 num -= dirp->d_reclen;
                 dirp = (void *)dirp + dirp->d_reclen;
@@ -2749,42 +1932,256 @@ __out:
     return 0;
 }
 
-static int bfm_notify_boot_success(void *param)
+
+static int bfm_find_newest_log(char *log_path, size_t log_path_len)
 {
-	unsigned int bootup_time = 0;
-    mutex_lock(&s_process_boot_fail_mutex);
-    if (s_is_process_boot_success)
+    int ret = -1;
+
+    if (unlikely((NULL == log_path)))
     {
-        mutex_unlock(&s_process_boot_fail_mutex);
-        BFMR_PRINT_ERR("s_is_process_boot_success has been set already!\n");
-        return 0;
+        BFMR_PRINT_INVALID_PARAMS("log_path_len: %p\n", log_path);
+        return -1;
     }
 
+    ret = bfm_lookup_dir_by_create_time(bfm_get_bfmr_log_root_path(), log_path, log_path_len, 0);
+    if (0 == strlen(log_path))
+    {
+        return -1;
+    }
+    else
+    {
+        BFMR_PRINT_ERR("The newest log is: %s\n", log_path);
+    }
+
+    return 0;
+}
+
+
+static int bfm_read_recovery_info(const char *precovery_info_file_path,
+    char *data_buf, long data_buf_len)
+{
+    mm_segment_t old_fs;
+    int fd = -1;
+    long bytes_read = 0;
+    int ret = -1;
+
+    if (unlikely((NULL == precovery_info_file_path) || (NULL == data_buf)))
+    {
+        BFMR_PRINT_INVALID_PARAMS("precovery_info_file_path: %p data_buf: %p\n", precovery_info_file_path, data_buf);
+        return -1;
+    }
+
+    old_fs = get_fs();
+    set_fs(KERNEL_DS);
+
+    fd = sys_open(precovery_info_file_path, O_RDONLY, 0);
+    if (fd < 0)
+    {
+        BFMR_PRINT_ERR("Open [%s] failed!fd: %d\n", precovery_info_file_path, fd);
+        goto __out;
+    }
+
+    bytes_read = bfmr_full_read(fd, data_buf, data_buf_len);
+    if (bytes_read != data_buf_len)
+    {
+        BFMR_PRINT_ERR("read [%s] failed!bytes_read: %ld, it should be: %ld\n",
+            precovery_info_file_path, bytes_read, data_buf_len);
+        goto __out;
+    }
+    else
+    {
+        ret = 0;
+    }
+
+__out:
+    if (fd >= 0)
+    {
+        sys_close(fd);
+    }
+
+    set_fs(old_fs);
+
+    return ret;
+}
+
+
+static bool bfm_is_valid_recovery_info(char *pdata)
+{
+    char *ptemp = NULL;
+
+    if (unlikely((NULL == pdata)))
+    {
+        BFMR_PRINT_INVALID_PARAMS("pdata: %p\n", pdata);
+        return false;
+    }
+
+    ptemp = strstr(pdata, BFM_RECOVERY_RESULT_FIELD);
+    if (NULL == ptemp)
+    {
+        return false;
+    }
+
+    ptemp = strstr(ptemp + strlen(BFM_RECOVERY_RESULT_FIELD), BFM_RECOVERY_RESULT_FIELD);
+    if (NULL == ptemp)
+    {
+        return false;
+    }
+
+    ptemp = strstr(ptemp, BFM_LOG_END_TAG_PER_LINE);
+    if (NULL == ptemp)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+
+static int bfm_update_recovery_result(char *precovery_info_file_path,
+    int real_recovery_method,
+    bool boot_success)
+{
+    int fd = -1;
+    int ret = -1;
+    int recovery_method = -1;
+    char *pfile_data = NULL;
+    char *ppart_file_data = NULL;
+    char *ptemp = NULL;
+    long file_len = 0L;
+    long bytes_write = 0L;
+    long bytes_to_write = 0L;
+    mm_segment_t oldfs;
+
+    if (unlikely((NULL == precovery_info_file_path)))
+    {
+        BFMR_PRINT_INVALID_PARAMS("precovery_info_file_path: %p\n", precovery_info_file_path);
+        return -1;
+    }
+
+    oldfs = get_fs();
+    set_fs(KERNEL_DS);
+
+    file_len = bfmr_get_file_length(precovery_info_file_path);
+    pfile_data = (char *)bfmr_malloc(file_len + 1);
+    if (NULL == pfile_data)
+    {
+        BFMR_PRINT_ERR("%s(): bfmr_malloc failed!\n", __func__);
+        goto __out;
+    }
+    memset((void *)pfile_data, 0, file_len + 1);
+
+    if (0 != bfm_read_recovery_info(precovery_info_file_path, pfile_data, file_len))
+    {
+        BFMR_PRINT_ERR("Read [%s] failed!\n", precovery_info_file_path);
+        goto __out;
+    }
+
+    /* 1. find the last fileld "rcvMethod:" */
+    ppart_file_data = (char *)bfmr_malloc(BFMR_TEMP_BUF_LEN);
+    if (NULL == ppart_file_data)
+    {
+        BFMR_PRINT_ERR("%s(): bfmr_malloc failed!\n", __func__);
+        goto __out;
+    }
+    memset(ppart_file_data, 0, BFMR_TEMP_BUF_LEN);
+
+    /* 2. check if the log is valid */
+    if (!bfm_is_valid_recovery_info(pfile_data))
+    {
+        BFMR_PRINT_ERR("[%s] has invalid data:\n%s\n", precovery_info_file_path, pfile_data);
+        recovery_method = real_recovery_method;
+        goto __save_log;
+    }
+
+    /* 3. check if the boot fail has been recoveried successfully? */
+    if (NULL != strstr(pfile_data, BFM_RECOVERY_SUCCESS_FIELD))
+    {
+        ret = 0;
+        BFMR_PRINT_KEY_INFO("recovery success result has been set!\n");
+        goto __out;
+    }
+
+    /* 4. check if the user has changed the recovery method */
+    ptemp = bfmr_reverse_find_string(pfile_data, BFM_RECOVERY_METHOD_FIELD);
+    if (NULL == ptemp)
+    {
+        BFMR_PRINT_ERR("Invalid file data:\n%s\n in file [%s]!\n", pfile_data, precovery_info_file_path);
+        goto __out;
+    }
+
+    recovery_method = (int)simple_strtol(ptemp + strlen(BFM_RECOVERY_METHOD_FIELD), NULL, 10);
+    if ((recovery_method == real_recovery_method) && (!boot_success))
+    {
+        /* if this is not the last boot fail and the recovery method is the same, go to out */
+        ret = 0;
+        BFMR_PRINT_KEY_INFO("recovery_method: %d, real_recovery_method: %d, boot_success: %d\n",
+            recovery_method, real_recovery_method, boot_success);
+        goto __out;
+    }
+    recovery_method = (-1 == real_recovery_method) ? (recovery_method) : (real_recovery_method);
+
+__save_log:
+    (void)snprintf(ppart_file_data, BFMR_TEMP_BUF_LEN - 1, BFM_RCV_FILE_CONTENT_FORMAT,
+        bfr_get_recovery_method_desc(recovery_method), (boot_success ? BFM_RECOVERY_SUCCESS_STR : BFM_RECOVERY_FAIL_STR),
+        recovery_method, (boot_success ? BFM_RECOVERY_SUCCESS_INT_VALUE : BFM_RECOVERY_FAIL_INT_VALUE));
+    fd = sys_open(precovery_info_file_path, O_RDWR | O_TRUNC, 0);
+    if (fd < 0)
+    {
+        BFMR_PRINT_ERR("sys_open [%s] failed![fd = %d]\n", precovery_info_file_path, fd);
+        goto __out;
+    }
+
+    bytes_to_write = (long)strlen(ppart_file_data);
+    bytes_write = bfmr_full_write(fd, ppart_file_data, bytes_to_write);
+    if (bytes_write != bytes_to_write)
+    {
+        BFMR_PRINT_ERR("bfmr_full_write [%s] failed!bytes_write:%ld, it should be:%ld\n",
+            precovery_info_file_path, bytes_write, bytes_to_write);
+        goto __out;
+    }
+
+    ret = 0;
+    bfmr_change_own_mode(precovery_info_file_path, BFMR_AID_ROOT, BFMR_AID_SYSTEM, BFMR_FILE_LIMIT);
+
+__out:
+    if (fd >= 0)
+    {
+        sys_fsync(fd);
+        sys_close(fd);
+    }
+
+    set_fs(oldfs);
+
+    bfmr_free(pfile_data);
+    bfmr_free(ppart_file_data);
+
+    return ret;
+}
+
+
+static int bfm_notify_boot_success(void *param)
+{
     /* 1. notify boot success event to the BFR */
     boot_status_notify(1);
+
     /* 2. let platfrom process the boot success */
     bfm_platform_process_boot_success();
 
     /* 3. update recovery result in recovery_info.txt */
+    mutex_lock(&s_process_boot_fail_mutex);
     bfm_update_info_for_each_log();
-    s_is_process_boot_success = true;
     mutex_unlock(&s_process_boot_fail_mutex);
 
-	/* 4. check bootup slowly event */
-	bootup_time = bfmr_get_bootup_time();
+
+    /* 4. check bootup slowly event */
+    unsigned int bootup_time = bfmr_get_bootup_time();
     if ((bootup_time >= BFM_BOOTUP_SLOWLY_THRESHOLD_IN_SECOND) && (!s_is_bootup_successfully))
     {
         BFMR_PRINT_ERR("bootup time[%dS] is too long.\n", bootup_time);
         boot_fail_err(BOOTUP_SLOWLY, DO_NOTHING, NULL);
     }
-    else
-    {
-        //once if boot success, free boot stage info resource
-        bfm_deinit_stage_info();
-    }
 
     s_is_bootup_successfully = true;
-
     return 0;
 }
 
@@ -2945,7 +2342,7 @@ static int bfmr_capture_and_save_log(bfmr_log_src_t *src, bfmr_log_dst_t *dst, b
 
     if (unlikely((NULL == src) || (NULL == dst) || (NULL == pparam)))
     {
-        BFMR_PRINT_INVALID_PARAMS("src or dst or pparam.\n");
+        BFMR_PRINT_INVALID_PARAMS("src: %p, dst: %p, pparam: %p\n", (void *)src, (void *)dst, (void *)pparam);
         return -1;
     }
 
@@ -2973,46 +2370,43 @@ static int bfmr_capture_and_save_log(bfmr_log_src_t *src, bfmr_log_dst_t *dst, b
         return -1;
     }
 
-    src->save_log_after_reboot = pparam->save_log_after_reboot;
     bytes_read = bfmr_capture_log_from_system(s_log_type_buffer_info[i].buf,
-        s_log_type_buffer_info[i].buf_len, src, 0);/*lint !e661 */
-    if (bfmr_is_oversea_commercail_version())
+        s_log_type_buffer_info[i].buf_len, src, 0);
+    switch (dst->type)
     {
-        BFMR_PRINT_ERR("Note: logs of oversea commercail version can't be saved!\n");
-    }
-    else
-    {
-        switch (dst->type)
+    case DST_FILE:
         {
-        case DST_FILE:
+            bfmr_save_log_to_fs(dst->dst_info.filename, s_log_type_buffer_info[i].buf, bytes_read, 0);
+            break;
+        }
+    case DST_RAW_PART:
+        {
+            if (dst->dst_info.raw_part.offset >=0) 
             {
-                bfmr_save_log_to_fs(dst->dst_info.filename, s_log_type_buffer_info[i].buf, bytes_read, 0);/*lint !e661 */
-                break;
+                bfmr_save_log_to_raw_part(dst->dst_info.raw_part.raw_part_name,
+                    (unsigned long long)dst->dst_info.raw_part.offset,
+                    s_log_type_buffer_info[i].buf, bytes_read);
+                bfmr_update_raw_log_info(src, dst, bytes_read);
             }
-        case DST_RAW_PART:
+            else
             {
-                if (dst->dst_info.raw_part.offset >=0)
-                {
-                    bfmr_save_log_to_raw_part(dst->dst_info.raw_part.raw_part_name,
-                        (unsigned long long)dst->dst_info.raw_part.offset,
-                        s_log_type_buffer_info[i].buf, bytes_read);/*lint !e661 */
-                    bfmr_update_raw_log_info(src, dst, bytes_read);
-                }
-                else
-                {
-                    BFMR_PRINT_ERR("dst->dst_info.raw_part.offset is negative [%d]\n", dst->dst_info.raw_part.offset);
-                }
-                break;
+                BFMR_PRINT_ERR("dst->dst_info.raw_part.offset is negative [%d]\n", dst->dst_info.raw_part.offset);
             }
-        case DST_MEMORY_BUFFER:
-        default:
-            {
-                bfmr_save_log_to_mem_buffer(dst->dst_info.buffer.addr, dst->dst_info.buffer.len, s_log_type_buffer_info[i].buf, bytes_read);/*lint !e661 */
-                break;
-            }
+            break;
+        }
+    case DST_MEMORY_BUFFER:
+    default:
+        {
+            bfmr_save_log_to_mem_buffer(dst->dst_info.buffer.addr, dst->dst_info.buffer.len, s_log_type_buffer_info[i].buf, bytes_read);
+            break;
         }
     }
 
+    if ((CRITICAL_SERVICE_FAIL_TO_START == pparam->bootfail_errno) && (LOG_TYPE_TEXT_KMSG == src->log_type))
+    {
+        bfmr_get_critical_process_name(s_log_type_buffer_info[i].buf, s_log_type_buffer_info[i].buf_len,
+            pparam->critical_process_name, sizeof(pparam->critical_process_name));
+    }
 
     bfmr_free(s_log_type_buffer_info[i].buf);
     s_log_type_buffer_info[i].buf = NULL;
@@ -3026,6 +2420,7 @@ static long bfmr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     int ret = 0;
     unsigned int timeout_value = -1;
     bfmr_detail_boot_stage_e boot_stage;
+    struct bfmr_dev_path *dev_path = NULL;
     struct bfmr_boot_fail_info *pboot_fail_info = NULL;
     struct action_ioctl_data *pact_data = NULL;
 
@@ -3037,7 +2432,7 @@ static long bfmr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
     if (NULL == (void *)arg)
     {
-        BFMR_PRINT_INVALID_PARAMS("arg.\n");
+        BFMR_PRINT_INVALID_PARAMS("arg: %p\n", (void *)arg);
         return -EINVAL;
     }
 
@@ -3048,12 +2443,7 @@ static long bfmr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             int state;
 
             bfmr_get_timer_state(&state);
-            if (0 != copy_to_user((int *)arg, &state, sizeof(state)))
-            {
-                BFMR_PRINT_ERR("copy_to_user failed!\n");
-                ret = -EFAULT;
-                break;
-            }
+            copy_to_user((int *)arg, &state, sizeof(state));
             BFMR_PRINT_KEY_INFO("short timer stats is: %d\n", state);
             break;
         }
@@ -3070,23 +2460,13 @@ static long bfmr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     case BFMR_GET_TIMER_TIMEOUT_VALUE:
         {
             bfmr_get_timer_timeout_value(&timeout_value);
-            if (0 != copy_to_user((int *)arg, &timeout_value, sizeof(timeout_value)))
-            {
-                BFMR_PRINT_ERR("copy_to_user failed!\n");
-                ret = -EFAULT;
-                break;
-            }
+            copy_to_user((int *)arg, &timeout_value, sizeof(timeout_value));
             BFMR_PRINT_KEY_INFO("short timer timeout value is: %d\n", timeout_value);
             break;
         }
     case BFMR_SET_TIMER_TIMEOUT_VALUE:
         {
-            if (0 != copy_from_user(&timeout_value, (int *)arg, sizeof(timeout_value)))
-            {
-                BFMR_PRINT_ERR("copy_from_user failed!\n");
-                ret = -EFAULT;
-                break;
-            }
+            copy_from_user(&timeout_value, (int *)arg, sizeof(timeout_value));
             bfmr_set_timer_timeout_value(timeout_value);
             BFMR_PRINT_KEY_INFO("set short timer timeout value to: %d\n", timeout_value);
             break;
@@ -3094,12 +2474,7 @@ static long bfmr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     case BFMR_GET_BOOT_STAGE:
         {
             bfmr_get_boot_stage(&boot_stage);
-            if (0 != copy_to_user((bfmr_detail_boot_stage_e *)arg, &boot_stage, sizeof(boot_stage)))
-            {
-                BFMR_PRINT_ERR("copy_to_user failed!\n");
-                ret = -EFAULT;
-                break;
-            }
+            copy_to_user((bfmr_detail_boot_stage_e *)arg, &boot_stage, sizeof(boot_stage));
             BFMR_PRINT_KEY_INFO("bfmr_bootstage is: 0x%08x\n", (unsigned int)boot_stage);
             break;
         }
@@ -3108,12 +2483,7 @@ static long bfmr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             bfmr_detail_boot_stage_e old_boot_stage;
 
             bfmr_get_boot_stage(&old_boot_stage);
-            if (0 != copy_from_user(&boot_stage, (int *)arg, sizeof(boot_stage)))
-            {
-                BFMR_PRINT_ERR("copy_from_user failed!\n");
-                ret = -EFAULT;
-                break;
-            }
+            copy_from_user(&boot_stage, (int *)arg, sizeof(boot_stage));
             BFMR_PRINT_KEY_INFO("set bfmr_bootstage to: 0x%08x\n", (unsigned int)boot_stage);
             bfmr_set_boot_stage(boot_stage);
 
@@ -3129,19 +2499,12 @@ static long bfmr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 break;
             }
             memset((void *)pboot_fail_info, 0, sizeof(struct bfmr_boot_fail_info));
-            if (0 != copy_from_user(pboot_fail_info, ((struct bfmr_boot_fail_info *)arg), sizeof(struct bfmr_boot_fail_info)))
-            {
-                BFMR_PRINT_ERR("copy_from_user failed!\n");
-                bfmr_free(pboot_fail_info);
-                ret = -EFAULT;
-                break;
-            }
-
-            pboot_fail_info->addl_info.log_path[sizeof(pboot_fail_info->addl_info.log_path) - 1] = '\0';
+            copy_from_user(pboot_fail_info, ((struct bfmr_boot_fail_info *)arg), sizeof(struct bfmr_boot_fail_info));
+            pboot_fail_info->log_path[sizeof(pboot_fail_info->log_path) - 1] = '\0';
             BFMR_PRINT_KEY_INFO("bootfail_errno: 0x%08x, suggested_recovery_method: %d, log_file [%s]'s lenth:%ld\n",
                 (unsigned int)pboot_fail_info->boot_fail_no, (int)pboot_fail_info->suggested_recovery_method,
-                pboot_fail_info->addl_info.log_path, bfmr_get_file_length(pboot_fail_info->addl_info.log_path));
-            (void)boot_fail_err(pboot_fail_info->boot_fail_no, pboot_fail_info->suggested_recovery_method, &pboot_fail_info->addl_info);
+                pboot_fail_info->log_path, bfmr_get_file_length(pboot_fail_info->log_path));
+            (void)boot_fail_err(pboot_fail_info->boot_fail_no, pboot_fail_info->suggested_recovery_method, pboot_fail_info->log_path);
             bfmr_free(pboot_fail_info);
             break;
         }
@@ -3171,15 +2534,12 @@ static long bfmr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 break;
             }
 
-			if (copy_from_user(pact_data,
-				(struct action_ioctl_data *)arg,
-				sizeof(struct action_ioctl_data)) != 0) {
-				BFMR_PRINT_KEY_INFO("Failed to copy "
-				"acttion_ioctl data from user buffer!\n");
-				bfmr_free(pact_data);
-				ret = -EFAULT;
-				break;
-			}
+            if (0 != copy_from_user(pact_data, arg, sizeof(struct action_ioctl_data))) {
+                BFMR_PRINT_KEY_INFO("Failed to copy acttion_ioctl_data from user buffer!\n");
+                bfmr_free(pact_data);
+                ret = -EFAULT;
+                break;
+            }
 
             pact_data->action_name[BFMR_ACTION_NAME_LEN-1] = '\0';
             BFMR_PRINT_KEY_INFO("set bfmr action timer: %x, %s, %d\n",
@@ -3188,67 +2548,6 @@ static long bfmr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             bfmr_free(pact_data);
             break;
         }
-
-#ifdef CONFIG_HUAWEI_DYNAMIC_BRD
-    case BFMR_IOC_CREATE_DYNAMIC_RAMDISK:
-        {
-            ret = create_dynamic_ramdisk(
-                (struct bfmr_dbrd_ioctl_block __user *)arg);
-            break;
-        }
-    case BFMR_IOC_DELETE_DYNAMIC_RAMDISK:
-        {
-            ret = delete_dynamic_ramdisk(
-                (struct bfmr_dbrd_ioctl_block __user *)arg);
-            break;
-        }
-#endif
-
-#ifdef CONFIG_HUAWEI_STORAGE_ROFA
-    case BFMR_IOC_CHECK_BOOTDISK_WP:
-        {
-            ret = storage_rochk_ioctl_check_bootdisk_wp(
-                (struct bfmr_bootdisk_wp_status_iocb __user *)arg);
-            break;
-        }
-    case BFMR_IOC_ENABLE_MONITOR:
-        {
-            ret = storage_rochk_ioctl_enable_monitor(
-                (struct bfmr_storage_rochk_iocb __user *)arg);
-            break;
-        }
-    case BFMR_IOC_DO_STORAGE_WRTRY:
-        {
-            ret = storage_rochk_ioctl_run_storage_wrtry_sync(
-                (struct bfmr_storage_rochk_iocb __user *)arg);
-            break;
-        }
-    case BFMR_IOC_GET_STORAGE_ROFA_INFO:
-        {
-            ret = storage_rofa_ioctl_get_rofa_info(
-                (struct bfmr_storage_rofa_info_iocb __user *)arg);
-            break;
-        }
-    case BFMR_IOC_GET_BOOTDEVICE_DISK_COUNT:
-        {
-            ret = storage_rochk_ioctl_get_bootdevice_disk_count(
-                (struct bfmr_storage_rochk_iocb __user *)arg);
-            break;
-        }
-    case BFMR_IOC_GET_BOOTDEVICE_DISK_INFO:
-        {
-            ret = storage_rochk_ioctl_get_bootdevice_disk_info(
-                (struct bfmr_bootdevice_disk_info_iocb __user *)arg);
-            break;
-        }
-    case BFMR_IOC_GET_BOOTDEVICE_PROD_INFO:
-        {
-            ret = storage_rochk_ioctl_get_bootdevice_prod_info(
-                (struct bfmr_bootdevice_prod_info_iocb __user *)arg);
-            break;
-        }
-#endif
-
     default:
         {
             BFMR_PRINT_ERR("Invalid CMD: 0x%x\n", cmd);
@@ -3323,7 +2622,7 @@ static int bfm_process_bottom_layer_boot_fail(void *param)
     }
 
     bytes_read = bfmr_capture_log_from_system(s_log_type_buffer_info[i].buf,
-        s_log_type_buffer_info[i].buf_len, &src, 0);/*lint !e661*/
+        s_log_type_buffer_info[i].buf_len, &src, 0);
     if (0U == bytes_read)
     {
         ret = 0;
@@ -3334,21 +2633,18 @@ static int bfm_process_bottom_layer_boot_fail(void *param)
     ret = bfm_parse_and_save_bottom_layer_bootfail_log(
         (bfm_process_bootfail_param_t *)param,
         s_log_type_buffer_info[i].buf,
-        s_log_type_buffer_info[i].buf_len);/*lint !e661 */
+        s_log_type_buffer_info[i].buf_len);
     if (0 != ret)
     {
         BFMR_PRINT_ERR("Failed to save bottom layer bootfail log!\n");
-        goto __out;
+        goto __out;      
     }
 
 __out:
-    if (i < count)
+    if (NULL != s_log_type_buffer_info[i].buf)
     {
-        if(NULL != s_log_type_buffer_info[i].buf)
-        {
-            bfmr_free(s_log_type_buffer_info[i].buf);
-            s_log_type_buffer_info[i].buf = NULL;
-        }
+        bfmr_free(s_log_type_buffer_info[i].buf);
+        s_log_type_buffer_info[i].buf = NULL;
     }
     bfmr_free(param);
     mutex_unlock(&s_process_boot_fail_mutex);
@@ -3376,89 +2672,6 @@ static int bfmr_capture_and_save_bottom_layer_boot_fail_log(void)
         BFMR_PRINT_ERR("Failed to create thread to save bottom layer bootfail log!\n");
         return -1;
     }
-
-    return 0;
-}
-
-
-/* this function can not be invoked in interrupt context */
-static int bfm_process_ocp_excp(bfmr_hardware_fault_type_e fault_type, ocp_excp_info_t *pexcp_info)
-{
-    bfmr_bootfail_addl_info_t *paddl_info = NULL;
-    bfmr_get_hw_fault_info_param_t *pfault_info_param = NULL;
-    int fault_times = 0;
-
-    if (unlikely(NULL == pexcp_info))
-    {
-        BFMR_PRINT_INVALID_PARAMS("pexcp_info.\n");
-        return -1;
-    }
-
-    paddl_info = (bfmr_bootfail_addl_info_t *)bfmr_malloc(sizeof(bfmr_bootfail_addl_info_t));
-    if (NULL == paddl_info)
-    {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        goto __out;
-    }
-    memset(paddl_info, 0, sizeof(bfmr_bootfail_addl_info_t));
-
-    pfault_info_param = (bfmr_get_hw_fault_info_param_t *)bfmr_malloc(sizeof(bfmr_get_hw_fault_info_param_t));
-    if (NULL == pfault_info_param)
-    {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        goto __out;
-    }
-    memset((void *)pfault_info_param, 0, sizeof(bfmr_get_hw_fault_info_param_t));
-
-    pfault_info_param->fault_stage = HW_FAULT_STAGE_AFTER_BOOT_SUCCESS;
-    memcpy(&pfault_info_param->hw_excp_info.ocp_excp_info, pexcp_info, sizeof(ocp_excp_info_t));
-    memcpy(paddl_info->detail_info, pexcp_info->ldo_num, BFMR_MIN(sizeof(paddl_info->detail_info) - 1, strlen(pexcp_info->ldo_num)));
-    paddl_info->hardware_fault_type = HW_FAULT_OCP;
-    if (s_is_bootup_successfully)
-    {
-        mutex_lock(&s_process_boot_fail_mutex);
-        fault_times = bfr_get_hardware_fault_times(pfault_info_param);
-        mutex_unlock(&s_process_boot_fail_mutex);
-        if (0 == fault_times)
-        {
-            boot_fail_err(BFM_HARDWARE_FAULT, DO_NOTHING, paddl_info);
-        }
-        else
-        {
-            BFMR_PRINT_KEY_INFO("BFM has processed OCP after boot-success one time!\n");
-        }
-
-        goto __out;
-    }
-
-    pfault_info_param->fault_stage = HW_FAULT_STAGE_DURING_BOOTUP;
-    mutex_lock(&s_process_boot_fail_mutex);
-    fault_times = bfr_get_hardware_fault_times(pfault_info_param);
-    mutex_unlock(&s_process_boot_fail_mutex);
-    switch (fault_times)
-    {
-    case 0:
-        {
-            BFMR_PRINT_KEY_INFO("%s has ocp once!\n", pexcp_info->ldo_num);
-            boot_fail_err(BFM_HARDWARE_FAULT, NO_SUGGESTION, paddl_info);
-            break;
-        }
-    case 1:
-        {
-            BFMR_PRINT_KEY_INFO("%s has ocp twice!\n", pexcp_info->ldo_num);
-            boot_fail_err(BFM_HARDWARE_FAULT, DO_NOTHING, paddl_info);
-            break;
-        }
-    default:
-        {
-            BFMR_PRINT_KEY_INFO("BFM has processed the same OCP during bootup!\n");
-            break;
-        }
-    }
-
-__out:
-    bfmr_free(paddl_info);
-    bfmr_free(pfault_info_param);
 
     return 0;
 }
@@ -3493,10 +2706,8 @@ int bfm_init(void)
     }
 
     (void)bfm_init_boot_timer();
-    (void)bfm_init_stage_info();
     memset((void *)&chipsets_init_param, 0, sizeof(bfm_chipsets_init_param_t));
     chipsets_init_param.log_saving_param.capture_and_save_bootfail_log = bfm_capture_and_save_bootfail_log;
-    chipsets_init_param.process_ocp_excp = bfm_process_ocp_excp;
     bfm_chipsets_init(&chipsets_init_param);
     bfmr_capture_and_save_bottom_layer_boot_fail_log();
 

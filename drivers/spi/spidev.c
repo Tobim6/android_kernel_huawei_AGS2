@@ -29,7 +29,6 @@
 #include <linux/compat.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/acpi.h>
 
 #include <linux/spi/spi.h>
 #include <linux/spi/spidev.h>
@@ -299,7 +298,7 @@ static int spidev_message(struct spidev_data *spidev,
 			k_tmp->speed_hz = spidev->speed_hz;
 #ifdef VERBOSE
 		dev_dbg(&spidev->spi->dev,
-			"  xfer len %u %s%s%s%dbits %u usec %uHz n:%d\n",
+			"  xfer len %zd %s%s%s%dbits %u usec %uHz n:%d\n",
 			u_tmp->len,
 			u_tmp->rx_buf ? "rx " : "",
 			u_tmp->tx_buf ? "tx " : "",
@@ -595,7 +594,7 @@ spidev_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			&& _IOC_DIR(cmd) == _IOC_WRITE)/*lint !e845 */
 		return spidev_compat_ioc_message(filp, cmd, arg);
 
-	return spidev_ioctl(filp, cmd, (uintptr_t)compat_ptr(arg));/*lint !e712 !e747 */
+	return spidev_ioctl(filp, cmd, (unsigned long)compat_ptr(arg));/*lint !e712 !e747 */
 }
 #else
 #define spidev_compat_ioctl NULL
@@ -727,43 +726,6 @@ static const struct of_device_id spidev_dt_ids[] = {
 MODULE_DEVICE_TABLE(of, spidev_dt_ids);
 #endif
 
-#ifdef CONFIG_ACPI
-
-/* Dummy SPI devices not to be used in production systems */
-#define SPIDEV_ACPI_DUMMY	1
-
-static const struct acpi_device_id spidev_acpi_ids[] = {
-	/*
-	 * The ACPI SPT000* devices are only meant for development and
-	 * testing. Systems used in production should have a proper ACPI
-	 * description of the connected peripheral and they should also use
-	 * a proper driver instead of poking directly to the SPI bus.
-	 */
-	{ "SPT0001", SPIDEV_ACPI_DUMMY },
-	{ "SPT0002", SPIDEV_ACPI_DUMMY },
-	{ "SPT0003", SPIDEV_ACPI_DUMMY },
-	{},
-};
-MODULE_DEVICE_TABLE(acpi, spidev_acpi_ids);
-
-static void spidev_probe_acpi(struct spi_device *spi)
-{
-	const struct acpi_device_id *id;
-
-	if (!has_acpi_companion(&spi->dev))
-		return;
-
-	id = acpi_match_device(spidev_acpi_ids, &spi->dev);
-	if (WARN_ON(!id))
-		return;
-
-	if (id->driver_data == SPIDEV_ACPI_DUMMY)
-		dev_warn(&spi->dev, "do not use this driver in production systems!\n");
-}
-#else
-static inline void spidev_probe_acpi(struct spi_device *spi) {}
-#endif
-
 /*-------------------------------------------------------------------------*/
 
 static int spidev_probe(struct spi_device *spi)
@@ -784,8 +746,6 @@ static int spidev_probe(struct spi_device *spi)
 			!of_match_device(spidev_dt_ids, &spi->dev));
 	}
 #endif
-
-	spidev_probe_acpi(spi);
 
 	/* Allocate driver data */
 	spidev = kzalloc(sizeof(*spidev), GFP_KERNEL);
@@ -946,74 +906,6 @@ static struct spi_driver spidev_spi_driver10 = {
 	 */
 };
 
-static const struct of_device_id spidev11_dt_ids[] = {
-	{ .compatible = "spi_dev11"},/*lint !e785 */
-	{},/*lint !e785 */
-};
-
-MODULE_DEVICE_TABLE(of, spidev11_dt_ids);
-
-static struct spi_driver spidev_spi_driver11 = {
-	.driver = {
-		.name =         "spi_dev11",
-		.owner =        THIS_MODULE,/*lint !e64 */
-		.of_match_table = of_match_ptr(spidev11_dt_ids),
-	},/*lint !e785 */
-	.probe =        spidev_probe,
-	.remove =       spidev_remove,
-
-       /* NOTE:  suspend/resume methods are not necessary here.
-	* We don't do anything except pass the requests to/from
-	* the underlying controller.  The refrigerator handles
-	* most issues; the controller driver handles the rest.
-	*/
-};
-
-static const struct of_device_id spidev12_dt_ids[] = {
-	{ .compatible = "spi_dev12"},/*lint !e785 */
-	{},/*lint !e785 */
-};
-
-MODULE_DEVICE_TABLE(of, spidev12_dt_ids);
-
-static struct spi_driver spidev_spi_driver12 = {
-	.driver = {
-		.name =         "spi_dev12",
-		.owner =        THIS_MODULE,/*lint !e64 */
-		.of_match_table = of_match_ptr(spidev12_dt_ids),
-	},/*lint !e785 */
-	.probe =        spidev_probe,
-	.remove =       spidev_remove,
-
-	/* NOTE:  suspend/resume methods are not necessary here.
-	 * We don't do anything except pass the requests to/from
-	 * the underlying controller.  The refrigerator handles
-	 * most issues; the controller driver handles the rest.
-	 */
-};
-
-static const struct of_device_id spidev13_dt_ids[] = {
-	{ .compatible = "spi_dev13"},/*lint !e785 */
-	{},/*lint !e785 */
-};
-
-MODULE_DEVICE_TABLE(of, spidev13_dt_ids);
-
-static struct spi_driver spidev_spi_driver13 = {
-	.driver = {
-		.name =         "spi_dev13",
-		.owner =        THIS_MODULE,/*lint !e64 */
-		.of_match_table = of_match_ptr(spidev13_dt_ids),
-	},/*lint !e785 */
-	.probe =        spidev_probe,
-	.remove =       spidev_remove,
-
-	/* NOTE:  suspend/resume methods are not necessary here.
-	 * We don't do anything except pass the requests to/from
-	 * the underlying controller.  The refrigerator handles
-	 * most issues; the controller driver handles the rest.
-	 */
-};
 static const struct of_device_id spidev21_dt_ids[] = {
 	{ .compatible = "spi_dev21"},/*lint !e785 */
 	{},/*lint !e785 */
@@ -1208,8 +1100,8 @@ static struct spi_driver spidev_spi_driver43 = {
 static struct spi_driver spidev_spi_driver = {
 	.driver = {
 		.name =		"spidev",
+		.owner =	THIS_MODULE,
 		.of_match_table = of_match_ptr(spidev_dt_ids),
-		.acpi_match_table = ACPI_PTR(spidev_acpi_ids),
 	},
 	.probe =	spidev_probe,
 	.remove =	spidev_remove,
@@ -1269,24 +1161,6 @@ static int __init spidev_init(void)
 		class_destroy(spidev_class);
 		unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver10.driver.name);
 	}
-
-	status = spi_register_driver(&spidev_spi_driver11);
-	if (status < 0) {
-		class_destroy(spidev_class);
-		unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver11.driver.name);
-	}
-
-	status = spi_register_driver(&spidev_spi_driver12);
-	if (status < 0) {
-		class_destroy(spidev_class);
-		unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver12.driver.name);
-	 }
-
-	status = spi_register_driver(&spidev_spi_driver13);
-	if (status < 0) {
-		class_destroy(spidev_class);
-		unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver13.driver.name);
-	 }
 
 	status = spi_register_driver(&spidev_spi_driver21);
 	if (status < 0) {
@@ -1362,9 +1236,6 @@ static void __exit spidev_exit(void)
 	spi_unregister_driver(&spidev_spi_driver2);
 	spi_unregister_driver(&spidev_spi_driver3);
 	spi_unregister_driver(&spidev_spi_driver10);
-	spi_unregister_driver(&spidev_spi_driver11);
-	spi_unregister_driver(&spidev_spi_driver12);
-	spi_unregister_driver(&spidev_spi_driver13);
 	spi_unregister_driver(&spidev_spi_driver21);
 	spi_unregister_driver(&spidev_spi_driver30);
 	spi_unregister_driver(&spidev_spi_driver31);
@@ -1379,9 +1250,6 @@ static void __exit spidev_exit(void)
 	unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver2.driver.name);
 	unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver3.driver.name);
 	unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver10.driver.name);
-	unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver11.driver.name);
-	unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver12.driver.name);
-	unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver13.driver.name);
 	unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver21.driver.name);
 	unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver30.driver.name);
 	unregister_chrdev(SPIDEV_MAJOR, spidev_spi_driver31.driver.name);

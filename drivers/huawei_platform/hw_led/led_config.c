@@ -75,7 +75,7 @@ void led_config_get_current_setting(struct hisi_led_platform_data* hisi_leds)
 		hisi_leds->leds[1].each_maxdr_iset = g_data->curr.green_curr;
 		hisi_leds->leds[2].each_maxdr_iset = g_data->curr.blue_curr;
 		g_data->got_tp_info_flag = 1;
-	}
+    }
 	return;
 }
 EXPORT_SYMBOL(led_config_get_current_setting);

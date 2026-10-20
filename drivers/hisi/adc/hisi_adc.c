@@ -98,15 +98,15 @@ static int adc_dev_notifier(struct notifier_block *nb, unsigned long len, void *
 			if ((_msg[1] & ADC_DATA_MASK) == hisi_adc_dev->info.channel) {
 				hisi_adc_dev->info.value = ADC_DATA_BIT_R(_msg[1], 16);
 				is_complete = 0;
-				pr_debug("%s: value msg[1][0x%x]\n", MODULE_NAME, _msg[1]);
 				goto exit;
 			}
 		} else {
 			is_complete = 0;
 			hisi_adc_dev->info.value = ADC_RESULT_ERR;
 		}
-		pr_err("%s: error value msg[1][0x%x]\n", MODULE_NAME, _msg[1]);
 	}
+
+	pr_err("%s: error value msg[1][0x%x]\n", MODULE_NAME, _msg[1]);
 
 exit:
 	if (!is_complete)
@@ -247,35 +247,33 @@ exit:
  */
 int hisi_adc_get_adc(int adc_channel)
 {
-	int ret = 0, value = 0;
+	int ret = 0;
 
 	mutex_lock(&hisi_adc_dev->mutex);
 
 	ret = hisi_adc_send_wait(adc_channel, ADC_IPC_DATA);
-	value = hisi_adc_dev->info.value;
-	hisi_adc_dev->info.channel = ADC_RESULT_ERR;
 
+	hisi_adc_dev->info.channel = ADC_RESULT_ERR;
 	mutex_unlock(&hisi_adc_dev->mutex);
 	if (1 == g_hkadc_debug)
-		pr_info("%s value %d;ret %d\n", __func__, value, ret);
+		pr_info("%s value %d;ret %d\n", __func__, hisi_adc_dev->info.value, ret);
 
-	return ret ? ret : value;
+	return ret ? ret : hisi_adc_dev->info.value;
 }
 EXPORT_SYMBOL(hisi_adc_get_adc);
 
 int hisi_adc_get_current(int adc_channel)
 {
-	int ret = 0, value = 0;
+	int ret = 0;
 
 	mutex_lock(&hisi_adc_dev->mutex);
 
 	ret = hisi_adc_send_wait(adc_channel, ADC_IPC_CURRENT);
-	value = hisi_adc_dev->info.value;
 	hisi_adc_dev->info.channel = ADC_RESULT_ERR;
 
 	mutex_unlock(&hisi_adc_dev->mutex);
 
-	return ret ? ret : value;
+	return ret ? ret : hisi_adc_dev->info.value;
 }
 EXPORT_SYMBOL(hisi_adc_get_current);
 

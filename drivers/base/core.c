@@ -759,7 +759,7 @@ class_dir_create_and_add(struct class *class, struct kobject *parent_kobj)
 
 	dir = kzalloc(sizeof(*dir), GFP_KERNEL);
 	if (!dir)
-		return ERR_PTR(-ENOMEM);
+		return NULL;
 
 	dir->class = class;
 	kobject_init(&dir->kobj, &class_dir_ktype);
@@ -769,7 +769,7 @@ class_dir_create_and_add(struct class *class, struct kobject *parent_kobj)
 	retval = kobject_add(&dir->kobj, parent_kobj, "%s", class->name);
 	if (retval < 0) {
 		kobject_put(&dir->kobj);
-		return ERR_PTR(retval);
+		return NULL;
 	}
 	return &dir->kobj;
 }
@@ -1076,10 +1076,6 @@ int device_add(struct device *dev)
 
 	parent = get_device(dev->parent);
 	kobj = get_device_parent(dev, parent);
-	if (IS_ERR(kobj)) {
-		error = PTR_ERR(kobj);
-		goto parent_error;
-	}
 	if (kobj)
 		dev->kobj.parent = kobj;
 
@@ -1178,7 +1174,6 @@ done:
 	kobject_del(&dev->kobj);
  Error:
 	cleanup_glue_dir(dev, glue_dir);
-parent_error:
 	put_device(parent);
 name_error:
 	kfree(dev->p);
@@ -1289,7 +1284,6 @@ void device_del(struct device *dev)
 	bus_remove_device(dev);
 	device_pm_remove(dev);
 	driver_deferred_probe_del(dev);
-	device_remove_properties(dev);
 
 	/* Notify the platform of the removal, in case they
 	 * need to do anything...
@@ -1996,11 +1990,6 @@ int device_move(struct device *dev, struct device *new_parent,
 	device_pm_lock();
 	new_parent = get_device(new_parent);
 	new_parent_kobj = get_device_parent(dev, new_parent);
-	if (IS_ERR(new_parent_kobj)) {
-		error = PTR_ERR(new_parent_kobj);
-		put_device(new_parent);
-		goto out;
-	}
 
 	pr_debug("device: '%s': %s: moving to '%s'\n", dev_name(dev),
 		 __func__, new_parent ? dev_name(new_parent) : "<NULL>");
@@ -2072,9 +2061,6 @@ void device_shutdown(void)
 {
 	struct device *dev, *parent;
 
-	wait_for_device_probe();
-	device_block_probing();
-
 	spin_lock(&devices_kset->list_lock);
 	/*
 	 * Walk the devices list backward, shutting down each in turn.
@@ -2108,11 +2094,7 @@ void device_shutdown(void)
 		pm_runtime_get_noresume(dev);
 		pm_runtime_barrier(dev);
 
-		if (dev->class && dev->class->shutdown) {
-			if (initcall_debug)
-				dev_info(dev, "shutdown\n");
-			dev->class->shutdown(dev);
-		} else if (dev->bus && dev->bus->shutdown) {
+		if (dev->bus && dev->bus->shutdown) {
 			if (initcall_debug)
 				dev_info(dev, "shutdown\n");
 			dev->bus->shutdown(dev);
@@ -2298,10 +2280,7 @@ void set_primary_fwnode(struct device *dev, struct fwnode_handle *fwnode)
 		if (fwnode_is_primary(fn))
 			fn = fn->secondary;
 
-		if (fn) {
-			WARN_ON(fwnode->secondary);
-			fwnode->secondary = fn;
-		}
+		fwnode->secondary = fn;
 		dev->fwnode = fwnode;
 	} else {
 		dev->fwnode = fwnode_is_primary(dev->fwnode) ?

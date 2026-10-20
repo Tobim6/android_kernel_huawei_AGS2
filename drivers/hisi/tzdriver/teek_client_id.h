@@ -48,8 +48,8 @@ enum SVC_SECBOOT_CMD_ID {
 	SECBOOT_CMD_ID_COPY_VRL_TYPE,  /**< Secboot Task 拷贝VRL，并传递SoC Type*/
 	SECBOOT_CMD_ID_COPY_DATA_TYPE,	/**< Secboot Task 拷贝镜像,并传递SoC Type*/
 	SECBOOT_CMD_ID_VERIFY_DATA_TYPE, /**< Secboot Task 校验，并传递SoC Type，校验成功解复位SoC*/
-	SECBOOT_CMD_ID_VERIFY_DATA_TYPE_LOCAL, /**< Secboot Task原地校验，并传递SoC Type,校验成功解复位SoC*/
-	SECBOOT_CMD_ID_COPY_IMG_TYPE,          /*<Secboot Task Copy img from secure buffer to run addr>*/
+	 /**< Secboot Task原地校验，并传递SoC Type,校验成功解复位SoC*/
+	SECBOOT_CMD_ID_VERIFY_DATA_TYPE_LOCAL,
 	SECBOOT_CMD_ID_BSP_MODEM_CALL,           /**< Secboot Task 执行对应函数*/
 	SECBOOT_CMD_ID_BSP_MODULE_VERIFY,        /**< Secboot Task modem module校验函数*/
 	SECBOOT_CMD_ID_BSP_ICC_OPEN_THREAD,      /**< Secboot Task icc open函数*/
@@ -75,52 +75,18 @@ phone secos
 vendor/thirdparty/secure_os/trustedcore/include/TEE/tee_common.h
 vendor/thirdparty/secure_os/trustedcore/platform/kirin/secureboot/secboot.h
 */
-
-#ifdef CONFIG_HISI_SECBOOT_IMG
 enum SVC_SECBOOT_IMG_TYPE {
-    MODEM,
-    DSP,
-    XDSP,
-    TAS,
-    WAS,
-    CAS,
-    MODEM_DTB,
-    NVM,
-    NVM_S,
-    MBN_R,
-    MBN_A,
-    MODEM_COLD_PATCH,
-    DSP_COLD_PATCH,
-    MODEM_CERT,
-    MAX_SOC_MODEM,
-    HIFI,
+	MODEM,
+	HIFI,
+	DSP,
+	XDSP,
+	TAS,
+	WAS,
+	CAS,
+	MODEM_DTB,
     ISP,
-    IVP,
-    SOC_MAX
+	SOC_MAX
 };
-#else
-enum SVC_SECBOOT_IMG_TYPE {
-    MODEM,
-    HIFI,
-    DSP,
-    XDSP,
-    TAS,
-    WAS,
-    CAS,
-    MODEM_DTB,
-    ISP,
-/*
-miami c30上需要支持冷补丁特性，该分支的modem代码与miami_c30 Modem代码共分支；
-增加冷补丁枚举是为了在该分支编译通过miami版本，安全OS中没有增加对应的枚举，该分支上编译的miami版本不支持冷补丁特性；
-分支对应关系链接：http://3ms.huawei.com/hi/group/8729/wiki_5190309.html
-*/
-#ifdef CONFIG_COLD_PATCH
-    MODEM_COLD_PATCH,
-    DSP_COLD_PATCH,
-#endif
-    SOC_MAX
-};
-#endif
 
 #endif
 

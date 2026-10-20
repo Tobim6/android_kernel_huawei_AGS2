@@ -21,6 +21,9 @@
 #include <linux/slab.h>
 #include <linux/list.h>
 #include <linux/gpio.h>
+#ifdef CONFIG_HUAWEI_DSM
+#include <dsm/dsm_pub.h>
+#endif
 
 #include <huawei_platform/log/hw_log.h>
 #include <huawei_platform/usb/pd/richtek/tcpci.h>
@@ -355,11 +358,15 @@ struct tcpc_device *tcpc_dev_get_by_name(const char *name)
 static void tcpc_device_release(struct device *dev)
 {
 	struct tcpc_device *tcpc_dev = to_tcpc_device(dev);
+	char buf[1024] = { 0 };
 
 	pr_info("%s : %s device release\n", __func__, dev_name(dev));
-	if (tcpc_dev == NULL)
-		PD_ERR("the tcpc device is NULL\n");
-
+	if(tcpc_dev == NULL) {
+		snprintf(buf, sizeof(buf), "the tcpc device is NULL\n");
+#ifdef CONFIG_HUAWEI_DSM
+		rt_dsm_report(ERROR_RT_TCPC_DEV_NULL, buf);
+#endif
+	}
 	/* Un-init pe thread */
 #ifdef CONFIG_USB_POWER_DELIVERY
 	tcpci_event_deinit(tcpc_dev);
@@ -375,18 +382,19 @@ static int pd_dpm_wake_lock_call(struct notifier_block *dpm_nb, unsigned long ev
 {
 	struct tcpc_device *tcpc = container_of(dpm_nb, struct tcpc_device, dpm_nb);
 
-	switch (event) {
-	case PD_WAKE_LOCK:
-		pr_info("%s=en\r\n", __func__);
-		wake_lock(&tcpc->attach_wake_lock);
-		break;
-	case PD_WAKE_UNLOCK:
-		pr_info("%s=dis\r\n", __func__);
-		wake_unlock(&tcpc->attach_wake_lock);
-		break;
-	default:
-		pr_info("%s unknown event (%ld)\n", __func__, event);
-		break;
+	switch(event)
+	{
+		case PD_WAKE_LOCK:
+			pr_info("%s=en\r\n", __func__);
+			wake_lock(&tcpc->attach_wake_lock);
+			break;
+		case PD_WAKE_UNLOCK:
+			pr_info("%s=dis\r\n", __func__);
+			wake_unlock(&tcpc->attach_wake_lock);
+			break;
+		default:
+			pr_info("%s unknown event (%d)\n", __func__, event);
+			break;
 	}
 
 	return NOTIFY_OK;

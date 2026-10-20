@@ -14,7 +14,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 static char *sensor_dts_name = "HI846BACH2_FRONT_VENDOR";
 static bool power_on_status = false;//false: power off, true:power on
 /*lint -e826 -e31 -e485 -e785 -e731 -e846 -e514 -e866 -e30 -e84 -e838 -e64 -e528 -e753 -e749 -e715 -esym(826, 31, 485, 785, 731, 846, 514, 866, 30, 84, 838, 64, 528, 753, 749, 715*)*/
@@ -466,8 +465,10 @@ int hi846BACH2_front_config(hwsensor_intf_t* si, void  *argp)
         case SEN_CONFIG_READ_REG_SETTINGS:
             break;
         case SEN_CONFIG_ENABLE_CSI:
+            //ret = si->vtbl->csi_enable(si);
             break;
         case SEN_CONFIG_DISABLE_CSI:
+            //ret = si->vtbl->csi_disable(si);
             break;
         case SEN_CONFIG_MATCH_ID:
             ret = si->vtbl->match_id(si,argp);
@@ -513,7 +514,7 @@ static int __init hi846BACH2_front_init_module(void)
 
 static void __exit hi846BACH2_front_exit_module(void)
 {
-    hwsensor_unregister(Sensor2Pdev(s_hi846BACH2_front));
+    hwsensor_unregister(&s_hi846BACH2_front.intf);
     platform_driver_unregister(&s_hi846BACH2_front_driver);
 }
 /*lint -restore*/

@@ -49,16 +49,15 @@ static DEVICE_ATTR_RO(field)
 sdio_config_attr(class, "0x%02x\n");
 sdio_config_attr(vendor, "0x%04x\n");
 sdio_config_attr(device, "0x%04x\n");
-
+/*lint -restore*/
 static ssize_t modalias_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct sdio_func *func = dev_to_sdio_func (dev);
 
 	/*cppcheck-suppress * */
 	return sprintf(buf, "sdio:c%02Xv%04Xd%04X\n",
-			func->class, func->vendor, func->device);
+			func->class, func->vendor, func->device);/*lint !e421*/
 }
-/*lint -restore*/
 static DEVICE_ATTR_RO(modalias);
 
 static struct attribute *sdio_dev_attrs[] = {
@@ -279,7 +278,7 @@ static void sdio_release_func(struct device *dev)
 		sdio_free_func_cis(func);
 
 	kfree(func->info);
-	kfree(func->tmpbuf);
+
 	kfree(func);
 }
 
@@ -293,16 +292,6 @@ struct sdio_func *sdio_alloc_func(struct mmc_card *card)
 	func = kzalloc(sizeof(struct sdio_func), GFP_KERNEL);
 	if (!func)
 		return ERR_PTR(-ENOMEM);
-
-	/*
-	 * allocate buffer separately to make sure it's properly aligned for
-	 * DMA usage (incl. 64 bit DMA)
-	 */
-	func->tmpbuf = kmalloc(4, GFP_KERNEL);
-	if (!func->tmpbuf) {
-		kfree(func);
-		return ERR_PTR(-ENOMEM);
-	}
 
 	func->card = card;
 
@@ -345,7 +334,6 @@ int sdio_add_func(struct sdio_func *func)
 
 	sdio_set_of_node(func);
 	sdio_acpi_set_handle(func);
-	device_enable_async_suspend(&func->dev);
 	ret = device_add(&func->dev);
 	if (ret == 0)
 		sdio_func_set_present(func);

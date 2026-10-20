@@ -32,9 +32,7 @@
 #include "hw_subdev.h"
 #include "cam_log.h"
 #include <dsm/dsm_pub.h>
-#include <securec.h>
-//lint -save -e607
-//lint -esym(607,*)
+
 #define CAMERA_FLASH_MAX	2
 #define CAMERA_FLASH_ARRAY_SIZE	10
 
@@ -58,15 +56,6 @@
       {\
           cam_err("'%s' failed, ret = 0x%x", #x, ret); \
           return -1; \
-      } \
-}
-
-#define loge_if(x) \
-{\
-      int ret = (x); \
-      if (ret) \
-      {\
-          cam_err("'%s' failed, ret = 0x%x", #x, ret); \
       } \
 }
 
@@ -142,15 +131,9 @@ struct hw_flash_i2c_client {
 	struct i2c_client *client;
 };
 
-struct hw_flash_i2c_msgs_t {
-    u8 reg;
-    u8 data;
-};
-
 struct hw_flash_i2c_fn_t {
 	int (*i2c_read) (struct hw_flash_i2c_client *, u8, u8 *);
 	int (*i2c_write) (struct hw_flash_i2c_client *, u8, u8);
-    int (*i2c_write_block) (struct hw_flash_i2c_client *, u8, u8 *, int);
 };
 
 struct hw_flash_ctrl_t {
@@ -188,4 +171,3 @@ void hw_flash_enable_thermal_protect(void);
 void hw_flash_disable_thermal_protect(void);
 
 #endif
-//lint -restore

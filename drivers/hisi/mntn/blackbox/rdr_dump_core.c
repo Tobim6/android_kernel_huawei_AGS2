@@ -33,10 +33,6 @@
 #include <hisi_partition.h>
 #include <linux/hisi/kirin_partition.h>
 #include <linux/mfd/hisi_pmic.h>
-#include <linux/hisi/rdr_hisi_platform.h>
-#include <libhwsecurec/securec.h>
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_BLACKBOX_TAG
 
 /*
  * func name: rdr_save_history_log
@@ -50,8 +46,6 @@
  */
 #define HISTORY_LOG_SIZE 256
 #define HISTORY_LOG_MAX  0x400000	/*64*16*1024*4 = 4M */
-u32 dfx_size_tbl[DFX_MAX_MODULE];
-u32 dfx_addr_tbl[DFX_MAX_MODULE];
 
 int rdr_save_history_log(struct rdr_exception_info_s *p, char *date,
 			 bool is_save_done, u32 bootup_keypoint)
@@ -61,7 +55,6 @@ int rdr_save_history_log(struct rdr_exception_info_s *p, char *date,
 	struct kstat historylog_stat;
 	char local_path[PATH_MAXLEN];
 	char *reboot_from_ap;
-	char * subtype_name;
 
 	if (!check_himntn(HIMNTN_GOBAL_RESETLOG)) {
 		return 0;
@@ -77,51 +70,16 @@ int rdr_save_history_log(struct rdr_exception_info_s *p, char *date,
 	else
 		reboot_from_ap = "false";
 	/*如果此次复位是走简易流程的，则正常记录，否则需要增加last_save_not_done字符串 */
-	subtype_name = rdr_get_subtype_name(p->e_exce_type, p->e_exce_subtype);
-
 	if (is_save_done) {
-		if (subtype_name) {
-			snprintf(buf, HISTORY_LOG_SIZE,
-				 "system exception core [%s], reason [%s:%s], time [%s], sysreboot [%s], bootup_keypoint [%d], category [%s]\n",
-			 	rdr_get_exception_core(p->e_from_core),
-			 	rdr_get_exception_type(p->e_exce_type),
-			 	subtype_name,
-				date, 
-				reboot_from_ap,
-				bootup_keypoint,
-				rdr_get_category_name(p->e_exce_type, p->e_exce_subtype));
-		}
-		else {
-			snprintf(buf, HISTORY_LOG_SIZE,
-				 "system exception core [%s], reason [%s], time [%s], sysreboot [%s], bootup_keypoint [%d], category [%s]\n",
-			 	rdr_get_exception_core(p->e_from_core),
-			 	rdr_get_exception_type(p->e_exce_type),
-				date,
-				reboot_from_ap,
-				bootup_keypoint,
-				rdr_get_category_name(p->e_exce_type, p->e_exce_subtype));
-		}
+		snprintf(buf, HISTORY_LOG_SIZE,
+			 "system exception core [%s], reason [%s], time [%s], sysreboot[%s], bootup_keypoint [%d]\n",
+			 rdr_get_exception_core(p->e_from_core),
+			 rdr_get_exception_type(p->e_exce_type), date, reboot_from_ap, bootup_keypoint);
 	} else {
-		if (subtype_name) {
-			snprintf(buf, HISTORY_LOG_SIZE,
-			 	"system exception core [%s], reason [%s:%s], time [%s][last_save_not_done], sysreboot [%s], bootup_keypoint [%d], category [%s]\n",
-				 rdr_get_exception_core(p->e_from_core),
-			 	 rdr_get_exception_type(p->e_exce_type),
-			 	 subtype_name,
-			 	 date,
-			 	 reboot_from_ap,
-			 	 bootup_keypoint,
-			 	 rdr_get_category_name(p->e_exce_type, p->e_exce_subtype));
-		} else {
-			snprintf(buf, HISTORY_LOG_SIZE,
-			 	"system exception core [%s], reason [%s], time [%s][last_save_not_done], sysreboot [%s], bootup_keypoint [%d], category [%s]\n",
-				 rdr_get_exception_core(p->e_from_core),
-			 	rdr_get_exception_type(p->e_exce_type),
-			 	date,
-			 	reboot_from_ap,
-			 	bootup_keypoint,
-			 	rdr_get_category_name(p->e_exce_type, p->e_exce_subtype));
-		}
+		snprintf(buf, HISTORY_LOG_SIZE,
+			 "system exception core [%s], reason [%s], time [%s][last_save_not_done], sysreboot[%s]\n",
+			 rdr_get_exception_core(p->e_from_core),
+			 rdr_get_exception_type(p->e_exce_type), date, reboot_from_ap);
 	}
 
 	memset(local_path, 0, PATH_MAXLEN);
@@ -195,7 +153,7 @@ int rdr_savebuf2fs(char *logpath, char *filename,
 
 	BB_PRINT_START();
 	if (logpath == NULL || filename == NULL || buf == NULL || len <= 0) {
-		BB_PRINT_ERR("invalid  parameter. path:%pK, name:%pK buf:%pK len:0x%x\n",
+		BB_PRINT_PN("invalid  parameter. path:%pK, name:%pK buf:%pK len:0x%x\n",
 		     logpath, filename, buf, len);
 		ret = -1;
 		goto out2;
@@ -206,7 +164,7 @@ int rdr_savebuf2fs(char *logpath, char *filename,
 	flags = O_CREAT | O_RDWR | (is_append ? O_APPEND : O_TRUNC);
 	fp = filp_open(path, flags, FILE_LIMIT);
 	if (IS_ERR(fp)) {
-		BB_PRINT_ERR("%s():create file %s err. fp=0x%pK\n", __func__, path, fp);
+		BB_PRINT_ERR("%s():create file %s err.\n", __func__, path);
 		ret = -1;
 		goto out2;
 	}
@@ -241,7 +199,7 @@ Input:          logpath;bbox's base_addr
 Output:         NA
 Return:         NA
 ********************************************************************/
-void bbox_save_every_core_data(const char *logpath, char *base_addr)
+void bbox_save_every_core_data(char *logpath, char *base_addr)
 {
 	char *addr;
 	int ret;
@@ -251,8 +209,28 @@ void bbox_save_every_core_data(const char *logpath, char *base_addr)
 	char *bbox_area_names = NULL;
 	char tmp_logpath[PATH_MAXLEN] = {0};
 
-	if (bbox_get_every_core_area_info(&value, data, &np)) {
-		BB_PRINT_ERR("[%s], bbox_get_every_core_area_info fail!\n",
+	np = of_find_compatible_node(NULL, NULL, "hisilicon,rdr");
+	if (!np) {
+		BB_PRINT_ERR("[%s], find rdr_memory node fail!\n", __func__);
+		return;
+	}
+
+	ret = of_property_read_u32(np, "rdr_area_num", &value);
+	if (ret) {
+		BB_PRINT_ERR("[%s], cannot find rdr_area_num in dts!\n",
+			     __func__);
+		return;
+	}
+	BB_PRINT_DBG("[%s], get rdr_area_num [0x%x] in dts!\n", __func__,
+		     value);
+
+	if (value != RDR_CORE_MAX) {
+		BB_PRINT_ERR("[%s], invaild core num in dts!\n", __func__);
+		return;
+	}
+	ret = of_property_read_u32_array(np, "rdr_area_sizes", &data[0], (unsigned long)value);
+	if (ret) {
+		BB_PRINT_ERR("[%s], cannot find rdr_area_sizes in dts!\n",
 			     __func__);
 		return;
 	}
@@ -273,7 +251,7 @@ void bbox_save_every_core_data(const char *logpath, char *base_addr)
 					 __func__, __LINE__);
 			return;
 		}
-		BB_PRINT_PN("[%s], size[0x%x], addr[0x%pK], name[%s]\n", __func__, data[i], addr, bbox_area_names);
+		BB_PRINT_ERR("[%s], size[0x%x], addr[0x%pK], name[%s]\n", __func__, data[i], addr, bbox_area_names);
 
 		if (data[i] > 0) {
 			rdr_savebuf2fs(tmp_logpath, bbox_area_names, addr, data[i], 0);
@@ -282,12 +260,12 @@ void bbox_save_every_core_data(const char *logpath, char *base_addr)
 
 	addr = base_addr;
 
-	BB_PRINT_PN("[%s], addr[0x%pK], name[%s]\n", __func__, addr, bbox_area_names);
+	BB_PRINT_ERR("[%s], addr[0x%pK], name[%s]\n", __func__, addr, bbox_area_names);
 	rdr_savebuf2fs(tmp_logpath, BBOX_HEAD_INFO, addr, RDR_BASEINFO_SIZE, 0);
 
 	/*save AP data info*/
 	addr = base_addr + RDR_BASEINFO_SIZE;
-	size = (u32)rdr_get_pbb_size() - (size + RDR_BASEINFO_SIZE);
+	size = (u32)rdr_get_pbb_size() - (size - RDR_BASEINFO_SIZE);
 	ret = of_property_read_string_index(np, "bbox_area_names", 0, (const char **)&bbox_area_names);
 	if (ret) {
 		BB_PRINT_ERR("[%s][%d], of_property_read_string_index fail\n",
@@ -295,7 +273,7 @@ void bbox_save_every_core_data(const char *logpath, char *base_addr)
 		return;
 	}
 
-	BB_PRINT_PN("[%s], size[0x%x], addr[0x%pK], name[%s]\n", __func__, size, addr, bbox_area_names);
+	BB_PRINT_ERR("[%s], size[0x%x], addr[0x%pK], name[%s]\n", __func__, size, addr, bbox_area_names);
 	rdr_savebuf2fs(tmp_logpath, bbox_area_names, addr, size, 0);
 
 	return;
@@ -320,7 +298,6 @@ void rdr_save_last_baseinfo(char *logpath)
 		       rdr_get_tmppbb(), rdr_get_pbb_size(), 0);
 	bbox_save_every_core_data(logpath, (char *)rdr_get_tmppbb());
 
-	bbox_cleartext_proc(logpath, (char *)rdr_get_tmppbb());
 	BB_PRINT_END();
 	return;
 }
@@ -357,12 +334,12 @@ bool is_need_save_dfx2file(void)
 	struct dfx_head_info *dfx_head_info;
 
 	if (!check_himntn(HIMNTN_DFXPARTITION_TO_FILE)) {
-		BB_PRINT_PN("%s():%d:switch is close\n", __func__, __LINE__);
+		BB_PRINT_ERR("%s():%d:switch is close\n", __func__, __LINE__);
 		goto out;
 	}
 
 	if (0 != rdr_wait_partition("/data/lost+found", 1000)) {
-		BB_PRINT_PN("%s():%d:data is not ready\n", __func__, __LINE__);
+		BB_PRINT_ERR("%s():%d:data is not ready\n", __func__, __LINE__);
 		goto out;
 	}
 
@@ -420,7 +397,7 @@ Return:         true:need save; false:not need save
 ********************************************************************************/
 bool need_save_dfxbuffer2file(u64 reboot_type, u64 bootup_keypoint)
 {
-	if (BFM_S_NATIVE_BOOT_FAIL == reboot_type) {
+	if (BFM_S_BOOT_NATIVE_DATA_FAIL == reboot_type) {
 		BB_PRINT_ERR("%s():%d:reboot_type is [0x%llx]\n",
 			__func__, __LINE__, reboot_type);
 		return true;
@@ -429,35 +406,35 @@ bool need_save_dfxbuffer2file(u64 reboot_type, u64 bootup_keypoint)
 	if ((bootup_keypoint < STAGE_XLOADER_START ||
 		bootup_keypoint >= STAGE_FASTBOOT_END)
 		&& (AP_S_PRESS6S != reboot_type)) {
-		BB_PRINT_PN("%s():%d:bootup_keypoint is [0x%llx]\n",
+		BB_PRINT_ERR("%s():%d:bootup_keypoint is [0x%llx]\n",
 			__func__, __LINE__, bootup_keypoint);
 		return false;
 	}
 
-	if (REBOOT_REASON_LABEL1 <= reboot_type
-	    && REBOOT_REASON_LABEL3 > reboot_type) {
-		BB_PRINT_PN("%s():%d:reboot_type is [0x%llx]\n",
+	if ((REBOOT_REASON_LABEL1 <= reboot_type
+	    && REBOOT_REASON_LABEL3 > reboot_type)
+	    || MMC_S_EXCEPTION == reboot_type
+	    || LPM3_S_EXCEPTION == reboot_type) {
+		BB_PRINT_ERR("%s():%d:reboot_type is [0x%llx]\n",
+			__func__, __LINE__, reboot_type);
+		return false;
+	}
+
+	if (REBOOT_REASON_LABEL5 <= reboot_type
+	    && REBOOT_REASON_LABEL6 > reboot_type) {
+		BB_PRINT_ERR("%s():%d:reboot_type is [0x%llx]\n",
+			__func__, __LINE__, reboot_type);
+		return false;
+	}
+
+	if (REBOOT_REASON_LABEL8 <= reboot_type
+	    && REBOOT_REASON_LABEL9 > reboot_type) {
+		BB_PRINT_ERR("%s():%d:reboot_type is [0x%llx]\n",
 			__func__, __LINE__, reboot_type);
 		return false;
 	}
 
 	return true;
-}
-
-static int check_dfx_head_valid(void *base, void *offset, u32 size)
-{
-	u32 noreboot_size;
-
-	noreboot_size = dfx_size_tbl[DFX_NOREBOOT];
-
-	if (offset >= base && size <= EVERY_NUMBER_SIZE
-		    && offset + size <= base + noreboot_size)
-		return 0;
-
-	BB_PRINT_ERR("%s(), base:0x%pK, offset:0x%pK, size:0x%x, noreboot_size:0x%x.\n",
-	     __func__, base, offset, size, noreboot_size);
-
-	return -1;
 }
 
 /*******************************************************************************
@@ -470,9 +447,7 @@ Return:         0:success
 static int save_dfxbuffer_to_file(struct dfx_head_info *dfx_head_info)
 {
 	char *buf;
-	void *offset;
-	u32 size;
-	int last_number, fd, ret;
+	int last_number, fd;
 	struct rdr_exception_info_s temp;
 	struct every_number_info *every_number_info;
 	char path[PATH_MAXLEN], date[DATATIME_MAXLEN];
@@ -501,27 +476,9 @@ static int save_dfxbuffer_to_file(struct dfx_head_info *dfx_head_info)
 		temp.e_from_core = RDR_AP;
 		temp.e_reset_core_mask = RDR_AP;
 		temp.e_exce_type = every_number_info->reboot_type;
-		temp.e_exce_subtype = every_number_info->exce_subtype;;
 
 		memset(path, 0, sizeof(path));
 		memset(date, 0, sizeof(date));
-
-		if (!rdr_check_log_rights()) {
-			ret = snprintf_s(date, DATATIME_MAXLEN, DATATIME_MAXLEN-1, "%s-%08lld",
-				  rdr_get_timestamp(), rdr_get_tick());
-			if(unlikely(ret < 0)){
-				BB_PRINT_ERR("[%s], snprintf_s date ret %d!\n", __func__, ret);
-				return -1;
-			}
-
-			rdr_save_history_log(&temp, &date[0], false, every_number_info->bootup_keypoint);
-
-			dfx_head_info->need_save_number--;
-			last_number = (last_number + 1 + TOTAL_NUMBER)%TOTAL_NUMBER;
-
-			continue;
-		}
-
 		if (0 != bbox_create_dfxlog_path(&path[0], &date[0])) {
 			BB_PRINT_ERR("bbox_create_dfxlog_path fail\n");
 			return -1;
@@ -537,24 +494,27 @@ static int save_dfxbuffer_to_file(struct dfx_head_info *dfx_head_info)
 		}
 
 		if (every_number_info->fastbootlog_size != 0) {
-			offset = (void*)every_number_info + every_number_info->fastbootlog_start_addr;
-			size = (u32)every_number_info->fastbootlog_size;
-			if (!check_dfx_head_valid((void*)dfx_head_info, offset, size))
-				rdr_savebuf2fs(path, "fastboot_log", offset, size, 0);
+			rdr_savebuf2fs(path,
+				"fastboot_log",
+				(char *)every_number_info + every_number_info->fastbootlog_start_addr,
+				every_number_info->fastbootlog_size,
+				0);
 		}
 
 		if (every_number_info->last_kmsg_size != 0) {
-			offset = (void*)every_number_info + every_number_info->last_kmsg_start_addr;
-			size = (u32)every_number_info->last_kmsg_size;
-			if (!check_dfx_head_valid((void*)dfx_head_info, offset, size))
-				rdr_savebuf2fs(path, "last_kmsg", offset, size, 0);
+			rdr_savebuf2fs(path,
+				"last_kmsg",
+				(char *)every_number_info + every_number_info->last_kmsg_start_addr,
+				every_number_info->last_kmsg_size,
+				0);
 		}
 
 		if (every_number_info->last_applog_size != 0) {
-			offset = (void*)every_number_info + every_number_info->last_applog_start_addr;
-			size = (u32)every_number_info->last_applog_size;
-			if (!check_dfx_head_valid((void*)dfx_head_info, offset, size))
-				rdr_savebuf2fs(path, "pmsg-ramoops-0", offset, size, 0);
+			rdr_savebuf2fs(path,
+				"pmsg-ramoops-0",
+				(char *)every_number_info + every_number_info->last_applog_start_addr,
+				every_number_info->last_applog_size,
+				0);
 		}
 
 		rdr_save_history_log(&temp, &date[0], true, every_number_info->bootup_keypoint);
@@ -563,8 +523,6 @@ static int save_dfxbuffer_to_file(struct dfx_head_info *dfx_head_info)
 		bbox_save_done(path, BBOX_SAVE_STEP_DONE);
 		dfx_head_info->need_save_number--;
 		last_number = (last_number + 1 + TOTAL_NUMBER)%TOTAL_NUMBER;
-
-		rdr_count_size();
 	}
 
 	return 0;
@@ -585,7 +543,7 @@ void save_dfxpartition_to_file(void)
 	BB_PRINT_START();
 
 	if (0 != rdr_wait_partition("/data/lost+found", 1000)) {
-		BB_PRINT_PN("%s():%d:data is not ready\n", __func__, __LINE__);
+		BB_PRINT_ERR("%s():%d:data is not ready\n", __func__, __LINE__);
 		return;
 	}
 
@@ -775,9 +733,7 @@ static void save_buffer_to_dfx_loopbuffer(struct every_number_info *every_number
 	kfree(buf2);
 
 close:
-	ret = (int)sys_fsync(fd_dfx);
-	if (ret < 0)
-		BB_PRINT_ERR("[%s]sys_fsync failed, ret is %d\n", __func__, ret);
+	sys_fsync(fd_dfx);
 	sys_close(fd_dfx);
 open_fail:
 	kfree(buf1);
@@ -798,7 +754,7 @@ void systemerror_save_log2dfx(u32 reboot_type)
 	BB_PRINT_START();
 
 	if (in_atomic() || irqs_disabled() || in_irq()) {
-		BB_PRINT_PN(
+		BB_PRINT_ERR(
 		    "%s():%d:unsupport in atomic or irqs disabled or in irq\n",
 		    __func__, __LINE__);
 		return;
@@ -835,7 +791,6 @@ void systemerror_save_log2dfx(u32 reboot_type)
 	memset(buf, 0, EVERY_NUMBER_SIZE);
 	every_number_info = (struct every_number_info *)buf;
 	every_number_info->rtc_time = get_system_time();
-	every_number_info->boot_time = hisi_getcurtime();
 	every_number_info->bootup_keypoint = get_boot_keypoint();
 	every_number_info->reboot_type = reboot_type;
 	every_number_info->fastbootlog_start_addr = DFX_HEAD_SIZE;
@@ -884,6 +839,11 @@ static void save_buffer_to_dfx_tempbuffer(struct every_number_info *every_number
 	char p_name[BDEVNAME_SIZE + 12];
 	struct dfx_head_info *dfx_head_info;
 	int ret, fd_dfx, cnt, cfo, need_write_size;
+
+	if (0 != rdr_wait_partition("/data/lost+found", 1000)) {
+		BB_PRINT_ERR("%s():%d:data is not ready\n", __func__, __LINE__);
+		return;
+	}
 
 	buf = kzalloc(SZ_4K, GFP_KERNEL);
 	if (!buf) {
@@ -1001,7 +961,6 @@ void save_log_to_dfx_tempbuffer(u32 reboot_type)
 	memset(buf, 0, EVERY_NUMBER_SIZE);
 	every_number_info = (struct every_number_info *)buf;
 	every_number_info->rtc_time = get_system_time();
-	every_number_info->boot_time = hisi_getcurtime();
 	every_number_info->bootup_keypoint = get_boot_keypoint();
 	every_number_info->reboot_type = reboot_type;
 	every_number_info->fastbootlog_start_addr = DFX_HEAD_SIZE;
@@ -1060,50 +1019,3 @@ void clear_dfx_tempbuffer(void)
 	return;
 }
 
-static int get_dfx_core_size(void)
-{
-	int ret;
-	struct device_node *np;
-
-	np = of_find_compatible_node(NULL, NULL,
-				     "hisilicon,dfx_partition");
-	if (!np) {
-		BB_PRINT_ERR("[%s], cannot find rdr_ap_adapter node in dts!\n",
-		       __func__);
-		return -ENODEV;
-	}
-
-	ret = of_property_read_u32(np, "dfx_noreboot_size",
-				   &dfx_size_tbl[DFX_NOREBOOT]);
-	if (ret) {
-		BB_PRINT_ERR("[%s], cannot find dfx_noreboot_size in dts!\n",
-		       __func__);
-		return ret;
-	}
-	dfx_addr_tbl[DFX_ZEROHUNG] += dfx_size_tbl[DFX_NOREBOOT];
-	ret = of_property_read_u32(np, "dfx_zerohung_size",
-				   &dfx_size_tbl[DFX_ZEROHUNG]);
-	if (ret) {
-		BB_PRINT_ERR("[%s], cannot find dfx_zerohung_size in dts!\n",
-		       __func__);
-		return ret;
-	}
-
-	return 0;
-}
-
-int dfx_partition_init(void)
-{
-	int ret;
-
-	ret = get_dfx_core_size();
-	if(ret < 0)
-		goto err;
-
-	BB_PRINT_PN("%s success\n", __func__);
-	return 0;
-err:
-	return ret;
-}
-
-early_initcall(dfx_partition_init);

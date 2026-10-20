@@ -21,10 +21,6 @@ void FUSB3601_platform_do_something_with_port(struct Port *port);
 void FUSB3601_platform_notify_cc_orientation(CCOrientation orientation);
 
 void FUSB3601_platform_notify_audio_accessory(void);
-void FUSB3601_platform_notify_attached_vbus_only(void);
-void FUSB3601_platform_notify_unattached_vbus_only(void);
-void FUSB3601_platform_notify_double_56k(void);
-void FUSB3601_platform_notify_DebugAccessorySink(void);
 /*******************************************************************************
 * Function:        platform_notify_pd_contract
 * Input:           contract - TRUE: Contract, FALSE: No Contract
@@ -63,7 +59,5 @@ void FUSB3601_platform_notify_data_role(FSC_BOOL PolicyIsDFP);
 *                  BIST
 *******************************************************************************/
 void FUSB3601_platform_notify_bist(FSC_BOOL bistEnabled);
-
-void FUSB3601_platform_notify_sink_current(struct Port *port);
 
 #endif /* FSC_CALLBACKS_H_ */

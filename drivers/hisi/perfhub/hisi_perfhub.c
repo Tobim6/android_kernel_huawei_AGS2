@@ -1,15 +1,3 @@
-/* Copyright (C) 2016-2017. Hisilicon Tech. Co., Ltd. All Rights Reserved.
-*
-* This software is licensed under the terms of the GNU General Public
-* License version 2, as published by the Free Software Foundation, and
-* may be copied, distributed, and modified under those terms.
-*
-* This program is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-*/
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kobject.h>
@@ -21,14 +9,20 @@
 #include <linux/cpu.h>
 #include <linux/security.h>
 #include <linux/cpuset.h>
-#include <libhwsecurec/securec.h>
 #include "../../../kernel/sched/sched.h"
-#include <trace/events/sched.h>
 
+#define LITTLE_CPU_START 0
+#define BIG_CPU_START    4
 #define CPU_TOTAL        8
 
-static unsigned int g_last_mask;
+static char g_last_tag;
 static int g_last_pid;
+
+enum cpu_cluster {
+	CPU_CLUSTER_LITTLE,
+	CPU_CLUSTER_BIG,
+	CPU_CLUSTER_ALL,
+};
 
 /**
  * find_process_by_pid - find a process with a matching PID value.
@@ -42,22 +36,21 @@ static struct task_struct *find_process_by_pid(pid_t pid)
 }
 
 
-static int bind_cpu_cluster(unsigned int setmask, pid_t pid)
+static int bind_cpu_cluster(enum cpu_cluster e_cpu_cluster, pid_t pid)
 {
 	cpumask_var_t cpus_allowed, new_mask;
 	struct task_struct *p;
 	int retval;
 	struct cpumask mask;
-	int i;
+	int cpu_no;
 
 	cpumask_clear(&mask);
 
-	for(i = 0; i < CPU_TOTAL; i++)
-	{
-		if(setmask & (0x01 << i))
-			cpumask_set_cpu(i, &mask);
+	switch (e_cpu_cluster) {
+		case CPU_CLUSTER_LITTLE: for (cpu_no = LITTLE_CPU_START; cpu_no < BIG_CPU_START; cpu_no++) cpumask_set_cpu(cpu_no, &mask); break;
+		case CPU_CLUSTER_BIG:    for (cpu_no = BIG_CPU_START; cpu_no < CPU_TOTAL; cpu_no++) cpumask_set_cpu(cpu_no, &mask); break;
+		default:                 for (cpu_no = LITTLE_CPU_START; cpu_no < CPU_TOTAL; cpu_no++) cpumask_set_cpu(cpu_no, &mask); break;
 	}
-
 
 	get_online_cpus();
 	rcu_read_lock();
@@ -123,8 +116,6 @@ again:
 			cpumask_copy(new_mask, cpus_allowed);
 			goto again;
 		}
-
-		trace_sched_set_affinity(p, new_mask);
 	}
 out_unlock:
 	free_cpumask_var(new_mask);
@@ -145,19 +136,15 @@ static ssize_t perfhub_show(struct kobject *kobj, struct kobj_attribute *attr, c
 		return -EINVAL;
 	}
 
-	return snprintf(buf, PAGE_SIZE, "%x|%d\n", g_last_mask, g_last_pid);// unsafe_function_ignore: snprintf
+	return snprintf(buf, PAGE_SIZE, "%c|%d\n", g_last_tag, g_last_pid);// unsafe_function_ignore: snprintf
 }
 
 static ssize_t perfhub_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
 {
-	long cpumask;
+	char tag;
 	long pid;
 	int ret;
-	char maskStr[64] = {0};
-	const char *pstrmask = NULL;
-	const char *pstrchr = NULL;
-	char *next_p = NULL;
-	const char *delimiter = "|";
+	const char *pstrchr;
 
 	if (buf == NULL)
 	{
@@ -165,37 +152,33 @@ static ssize_t perfhub_store(struct kobject *kobj, struct kobj_attribute *attr, 
 		return -EINVAL;
 	}
 
-	strcpy_s(maskStr, sizeof(maskStr)-1, buf);
+	tag = *buf;
 
-	pstrmask = strtok_s(maskStr, delimiter, &next_p);
-	if(pstrmask)
-		pstrchr = strtok_s(NULL, delimiter, &next_p);
-	else
-		return -EINVAL;
-
+	pstrchr = strchr(buf, '|');//lint !e158
 	if (NULL == pstrchr)
 		return -EINVAL;
 
-	ret = strict_strtol(pstrmask, 16, &cpumask);
-	if (ret != 0)
-		return -EINVAL;
+	pstrchr++;
 
 	ret = strict_strtol(pstrchr, 10, &pid);
 	if (ret != 0)
 		return -EINVAL;
 
-	g_last_mask = cpumask;
+	g_last_tag = tag;
 	g_last_pid = pid;
 
-	if (cpumask < 0 || cpumask > ((1 << CPU_TOTAL) - 1) )
-	{
-		pr_err("invalid cpumask");
+	if (tag == 'P') {
+		ret = bind_cpu_cluster(CPU_CLUSTER_BIG, pid);
+		if (0 != ret)
+			return -EINVAL;
+	} else if (tag == 'N') {
+		ret = bind_cpu_cluster(CPU_CLUSTER_ALL, pid);
+		if (0 != ret)
+			return -EINVAL;
+	} else {
+		pr_err("invalid tag (%c)", tag);
 		return -EINVAL;
 	}
-
-	ret = bind_cpu_cluster((unsigned int)cpumask, pid);
-	if (0 != ret)
-		return -EINVAL;
 
 	return count;
 }

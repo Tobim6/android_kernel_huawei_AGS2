@@ -1,11 +1,5 @@
-/*
- * Copyright (c) Huawei Technologies Co., Ltd. 2017-2020. All rights reserved.
- * Description: Header file of Access Control Module.
- *
- *     This file is released under the GPL v2.
- */
-#ifndef __DRIVERS_CHAR_ACM_H__
-#define __DRIVERS_CHAR_ACM_H__
+#ifndef __ACM_H__
+#define __ACM_H__
 
 #include <linux/module.h>
 #include <linux/cdev.h>
@@ -13,14 +7,14 @@
 #include <linux/device.h>
 #include <linux/ioctl.h>
 #include <linux/slab.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/list.h>
 #include <linux/hash.h>
 #include <asm-generic/unistd.h>
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <linux/kthread.h>
-#include <linux/spinlock.h>
+#include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/path.h>
 #include <linux/mount.h>
@@ -33,126 +27,131 @@
 #include <linux/acm_f2fs.h>
 
 #define ACM_DEV_NAME "acm"
-#define ACM_DEV_BASE_MINOR 0
-#define ACM_DEV_COUNT 1
+#define ACM_DEV_BASE_MINOR (0)
+#define ACM_DEV_COUNT (1)
 
-#define ACM_MAGIC       'a'
-#define ACM_ADD         _IOW(ACM_MAGIC, 0, struct acm_fwk_pkg)
-#define ACM_DEL         _IOW(ACM_MAGIC, 1, struct acm_fwk_pkg)
-#define ACM_SEARCH      _IOR(ACM_MAGIC, 2, struct acm_mp_node)
-#define ACM_ADD_DIR     _IOR(ACM_MAGIC, 3, struct acm_fwk_dir)
-#define ACM_DEL_DIR     _IOR(ACM_MAGIC, 4, struct acm_fwk_dir)
-#ifdef CONFIG_ACM_DSM
-#define ACM_ADD_DSM     _IOR(ACM_MAGIC, 5, struct acm_mp_node)
-#define ACM_CMD_MAXNR   5
-#else
-#define ACM_CMD_MAXNR   4
-#endif
+#define ACM_MAGIC 'a'
+#define ACM_ADD _IOW(ACM_MAGIC,0,struct acm_data_node_for_fwk_t)
+#define ACM_DEL _IOW(ACM_MAGIC,1,struct acm_data_node_for_fwk_t)
+#define ACM_SEARCH _IOR(ACM_MAGIC,2,struct acm_data_node_for_mp_t)
+#define ACM_CMD_MAXNR (2)
 
-#define ACM_HASHTBL_SZ 512
-#define HASHTBL_MAX_SZ 4096
-#define ACM_PATH_MAX 1024
-#define DEPTH_INIT (-1)
-#define ACM_DIR_MAX 64
-#define ACM_DIR_LIST_MAX 1024
-#define ACM_DNAME_MAX 256
-#define ACM_DMD_LIST_MAX_NODES 2048
-#define MAX_CACHED_DELETE_LOG 3
-#define DELETE_LOG_UPLOAD_INTERVAL_MS 100
+#define ACM_HASH_TABLE_SIZE (512)
+#define ACM_PKGNAME_MAX_LEN (100)
+#define ACM_PIC_PATH (1024)
+#define PIC_NR_INIT (1)
 
-#define PATH_PREFIX_MEDIA "/media"
-#define PATH_PREFIX_STORAGE_EMULATED "/storage/emulated"
+#define ACM_DMD_BUFLEN (1024)
+#define SPACE_LEN (1)
+#define BUF_END_LEN (1)
+#define ACM_PKGNAME_DMD_BUFLEN (ACM_PKGNAME_MAX_LEN + SPACE_LEN)
+#define ACM_PIC_NR_DMD_BUFLEN (sizeof(unsigned long) + SPACE_LEN)
+#define ACM_DMD_PIC_PATH (ACM_DMD_BUFLEN - ACM_PKGNAME_DMD_BUFLEN - ACM_PIC_NR_DMD_BUFLEN - BUF_END_LEN)
+#define PICPATH_PREFIX_STR "/storage/emulated"
+#define PICPATH_PREFIX_STR_SIZE (strlen(PICPATH_PREFIX_STR))
+#define VALID_STR_SIZE(len, maxlen) (((len) > (maxlen)) ? (maxlen) : (len))
+#define ACM_DELETE_INFO (928005000)
+
+#define ERR_PATH_MAX_DENTRIES (6)
+#define ERR_PATH_LAST_DENTRY (0)
+
+#define ACM_DMD_UPLOAD_NR_THRESHOLD (10)
+#define ACM_DMD_MAX_NODES (2048)
+#define ACM_TICK (1000/HZ)
+#define ACM_DMD_UPLOAD_THRESHOLD (60*60*2 * HZ)
+#define ACM_DSM_THRESHOLD (HZ/20)
+#define ACM_DSM_THRESHOLD_MS (ACM_DSM_THRESHOLD * ACM_TICK)
+
+#define UEVENT_KEY_STR_MAX_LEN (10)
+#define ACM_MAX_TRIES (3)
+
+#define PATH_PREFIX "/media/0"
+#define PATH_CAMERA "/DCIM/Camera"
+#define PATH_CAMERA_FULL (PATH_PREFIX PATH_CAMERA)
+#define PATH_DCIM "/DCIM"
+#define PATH_DCIM_FULL (PATH_PREFIX PATH_DCIM)
+#define PATH_SCREENSHOTS "/Pictures/Screenshots"
+#define PATH_SCREENSHOTS_FULL (PATH_PREFIX PATH_SCREENSHOTS)
+#define PATH_PICTURES "/Pictures"
+#define PATH_PICTURES_FULL (PATH_PREFIX PATH_PICTURES)
+#define PATH_WEIXIN "/tencent/MicroMsg/WeiXin"
+#define PATH_WEIXIN_FULL (PATH_PREFIX PATH_WEIXIN)
+#define PATH_MICROMSG "/tencent/MicroMsg"
+#define PATH_MICROMSG_FULL (PATH_PREFIX PATH_MICROMSG)
+#define PATH_QQ_IMAGES "/tencent/QQ_Images"
+#define PATH_QQ_IMAGES_FULL (PATH_PREFIX PATH_QQ_IMAGES)
+#define PATH_TENCENT "/tencent"
+#define PATH_TENCENT_FULL (PATH_PREFIX PATH_TENCENT)
 #define PATH_UNKNOWN "unknown_path"
 
-#define UEVENT_KEY_STR_MAX 16
-#define ENV_DSM_PKGNAME_MAX (UEVENT_KEY_STR_MAX + ACM_PKGNAME_MAX)
-#define ENV_DSM_PATH_MAX 1024
-#define ENV_DSM_NR_STR_MAX 32
-#define ENV_DSM_DEPTH_STR_MAX 32
-#define ENV_DSM_FILE_TYPE_STR_MAX 32
+#define UID_BOUNDARY 10000
+#define ACM_SUCCESS (0)
 
-#define ERR_PATH_MAX_DENTRIES 6
-#define ERR_PATH_LAST_DENTRY 0
+#ifdef CONFIG_ACM_TEST
+#include <linux/debugfs.h>
+#define acm_static
+#define EXPORT_FOR_ACM_TEST(name) EXPORT_SYMBOL(name)
+#else
+#define acm_static static
+#define EXPORT_FOR_ACM_TEST(name)
+#endif
 
-#define ACM_HASH_LEFT_SHIFT 4
-#define ACM_HASH_MASK 0xF0000000L
-#define ACM_HASH_RESULT_MASK 0x7FFFFFFF
-#define ACM_HASH_RIGHT_SHIFT 24
+#ifdef CONFIG_HUAWEI_DSM
+#define ACM_DSM
+#endif
 
-#define DEL_ALLOWED 0
-#define ACM_SUCCESS 0
+#ifdef ACM_DSM
+#include <dsm/dsm_pub.h>
+extern struct dsm_client *f2fs_dclient;
+#endif
+
+enum UEVENT_VAL_INDEX {
+	UEVENT_PKGNAME_INDEX = 0,
+	UEVENT_PIC_PATH_INDEX,
+	UEVENT_LAST_VAL_INDEX
+};
+
+enum CHECK_STATE {
+	DEFAULT_STATE =0,
+	LIST_EMPTY = 1,
+	PKGNAME_DIFF = 1,
+	PIC_PATH_DIFF = 1,
+	SAME_PKG_AND_PATH = 0
+};
 
 /* white list node */
-struct acm_hnode {
+typedef struct acm_hash_node {
 	struct hlist_node hnode;
-	char pkgname[ACM_PKGNAME_MAX];
-};
+	char pkgname[ACM_PKGNAME_MAX_LEN];
+}acm_hash_node_t;
 
-/* a hash table for white list */
-struct acm_htbl {
+typedef struct acm_hash_table {
 	struct hlist_head *head;
-	spinlock_t spinlock;
-	int nr_nodes;
-};
-
-/* data node for directory */
-struct acm_dnode {
-	struct list_head lnode;
-	char dir[ACM_DIR_MAX];
-};
+	struct mutex mutex;
+}acm_hash_table_t;
 
 /* data node for framework and DMD */
-struct acm_lnode {
+typedef struct acm_list_node {
 	struct list_head lnode;
-	char pkgname[ACM_PKGNAME_MAX];
-	char path[ACM_PATH_MAX];
-	int file_type;
-	int depth;
-	int op;
-	/*
-	 * Number of deleted files in a period of time,
-	 * only used in cache
-	 */
-	int nr;
-};
+	char pkgname[ACM_PKGNAME_MAX_LEN];
+	char pic_path[ACM_PIC_PATH];
+	unsigned long pic_nr;
+}acm_list_node_t;
 
-struct acm_list {
+typedef struct acm_list {
 	struct list_head head;
 	unsigned long nr_nodes;
-	spinlock_t spinlock;
-};
+	struct mutex mutex;
+}acm_list_t;
 
-struct acm_cache {
-	struct acm_lnode cache[MAX_CACHED_DELETE_LOG];
-	int count;
-};
+acm_static acm_hash_node_t *acm_hash_search(struct hlist_head *hash,char *keystring);
+acm_static unsigned int ELFHash(char *str);
 
-struct acm_env {
-	char pkgname[ENV_DSM_PKGNAME_MAX];
-	char path[ENV_DSM_PATH_MAX];
-	char depth[ENV_DSM_DEPTH_STR_MAX];
-	char file_type[ENV_DSM_FILE_TYPE_STR_MAX];
-	char nr[ENV_DSM_NR_STR_MAX];
-	char op[ENV_DSM_NR_STR_MAX];
-	char *envp[UEVENT_NUM_ENVP];
-};
+acm_static void acm_fwk_add(struct list_head *head,acm_list_node_t *list_node);
+acm_static void acm_dmd_add(struct list_head *head,acm_list_node_t *list_node);
+acm_static void acm_fwk_upload(void);
+acm_static void acm_dmd_upload(void);
+acm_static enum CHECK_STATE should_add(struct list_head *head, char *pkgname, char *pic_path);
+acm_static int valid_len(char *str,unsigned long len);
 
-/* package name received from framework */
-struct acm_fwk_pkg {
-	char pkgname[ACM_PKGNAME_MAX];
-};
-
-/* directory received from framework */
-struct acm_fwk_dir {
-	char dir[ACM_DIR_MAX];
-};
-
-/* data received from mediaprovider */
-struct acm_mp_node {
-	char pkgname[ACM_PKGNAME_MAX];
-	char path[ACM_PATH_MAX];
-	int file_type;
-	int flag;
-};
-
-#endif /* __DRIVERS_CHAR_ACM_H__ */
+#endif /* __ACM_H__ */

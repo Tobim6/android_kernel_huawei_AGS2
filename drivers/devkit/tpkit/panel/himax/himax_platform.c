@@ -70,7 +70,7 @@ int i2c_himax_write(uint8_t command,uint8_t *data, uint16_t length, uint16_t lim
 	if(data == NULL) {
 		return retval;
 	}
-	if((length > limit_len)||(length >= HX_I2C_MAX_SIZE)){
+	if((length > limit_len)||(length > HX_I2C_MAX_SIZE)){
 		TS_LOG_ERR("%s: i2c_read_block size error %d, over array size%d\n",
 			__func__, length, limit_len);
 		return retval;
@@ -166,56 +166,6 @@ uint8_t himax_int_gpio_read(int pinnum)
 	return gpio_get_value(pinnum);
 }
 
-static int himax_power_regulator_config(void)
-{
-	int ret = NO_ERR;
-	TS_LOG_INFO("%s:called\n", __func__);
-	if(!g_himax_ts_data || !g_himax_ts_data->ts_dev || !g_himax_ts_data->tskit_himax_data) {
-		TS_LOG_ERR("%s, param invalid\n", __func__);
-		return -EINVAL;
-	}
-
-	g_himax_ts_data->vdda = regulator_get(&g_himax_ts_data->ts_dev->dev,"vdda");
-
-	if (IS_ERR(g_himax_ts_data->vdda)) {
-		TS_LOG_ERR("%s, regulator tp vdda not used\n",__func__);
-		goto set_vdda_fail_out;
-	}
-
-	g_himax_ts_data->vddd= regulator_get(&g_himax_ts_data->ts_dev->dev,"vddd");
-
-	if (IS_ERR(g_himax_ts_data->vddd)) {
-		TS_LOG_ERR("%s, regulator tp vddd not used\n",__func__);
-		goto set_vddd_fail_out;
-	}
-
-	/*set voltage for vddd and vdda*/
-	ret = regulator_set_voltage(g_himax_ts_data->vdda,
-			g_himax_ts_data->tskit_himax_data->regulator_ctr.vci_value,
-			g_himax_ts_data->tskit_himax_data->regulator_ctr.vci_value);
-	if (ret < 0) {
-		TS_LOG_ERR("%s:set vdda voltage failed\n", __func__);
-		goto set_vdda_fail_out;
-	}
-
-	ret = regulator_set_voltage(g_himax_ts_data->vddd,1800000, 1800000);
-	if (ret < 0) {
-		TS_LOG_ERR("%s:set vddd voltage failed\n", __func__);
-		goto set_vddd_fail_out;
-	}
-
-	TS_LOG_INFO("%s:power config setting success, ret=%d\n", __func__, ret );
-
-	return NO_ERR;
-
-set_vdda_fail_out:
-	regulator_put(g_himax_ts_data->vdda);
-set_vddd_fail_out:
-	regulator_put(g_himax_ts_data->vddd);
-
-	return HX_ERR;
-
-}
 int himax_gpio_power_config(struct himax_i2c_platform_data *pdata)
 {
 	int err = 0;
@@ -225,27 +175,19 @@ int himax_gpio_power_config(struct himax_i2c_platform_data *pdata)
 		err =  -EINVAL;
 		goto out;
 	}
-	if (g_himax_ts_data->power_support) {
-		if (g_himax_ts_data->power_type_sel == POWER_TYPE_GPIO) {
-			if (pdata->gpio_3v3_en > 0) {
-				err = gpio_request(pdata->gpio_3v3_en, "himax-3v3_en");
-				if (err < 0) {
-					TS_LOG_ERR("%s: request 3v3_en pin failed\n", __func__);
-					goto err_req_3v3;
-				}
-			}
-			if (pdata->gpio_1v8_en > 0) {
-				err = gpio_request(pdata->gpio_1v8_en, "himax-1V8_en");
-				if (err < 0) {
-					TS_LOG_ERR("%s: request gpio_1v8_en pin failed\n", __func__);
-					goto err_req_1v8;
-				}
-			}
-		}else {
-			err = himax_power_regulator_config();
-			if(err != NO_ERR)
-				goto out;
 
+	if (pdata->gpio_3v3_en > 0) {
+		err = gpio_request(pdata->gpio_3v3_en, "himax-3v3_en");
+		if (err < 0) {
+			TS_LOG_ERR("%s: request 3v3_en pin failed\n", __func__);
+			goto err_req_3v3;
+		}
+	}
+	if (pdata->gpio_1v8_en > 0) {
+		err = gpio_request(pdata->gpio_1v8_en, "himax-1V8_en");
+		if (err < 0) {
+			TS_LOG_ERR("%s: request gpio_1v8_en pin failed\n", __func__);
+			goto err_req_1v8;
 		}
 	}
 	if (gpio_is_valid(pdata->gpio_irq)) {
@@ -263,15 +205,9 @@ int himax_gpio_power_config(struct himax_i2c_platform_data *pdata)
 	return err;
 
 err_req_1v8:
-	if (g_himax_ts_data->power_support) {
-		if (g_himax_ts_data->power_type_sel == POWER_TYPE_GPIO)
-			gpio_free(pdata->gpio_1v8_en);
-		}
+	gpio_free(pdata->gpio_1v8_en);
 err_req_3v3:
-	if (g_himax_ts_data->power_support) {
-		if (g_himax_ts_data->power_type_sel == POWER_TYPE_GPIO)
-			gpio_free(pdata->gpio_3v3_en);
-	}
+	gpio_free(pdata->gpio_3v3_en);
 out:
 	TS_LOG_ERR("%s:error exit\n", __func__);
 
@@ -291,44 +227,27 @@ int himax_gpio_power_on(struct himax_i2c_platform_data *pdata)
 			return err;
 		}
 	}
-	if (g_himax_ts_data->power_support) {
-		if (g_himax_ts_data->power_type_sel == POWER_TYPE_GPIO) {
-			if (pdata->gpio_3v3_en >= 0) {
-				err = gpio_direction_output(pdata->gpio_3v3_en, 1);
-				if (err) {
-					TS_LOG_ERR("unable to set direction for gpio [%d]\n",
-						pdata->gpio_3v3_en);
-					return err;
-				}
-				TS_LOG_INFO("3v3_en pin =%d\n", gpio_get_value(pdata->gpio_3v3_en));
-			}
-			usleep_range(VCCA_DELAY_TIME, VCCA_DELAY_TIME);
-			if (pdata->gpio_1v8_en >= 0) {
-				err = gpio_direction_output(pdata->gpio_1v8_en, 1);
-				if (err) {
-					TS_LOG_ERR("unable to set direction for gpio [%d]\n",
-						pdata->gpio_1v8_en);
-					return err;
-				}
-				TS_LOG_INFO("gpio_1v8_en pin =%d\n", gpio_get_value(pdata->gpio_1v8_en));
-			}
-			msleep(VCCD_DELAY_TIME);
-		}else{
-			err = regulator_enable(g_himax_ts_data->vdda);
-			if (err < 0) {
-				TS_LOG_ERR("%s, failed to enable himax vdda, rc = %d\n", __func__, err);
-				return err;
-			}
-			usleep_range(VCCA_DELAY_TIME, VCCA_DELAY_TIME);
-			err = regulator_enable(g_himax_ts_data->vddd);
-			if (err < 0) {
-				TS_LOG_ERR("%s, failed to enable himax vddd, rc = %d\n", __func__, err);
-				return err;
-			}
-			msleep(VCCD_DELAY_TIME);
+	if (pdata->gpio_3v3_en >= 0) {
+		err = gpio_direction_output(pdata->gpio_3v3_en, 1);
+		if (err) {
+			TS_LOG_ERR("unable to set direction for gpio [%d]\n",
+				pdata->gpio_3v3_en);
+			return err;
 		}
+		TS_LOG_INFO("3v3_en pin =%d\n", gpio_get_value(pdata->gpio_3v3_en));
+	}
+	usleep_range(VCCA_DELAY_TIME, VCCA_DELAY_TIME);
+	if (pdata->gpio_1v8_en >= 0) {
+		err = gpio_direction_output(pdata->gpio_1v8_en, 1);
+		if (err) {
+			TS_LOG_ERR("unable to set direction for gpio [%d]\n",
+				pdata->gpio_1v8_en);
+			return err;
+		}
+		TS_LOG_INFO("gpio_1v8_en pin =%d\n", gpio_get_value(pdata->gpio_1v8_en));
 	}
 
+	msleep(VCCD_DELAY_TIME);
 	if (pdata->gpio_reset >= 0) {
 		err = gpio_direction_output(pdata->gpio_reset, 1);
 		if (err) {
@@ -348,26 +267,14 @@ void himax_gpio_power_deconfig(struct himax_i2c_platform_data *pdata)
 	if(NULL == pdata) {
 		return;
 	}
-	if (g_himax_ts_data->power_support) {
-		if (g_himax_ts_data->power_type_sel == POWER_TYPE_GPIO) {
-			if (pdata->gpio_reset >= 0) {
-				gpio_free(pdata->gpio_reset);
-			}
-			if (pdata->gpio_3v3_en >= 0) {
-				gpio_free(pdata->gpio_3v3_en);
-			}
-			if (pdata->gpio_1v8_en >= 0) {
-				gpio_free(pdata->gpio_1v8_en);
-			}
-		}else {
-			if (!IS_ERR(g_himax_ts_data->vdda)) {
-				regulator_put(g_himax_ts_data->vdda);
-			}
-
-			if (!IS_ERR(g_himax_ts_data->vddd)) {
-				regulator_put(g_himax_ts_data->vddd);
-			}
-		}
+	if (pdata->gpio_reset >= 0) {
+		gpio_free(pdata->gpio_reset);
+	}
+	if (pdata->gpio_3v3_en >= 0) {
+		gpio_free(pdata->gpio_3v3_en);
+	}
+	if (pdata->gpio_1v8_en >= 0) {
+		gpio_free(pdata->gpio_1v8_en);
 	}
 	if (gpio_is_valid(pdata->gpio_irq)) {
 		gpio_free(pdata->gpio_irq);
@@ -379,45 +286,25 @@ void himax_gpio_power_deconfig(struct himax_i2c_platform_data *pdata)
 void himax_gpio_power_off(struct himax_i2c_platform_data *pdata)
 {
 	int err = 0;
-	if (g_himax_ts_data->power_support) {
-		TS_LOG_INFO("%s:enter\n", __func__);
-
-		if (g_himax_ts_data->power_type_sel == POWER_TYPE_GPIO) {
-			if(NULL == pdata) {
-				return;
-			}
-
-			if (pdata->gpio_3v3_en >= 0) {
-				err = gpio_direction_output(pdata->gpio_3v3_en, 0);
-				if (err) {
-					TS_LOG_ERR("unable to set direction for gpio [%d]\n",
-						pdata->gpio_3v3_en);
-					return;
-				}
-			}
-			if (pdata->gpio_1v8_en >= 0) {
-				err = gpio_direction_output(pdata->gpio_1v8_en, 0);
-				if (err) {
-					TS_LOG_ERR("unable to set direction for gpio [%d]\n",
-						pdata->gpio_1v8_en);
-					return;
-				}
-			}
-		}else {
-			TS_LOG_INFO("vdda disable is called\n");
-			err = regulator_disable(g_himax_ts_data->vdda);
-			if (err < 0) {
-				TS_LOG_ERR("%s, failed to disable himax vdda, rc = %d\n", __func__, err);
-				return;
-			}
-
-			TS_LOG_INFO("vdda disable is called\n");
-			err = regulator_disable(g_himax_ts_data->vddd);
-			if (err < 0) {
-				TS_LOG_ERR("%s, failed to disable himax vddd, rc = %d\n", __func__, err);
-				return;
-			}
-		}
-		TS_LOG_INFO("%s:exit\n", __func__);
+	TS_LOG_INFO("%s:enter\n", __func__);
+	if(NULL == pdata) {
+		return;
 	}
+	if (pdata->gpio_3v3_en >= 0) {
+		err = gpio_direction_output(pdata->gpio_3v3_en, 0);
+		if (err) {
+			TS_LOG_ERR("unable to set direction for gpio [%d]\n",
+				pdata->gpio_3v3_en);
+			return;
+		}
+	}
+	if (pdata->gpio_1v8_en >= 0) {
+		err = gpio_direction_output(pdata->gpio_1v8_en, 0);
+		if (err) {
+			TS_LOG_ERR("unable to set direction for gpio [%d]\n",
+				pdata->gpio_1v8_en);
+			return;
+		}
+	}
+	TS_LOG_INFO("%s:exit\n", __func__);
 }

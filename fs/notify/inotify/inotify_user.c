@@ -115,10 +115,10 @@ static unsigned int inotify_poll(struct file *file, poll_table *wait)
 	int ret = 0;
 
 	poll_wait(file, &group->notification_waitq, wait);
-	spin_lock(&group->notification_lock);
+	mutex_lock(&group->notification_mutex);
 	if (!fsnotify_notify_queue_is_empty(group))
 		ret = POLLIN | POLLRDNORM;
-	spin_unlock(&group->notification_lock);
+	mutex_unlock(&group->notification_mutex);
 
 	return ret;
 }
@@ -138,7 +138,7 @@ static int round_event_name_len(struct fsnotify_event *fsn_event)
  * enough to fit in "count". Return an error pointer if
  * not large enough.
  *
- * Called with the group->notification_lock held.
+ * Called with the group->notification_mutex held.
  */
 static struct fsnotify_event *get_one_event(struct fsnotify_group *group,
 					    size_t count)
@@ -157,7 +157,7 @@ static struct fsnotify_event *get_one_event(struct fsnotify_group *group,
 	if (event_size > count)
 		return ERR_PTR(-EINVAL);
 
-	/* held the notification_lock the whole time, so this is the
+	/* held the notification_mutex the whole time, so this is the
 	 * same event we peeked above */
 	fsnotify_remove_first_event(group);
 
@@ -234,9 +234,9 @@ static ssize_t inotify_read(struct file *file, char __user *buf,
 
 	add_wait_queue(&group->notification_waitq, &wait);
 	while (1) {
-		spin_lock(&group->notification_lock);
+		mutex_lock(&group->notification_mutex);
 		kevent = get_one_event(group, count);
-		spin_unlock(&group->notification_lock);
+		mutex_unlock(&group->notification_mutex);
 
 		pr_debug("%s: group=%p kevent=%p\n", __func__, group, kevent);
 
@@ -300,13 +300,13 @@ static long inotify_ioctl(struct file *file, unsigned int cmd,
 
 	switch (cmd) {
 	case FIONREAD:
-		spin_lock(&group->notification_lock);
+		mutex_lock(&group->notification_mutex);
 		list_for_each_entry(fsn_event, &group->notification_list,
 				    list) {
 			send_len += sizeof(struct inotify_event);
 			send_len += round_event_name_len(fsn_event);
 		}
-		spin_unlock(&group->notification_lock);
+		mutex_unlock(&group->notification_mutex);
 		ret = put_user(send_len, (int __user *) p);
 		break;
 	}
@@ -337,7 +337,7 @@ static int inotify_find_inode(const char __user *dirname, struct path *path, uns
 	if (error)
 		return error;
 	/* you can only watch an inode if you have read permissions on it */
-	error = inode_permission2(path->mnt, path->dentry->d_inode, MAY_READ);
+	error = inode_permission(path->dentry->d_inode, MAY_READ);
 	if (error)
 		path_put(path);
 	return error;
@@ -522,7 +522,6 @@ static int inotify_update_existing_watch(struct fsnotify_group *group,
 	__u32 old_mask, new_mask;
 	__u32 mask;
 	int add = (arg & IN_MASK_ADD);
-	int create = (arg & IN_MASK_CREATE);
 	int ret;
 
 	mask = inotify_arg_to_mask(arg);
@@ -530,10 +529,6 @@ static int inotify_update_existing_watch(struct fsnotify_group *group,
 	fsn_mark = fsnotify_find_inode_mark(group, inode);
 	if (!fsn_mark)
 		return -ENOENT;
-	else if (create) {
-		ret = -EEXIST;
-		goto out;
-	}
 
 	i_mark = container_of(fsn_mark, struct inotify_inode_mark, fsn_mark);
 
@@ -563,7 +558,6 @@ static int inotify_update_existing_watch(struct fsnotify_group *group,
 	/* return the wd */
 	ret = i_mark->wd;
 
-out:
 	/* match the get from fsnotify_find_mark() */
 	fsnotify_put_mark(fsn_mark);
 
@@ -734,10 +728,6 @@ SYSCALL_DEFINE3(inotify_add_watch, int, fd, const char __user *, pathname,
 	if (unlikely(!f.file))
 		return -EBADF;
 
-	/* IN_MASK_ADD and IN_MASK_CREATE don't make sense together */
-	if (unlikely((mask & IN_MASK_ADD) && (mask & IN_MASK_CREATE)))
-		return -EINVAL;
-
 	/* verify that this is indeed an inotify instance */
 	if (unlikely(f.file->f_op != &inotify_fops)) {
 		ret = -EINVAL;
@@ -835,7 +825,7 @@ static int __init inotify_user_setup(void)
 	BUILD_BUG_ON(IN_ISDIR != FS_ISDIR);
 	BUILD_BUG_ON(IN_ONESHOT != FS_IN_ONESHOT);
 
-	BUG_ON(hweight32(ALL_INOTIFY_BITS) != 22);
+	BUG_ON(hweight32(ALL_INOTIFY_BITS) != 21);
 
 	inotify_inode_mark_cachep = KMEM_CACHE(inotify_inode_mark, SLAB_PANIC);
 

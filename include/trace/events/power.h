@@ -63,28 +63,6 @@ DEFINE_EVENT(cpu, cpu_idle,
 	TP_ARGS(state, cpu_id)
 );
 
-TRACE_EVENT(powernv_throttle,
-
-	TP_PROTO(int chip_id, const char *reason, int pmax),
-
-	TP_ARGS(chip_id, reason, pmax),
-
-	TP_STRUCT__entry(
-		__field(int, chip_id)
-		__string(reason, reason)
-		__field(int, pmax)
-	),
-
-	TP_fast_assign(
-		__entry->chip_id = chip_id;
-		__assign_str(reason, reason);
-		__entry->pmax = pmax;
-	),
-
-	TP_printk("Chip %d Pmax %d %s", __entry->chip_id,
-		  __entry->pmax, __get_str(reason))
-);
-
 TRACE_EVENT(pstate_sample,
 
 	TP_PROTO(u32 core_busy,
@@ -94,8 +72,7 @@ TRACE_EVENT(pstate_sample,
 		u64 mperf,
 		u64 aperf,
 		u64 tsc,
-		u32 freq,
-		u32 io_boost
+		u32 freq
 		),
 
 	TP_ARGS(core_busy,
@@ -105,8 +82,7 @@ TRACE_EVENT(pstate_sample,
 		mperf,
 		aperf,
 		tsc,
-		freq,
-		io_boost
+		freq
 		),
 
 	TP_STRUCT__entry(
@@ -118,7 +94,6 @@ TRACE_EVENT(pstate_sample,
 		__field(u64, aperf)
 		__field(u64, tsc)
 		__field(u32, freq)
-		__field(u32, io_boost)
 		),
 
 	TP_fast_assign(
@@ -130,10 +105,9 @@ TRACE_EVENT(pstate_sample,
 		__entry->aperf = aperf;
 		__entry->tsc = tsc;
 		__entry->freq = freq;
-		__entry->io_boost = io_boost;
 		),
 
-	TP_printk("core_busy=%lu scaled=%lu from=%lu to=%lu mperf=%llu aperf=%llu tsc=%llu freq=%lu io_boost=%lu",
+	TP_printk("core_busy=%lu scaled=%lu from=%lu to=%lu mperf=%llu aperf=%llu tsc=%llu freq=%lu ",
 		(unsigned long)__entry->core_busy,
 		(unsigned long)__entry->scaled_busy,
 		(unsigned long)__entry->from,
@@ -141,8 +115,7 @@ TRACE_EVENT(pstate_sample,
 		(unsigned long long)__entry->mperf,
 		(unsigned long long)__entry->aperf,
 		(unsigned long long)__entry->tsc,
-		(unsigned long)__entry->freq,
-		(unsigned long)__entry->io_boost
+		(unsigned long)__entry->freq
 		)
 
 );
@@ -651,15 +624,14 @@ TRACE_EVENT(memlat_dev_update,
 #endif
 
 #ifdef CONFIG_HISI_DEVFREQ_DEVBW
-TRACE_EVENT(memlat_set_dev_freq,
+TRACE_EVENT(memlat_set_ddr_freq,
 
-	TP_PROTO(const char *name, const char *reason, int cpu,
+	TP_PROTO(const char *reason, int cpu,
 		 unsigned long min_core_freq, unsigned long cpu_freq, unsigned long new_ddr_freq),
 
-	TP_ARGS(name, reason, cpu, min_core_freq, cpu_freq, new_ddr_freq),
+	TP_ARGS(reason, cpu, min_core_freq, cpu_freq, new_ddr_freq),
 
 	TP_STRUCT__entry(
-		__string(name, name)
 		__string(reason, reason)
 		__field(int, cpu)
 		__field(unsigned long, min_core_freq)
@@ -668,7 +640,6 @@ TRACE_EVENT(memlat_set_dev_freq,
 	),
 
 	TP_fast_assign(
-		__assign_str(name, name);
 		__assign_str(reason, reason);
 		__entry->cpu = cpu;
 		__entry->min_core_freq = min_core_freq;
@@ -676,8 +647,7 @@ TRACE_EVENT(memlat_set_dev_freq,
 		__entry->new_ddr_freq = new_ddr_freq;
 	),
 
-	TP_printk("dev:%s reason=%s  cpu=%d min_core_freq=%lu cpu_freq=%lu new_ddr_freq=%lu",
-		__get_str(name),
+	TP_printk("reason=%s  cpu=%d min_core_freq=%lu cpu_freq=%lu new_ddr_freq=%lu",
 		__get_str(reason),
 		__entry->cpu,
 		__entry->min_core_freq,

@@ -16,6 +16,9 @@
 #define PD_DPM_PRV_H_INCLUDED
 
 #include <huawei_platform/usb/pd/richtek/rt1711h.h>
+#ifdef CONFIG_HUAWEI_DSM
+#include <dsm/dsm_pub.h>
+#endif
 
 typedef struct __eval_snk_request_result {
 	int src_sel;
@@ -135,12 +138,15 @@ static inline void dpm_vdm_get_svid_ops(
 	pd_event_t *pd_event, uint16_t *svid, uint8_t *ops)
 {
 	uint32_t vdm_hdr;
+	char buf[1024] = { 0 };
 
 	if (pd_event->pd_msg == NULL) {
-		PD_ERR("the pd msg is NULL\n");
+		snprintf(buf, sizeof(buf), "the pd msg is NULL\n");
+#ifdef CONFIG_HUAWEI_DSM
+		rt_dsm_report(ERROR_RT_PD_MSG_NULL, buf);
+#endif
 		return;
 	}
-
 	vdm_hdr = pd_event->pd_msg->payload[0];
 	if (svid)
 		*svid = PD_VDO_VID(vdm_hdr);

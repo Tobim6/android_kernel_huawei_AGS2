@@ -26,35 +26,10 @@
 #include <linux/hw_breakpoint.h>
 #include <linux/cn_proc.h>
 #include <linux/compat.h>
+#ifdef CONFIG_HUAWEI_PTRACE_POKE_ON
+#else
 #include <chipset_common/kernel_harden/hw_ptrace_log.h>
-/*
- * Access another process' address space via ptrace.
- * Source/target buffer must be kernel space,
- * Do not walk the page table directly, use get_user_pages
- */
-int ptrace_access_vm(struct task_struct *tsk, unsigned long addr,
-		     void *buf, int len, unsigned int gup_flags)
-{
-	struct mm_struct *mm;
-	int ret;
-
-	mm = get_task_mm(tsk);
-	if (!mm)
-		return 0;
-
-	if (!tsk->ptrace ||
-	    (current != tsk->parent) ||
-	    ((get_dumpable(mm) != SUID_DUMP_USER) &&
-	     !ptracer_capable(tsk, mm->user_ns))) {
-		mmput(mm);
-		return 0;
-	}
-
-	ret = __access_remote_vm(tsk, mm, addr, buf, len, gup_flags);
-	mmput(mm);
-
-	return ret;
-}
+#endif
 
 
 void __ptrace_link(struct task_struct *child, struct task_struct *new_parent,
@@ -74,7 +49,9 @@ void __ptrace_link(struct task_struct *child, struct task_struct *new_parent,
  */
 static void ptrace_link(struct task_struct *child, struct task_struct *new_parent)
 {
-	__ptrace_link(child, new_parent, current_cred());
+	rcu_read_lock();
+	__ptrace_link(child, new_parent, __task_cred(new_parent));
+	rcu_read_unlock();
 }
 
 /**
@@ -110,8 +87,7 @@ void __ptrace_unlink(struct task_struct *child)
 	const struct cred *old_cred;
 	BUG_ON(!child->ptrace);
 
-	clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
-
+	child->ptrace = 0;
 	child->parent = child->real_parent;
 	list_del_init(&child->ptrace_entry);
 	old_cred = child->ptracer_cred;
@@ -119,7 +95,7 @@ void __ptrace_unlink(struct task_struct *child)
 	put_cred(old_cred);
 
 	spin_lock(&child->sighand->siglock);
-	child->ptrace = 0;
+
 	/*
 	 * Clear all pending traps and TRAPPING.  TRAPPING should be
 	 * cleared regardless of JOBCTL_STOP_PENDING.  Do it explicitly.
@@ -256,12 +232,10 @@ static int ptrace_check_attach(struct task_struct *child, bool ignore_state)
 
 static int ptrace_has_cap(struct user_namespace *ns, unsigned int mode)
 {
-	int check_cap = (mode & PTRACE_MODE_PERF_EVENT) ? CAP_PERF_EVENT : CAP_SYS_PTRACE;
-
 	if (mode & PTRACE_MODE_NOAUDIT)
-		return has_ns_capability_noaudit(current, ns, check_cap);
+		return has_ns_capability_noaudit(current, ns, CAP_SYS_PTRACE);
 	else
-		return has_ns_capability(current, ns, check_cap);
+		return has_ns_capability(current, ns, CAP_SYS_PTRACE);
 }
 
 /* Returns 0 on success, -errno on denial. */
@@ -427,14 +401,8 @@ unlock_creds:
 	mutex_unlock(&task->signal->cred_guard_mutex);
 out:
 	if (!retval) {
-		/*
-		 * We do not bother to change retval or clear JOBCTL_TRAPPING
-		 * if wait_on_bit() was interrupted by SIGKILL. The tracer will
-		 * not return to user-mode, it will exit and clear this bit in
-		 * __ptrace_unlink() if it wasn't already cleared by the tracee;
-		 * and until then nobody can ptrace this task.
-		 */
-		wait_on_bit(&task->jobctl, JOBCTL_TRAPPING_BIT, TASK_KILLABLE);
+		wait_on_bit(&task->jobctl, JOBCTL_TRAPPING_BIT,
+			    TASK_UNINTERRUPTIBLE);
 		proc_ptrace_connector(task, PTRACE_ATTACH);
 	}
 
@@ -530,6 +498,7 @@ static int ptrace_detach(struct task_struct *child, unsigned int data)
 
 	/* Architecture-specific hardware disable .. */
 	ptrace_disable(child);
+	clear_tsk_thread_flag(child, TIF_SYSCALL_TRACE);
 
 	write_lock_irq(&tasklist_lock);
 	/*
@@ -576,8 +545,7 @@ int ptrace_readdata(struct task_struct *tsk, unsigned long src, char __user *dst
 		int this_len, retval;
 
 		this_len = (len > sizeof(buf)) ? sizeof(buf) : len;
-		retval = ptrace_access_vm(tsk, src, buf, this_len, FOLL_FORCE);
-
+		retval = access_process_vm(tsk, src, buf, this_len, 0);
 		if (!retval) {
 			if (copied)
 				break;
@@ -604,8 +572,7 @@ int ptrace_writedata(struct task_struct *tsk, char __user *src, unsigned long ds
 		this_len = (len > sizeof(buf)) ? sizeof(buf) : len;
 		if (copy_from_user(buf, src, this_len))
 			return -EFAULT;
-		retval = ptrace_access_vm(tsk, dst, buf, this_len,
-				FOLL_FORCE | FOLL_WRITE);
+		retval = access_process_vm(tsk, dst, buf, this_len, 1);
 		if (!retval) {
 			if (copied)
 				break;
@@ -627,8 +594,8 @@ static int ptrace_setoptions(struct task_struct *child, unsigned long data)
 		return -EINVAL;
 
 	if (unlikely(data & PTRACE_O_SUSPEND_SECCOMP)) {
-		if (!IS_ENABLED(CONFIG_CHECKPOINT_RESTORE) ||
-		    !IS_ENABLED(CONFIG_SECCOMP))
+		if (!config_enabled(CONFIG_CHECKPOINT_RESTORE) ||
+		    !config_enabled(CONFIG_SECCOMP))
 			return -EINVAL;
 
 		if (!capable(CAP_SYS_ADMIN))
@@ -722,7 +689,7 @@ static int ptrace_peek_siginfo(struct task_struct *child,
 			break;
 
 #ifdef CONFIG_COMPAT
-		if (unlikely(in_compat_syscall())) {
+		if (unlikely(is_compat_task())) {
 			compat_siginfo_t __user *uinfo = compat_ptr(data);
 
 			if (copy_siginfo_to_user32(uinfo, &info) ||
@@ -895,8 +862,11 @@ int ptrace_request(struct task_struct *child, long request,
 		return generic_ptrace_peekdata(child, addr, data);
 	case PTRACE_POKETEXT:
 	case PTRACE_POKEDATA:
-		record_ptrace_info_before_return(request,child);
+#ifdef CONFIG_HUAWEI_PTRACE_POKE_ON
 		return generic_ptrace_pokedata(child, addr, data);
+#else
+		return record_ptrace_info_before_return_EIO(request,child);
+#endif
 #ifdef PTRACE_OLDSETOPTIONS
 	case PTRACE_OLDSETOPTIONS:
 #endif
@@ -1168,7 +1138,7 @@ int generic_ptrace_peekdata(struct task_struct *tsk, unsigned long addr,
 	unsigned long tmp;
 	int copied;
 
-	copied = ptrace_access_vm(tsk, addr, &tmp, sizeof(tmp), FOLL_FORCE);
+	copied = access_process_vm(tsk, addr, &tmp, sizeof(tmp), 0);
 	if (copied != sizeof(tmp))
 		return -EIO;
 	return put_user(tmp, (unsigned long __user *)data);
@@ -1179,8 +1149,7 @@ int generic_ptrace_pokedata(struct task_struct *tsk, unsigned long addr,
 {
 	int copied;
 
-	copied = ptrace_access_vm(tsk, addr, &data, sizeof(data),
-			FOLL_FORCE | FOLL_WRITE);
+	copied = access_process_vm(tsk, addr, &data, sizeof(data), 1);
 	return (copied == sizeof(data)) ? 0 : -EIO;
 }
 
@@ -1197,8 +1166,7 @@ int compat_ptrace_request(struct task_struct *child, compat_long_t request,
 	switch (request) {
 	case PTRACE_PEEKTEXT:
 	case PTRACE_PEEKDATA:
-		ret = ptrace_access_vm(child, addr, &word, sizeof(word),
-				FOLL_FORCE);
+		ret = access_process_vm(child, addr, &word, sizeof(word), 0);
 		if (ret != sizeof(word))
 			ret = -EIO;
 		else
@@ -1207,11 +1175,14 @@ int compat_ptrace_request(struct task_struct *child, compat_long_t request,
 
 	case PTRACE_POKETEXT:
 	case PTRACE_POKEDATA:
-		record_ptrace_info_before_return(request,child);
-		ret = ptrace_access_vm(child, addr, &data, sizeof(data),
-				FOLL_FORCE | FOLL_WRITE);
+#ifdef CONFIG_HUAWEI_PTRACE_POKE_ON
+		ret = access_process_vm(child, addr, &data, sizeof(data), 1);
 		ret = (ret != sizeof(data) ? -EIO : 0);
 		break;
+#else
+		ret = record_ptrace_info_before_return_EIO(request,child);
+		break;
+#endif
 	case PTRACE_GETEVENTMSG:
 		ret = put_user((compat_ulong_t) child->ptrace_message, datap);
 		break;

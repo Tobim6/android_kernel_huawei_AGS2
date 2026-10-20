@@ -33,11 +33,7 @@
 #include <linux/mutex.h>
 #include <linux/shmem_fs.h>
 #include "ashmem.h"
-#define CREATE_TRACE_POINTS
-#include "trace/ashmem.h"
-#ifdef CONFIG_HW_FDLEAK
-#include <chipset_common/hwfdleak/fdleak.h>
-#endif
+
 #define ASHMEM_NAME_PREFIX "dev/ashmem/"
 #define ASHMEM_NAME_PREFIX_LEN (sizeof(ASHMEM_NAME_PREFIX) - 1)
 #define ASHMEM_FULL_NAME_LEN (ASHMEM_NAME_LEN + ASHMEM_NAME_PREFIX_LEN)
@@ -111,34 +107,21 @@ static struct kmem_cache *ashmem_range_cachep __read_mostly;
 #define range_on_lru(range) \
 	((range)->purged == ASHMEM_NOT_PURGED)
 
-static inline int page_range_subsumes_range(struct ashmem_range *range,
-					    size_t start, size_t end)
-{
-	return (((range)->pgstart >= (start)) && ((range)->pgend <= (end)));
-}
+#define page_range_subsumes_range(range, start, end) \
+	(((range)->pgstart >= (start)) && ((range)->pgend <= (end)))
 
-static inline int page_range_subsumed_by_range(struct ashmem_range *range,
-					       size_t start, size_t end)
-{
-	return (((range)->pgstart <= (start)) && ((range)->pgend >= (end)));
-}
+#define page_range_subsumed_by_range(range, start, end) \
+	(((range)->pgstart <= (start)) && ((range)->pgend >= (end)))
 
-static inline int page_in_range(struct ashmem_range *range, size_t page)
-{
-	return (((range)->pgstart <= (page)) && ((range)->pgend >= (page)));
-}
+#define page_in_range(range, page) \
+	(((range)->pgstart <= (page)) && ((range)->pgend >= (page)))
 
-static inline int page_range_in_range(struct ashmem_range *range,
-				      size_t start, size_t end)
-{
-	return (page_in_range(range, start) || page_in_range(range, end) ||
-		page_range_subsumes_range(range, start, end));
-}
+#define page_range_in_range(range, start, end) \
+	(page_in_range(range, start) || page_in_range(range, end) || \
+		page_range_subsumes_range(range, start, end))
 
-static inline int range_before_page(struct ashmem_range *range, size_t page)
-{
-	return ((range)->pgend < (page));
-}
+#define range_before_page(range, page) \
+	((range)->pgend < (page))
 
 #define PROT_MASK		(PROT_EXEC | PROT_READ | PROT_WRITE)
 
@@ -267,9 +250,7 @@ static int ashmem_open(struct inode *inode, struct file *file)
 	asma->prot_mask = PROT_MASK;
 	file->private_data = asma;
 	mutex_init(&asma->lock);
-#ifdef CONFIG_HW_FDLEAK
-	fdleak_report(FDLEAK_WP_ASHMEM, 0);
-#endif
+
 	return 0;
 }
 
@@ -297,9 +278,7 @@ static int ashmem_release(struct inode *ignored, struct file *file)
 	if (asma->file)
 		fput(asma->file);
 	kmem_cache_free(ashmem_area_cachep, asma);
-#ifdef CONFIG_HW_FDLEAK
-	fdleak_report(FDLEAK_WP_ASHMEM, 1);
-#endif
+
 	return 0;
 }
 
@@ -356,23 +335,24 @@ static loff_t ashmem_llseek(struct file *file, loff_t offset, int origin)
 	mutex_lock(&asma->lock);
 
 	if (asma->size == 0) {
-		mutex_unlock(&asma->lock);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
 
 	if (!asma->file) {
-		mutex_unlock(&asma->lock);
-		return -EBADF;
+		ret = -EBADF;
+		goto out;
 	}
-
-	mutex_unlock(&asma->lock);
 
 	ret = vfs_llseek(asma->file, offset, origin);
 	if (ret < 0)
-		return ret;
+		goto out;
 
 	/** Copy f_pos from backing file, since f_ops->llseek() sets it */
 	file->f_pos = asma->file->f_pos;
+
+out:
+	mutex_unlock(&asma->lock);
 	return ret;
 }
 
@@ -383,23 +363,8 @@ static inline vm_flags_t calc_vm_may_flags(unsigned long prot)
 	       _calc_vm_trans(prot, PROT_EXEC,  VM_MAYEXEC);
 }
 
-static int ashmem_vmfile_mmap(struct file *file, struct vm_area_struct *vma)
-{
-	/* do not allow to mmap ashmem backing shmem file directly */
-	return -EPERM;
-}
-
-static unsigned long
-ashmem_vmfile_get_unmapped_area(struct file *file, unsigned long addr,
-				unsigned long len, unsigned long pgoff,
-				unsigned long flags)
-{
-	return current->mm->get_unmapped_area(file, addr, len, pgoff, flags);
-}
-
 static int ashmem_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	static struct file_operations vmfile_fops;
 	struct ashmem_area *asma = file->private_data;
 	int ret = 0;
 
@@ -412,8 +377,8 @@ static int ashmem_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 
 	/* requested protection bits must match our allowed protection mask */
-	if (unlikely((vma->vm_flags & ~calc_vm_prot_bits(asma->prot_mask, 0)) &
-		     calc_vm_prot_bits(PROT_MASK, 0))) {
+	if (unlikely((vma->vm_flags & ~calc_vm_prot_bits(asma->prot_mask)) &
+		     calc_vm_prot_bits(PROT_MASK))) {
 		ret = -EPERM;
 		goto out;
 	}
@@ -434,19 +399,6 @@ static int ashmem_mmap(struct file *file, struct vm_area_struct *vma)
 		}
 		vmfile->f_mode |= FMODE_LSEEK;
 		asma->file = vmfile;
-		/*
-		 * override mmap operation of the vmfile so that it can't be
-		 * remapped which would lead to creation of a new vma with no
-		 * asma permission checks. Have to override get_unmapped_area
-		 * as well to prevent VM_BUG_ON check for f_ops modification.
-		 */
-		if (!vmfile_fops.mmap) {
-			vmfile_fops = *vmfile->f_op;
-			vmfile_fops.mmap = ashmem_vmfile_mmap;
-			vmfile_fops.get_unmapped_area =
-					ashmem_vmfile_get_unmapped_area;
-		}
-		vmfile->f_op = &vmfile_fops;
 	}
 	get_file(asma->file);
 
@@ -576,12 +528,8 @@ static int set_name(struct ashmem_area *asma, void __user *name)
 	/* cannot change an existing mapping's name */
 	if (unlikely(asma->file))
 		ret = -EINVAL;
-	else {
+	else
 		strcpy(asma->name + ASHMEM_NAME_PREFIX_LEN, local_name);
-#ifdef CONFIG_HW_FDLEAK
-		trace_ashmem_set_name(local_name, current->tgid);
-#endif
-	}
 
 	mutex_unlock(&asma->lock);
 	return ret;
@@ -719,8 +667,8 @@ restart:
 			return 0;
 		if (page_range_in_range(range, pgstart, pgend)) {
 			mutex_lock(&ashmem_lru_mutex);
-			pgstart = min(range->pgstart, pgstart);
-			pgend = max(range->pgend, pgend);
+			pgstart = min_t(size_t, range->pgstart, pgstart);
+			pgend = max_t(size_t, range->pgend, pgend);
 			purged |= range->purged;
 			range_del(range);
 			mutex_unlock(&ashmem_lru_mutex);
@@ -765,31 +713,29 @@ static int ashmem_pin_unpin(struct ashmem_area *asma, unsigned long cmd,
 	size_t pgstart, pgend;
 	int ret = -EINVAL;
 
-	mutex_lock(&asma->lock);
-
 	if (unlikely(!asma->file))
-		goto out_unlock;
+		return -EINVAL;
 
-	if (unlikely(copy_from_user(&pin, p, sizeof(pin)))) {
-		ret = -EFAULT;
-		goto out_unlock;
-	}
+	if (unlikely(copy_from_user(&pin, p, sizeof(pin))))
+		return -EFAULT;
 
 	/* per custom, you can pass zero for len to mean "everything onward" */
 	if (!pin.len)
 		pin.len = PAGE_ALIGN(asma->size) - pin.offset;
 
 	if (unlikely((pin.offset | pin.len) & ~PAGE_MASK))
-		goto out_unlock;
+		return -EINVAL;
 
 	if (unlikely(((__u32)-1) - pin.offset < pin.len))
-		goto out_unlock;
+		return -EINVAL;
 
 	if (unlikely(PAGE_ALIGN(asma->size) < pin.offset + pin.len))
-		goto out_unlock;
+		return -EINVAL;
 
 	pgstart = pin.offset / PAGE_SIZE;
 	pgend = pgstart + (pin.len / PAGE_SIZE) - 1;
+
+	mutex_lock(&asma->lock);
 
 	switch (cmd) {
 	case ASHMEM_PIN:
@@ -803,7 +749,6 @@ static int ashmem_pin_unpin(struct ashmem_area *asma, unsigned long cmd,
 		break;
 	}
 
-out_unlock:
 	mutex_unlock(&asma->lock);
 
 	return ret;
@@ -898,14 +843,14 @@ static struct miscdevice ashmem_misc = {
 
 static int __init ashmem_init(void)
 {
-	int ret = -ENOMEM;
+	int ret;
 
 	ashmem_area_cachep = kmem_cache_create("ashmem_area_cache",
 					       sizeof(struct ashmem_area),
 					       0, 0, NULL);
 	if (unlikely(!ashmem_area_cachep)) {
 		pr_err("failed to create slab cache\n");
-		goto out;
+		return -ENOMEM;
 	}
 
 	ashmem_range_cachep = kmem_cache_create("ashmem_range_cache",
@@ -913,13 +858,13 @@ static int __init ashmem_init(void)
 						0, 0, NULL);
 	if (unlikely(!ashmem_range_cachep)) {
 		pr_err("failed to create slab cache\n");
-		goto out_free1;
+		return -ENOMEM;
 	}
 
 	ret = misc_register(&ashmem_misc);
 	if (unlikely(ret)) {
 		pr_err("failed to register misc device!\n");
-		goto out_free2;
+		return ret;
 	}
 
 	register_shrinker(&ashmem_shrinker);
@@ -927,12 +872,5 @@ static int __init ashmem_init(void)
 	pr_info("initialized\n");
 
 	return 0;
-
-out_free2:
-	kmem_cache_destroy(ashmem_range_cachep);
-out_free1:
-	kmem_cache_destroy(ashmem_area_cachep);
-out:
-	return ret;
 }
 device_initcall(ashmem_init);

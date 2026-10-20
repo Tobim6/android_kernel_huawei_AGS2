@@ -19,7 +19,7 @@ struct boot_log_struct
 int boot_log_count = 0;
 static DEFINE_MUTEX(hw_boottime_lock);
 static int hw_boottime_enabled = 1;
-#define BOOTUP_DONE "[INFOR]_wm_boot_animation_done"
+#define START_ZYGOT "[INFOR]_start_zygote"
 
 int __init_or_module do_boottime_initcall(initcall_t fn)
 {
@@ -111,7 +111,7 @@ void boot_record(char *str)
 #else
     ts = sched_clock();
 #endif
-    if((ts == 0) || (str == NULL))
+    if(ts == 0)
     {
         printk("[boottime] invalid boottime point\n");
         return;
@@ -121,7 +121,7 @@ void boot_record(char *str)
         printk("[boottime] no enough boottime buffer\n");
         return;
     }
-    if (strncmp(BOOTUP_DONE, str, strlen(BOOTUP_DONE)) == 0)
+    if (strncmp(START_ZYGOT, str, strlen(START_ZYGOT)) == 0)
     {
         hw_boottime_enabled = 0;//zygote start
     }
@@ -130,8 +130,7 @@ void boot_record(char *str)
     hw_boottime[boot_log_count].Second = Second(tmp, 1000000000);
     tmp = ts;
     hw_boottime[boot_log_count].mSecond = mSecond(tmp, 1000000000);
-    memset(&hw_boottime[boot_log_count].event, 0, sizeof(hw_boottime[boot_log_count].event));
-    strncpy( (char*)&hw_boottime[boot_log_count].event, str, BOOT_STR_SIZE - 1 );
+    strncpy( (char*)&hw_boottime[boot_log_count].event, str, BOOT_STR_SIZE );
     boot_log_count++;
     mutex_unlock(&hw_boottime_lock);
 }

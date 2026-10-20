@@ -10,19 +10,12 @@
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/hisi/hi64xx_hifi_misc.h>
+#include <linux/hisi/hilog.h>
 #include <linux/hisi/hi64xx/hi6402_dsp_regs.h>
 #include "hi64xx_hifi_debug.h"
 #include "hi6402_hifi_config.h"
 #include "hi64xx_hifi_img_dl.h"
 #include "../soundtrigger/soundtrigger_dma_drv.h"
-
-static unsigned int hi6402_sc_fs_ctrls_h[] = {
-	HI64xx_SC_FS_S1_CTRL_H,
-	HI64xx_SC_FS_S2_CTRL_H,
-	HI64xx_SC_FS_S3_CTRL_H,
-	HI64xx_SC_FS_S4_CTRL_H,
-	HI64xx_SC_FS_MISC_CTRL,
-};
 
 static void hi6402_hifi_autoclk_enable(bool enable)
 {
@@ -117,6 +110,7 @@ static int hi6402_hifi_cfg_clk(bool enable)
 	ret = hi6402_hifi_cfg_sw_mode(HI6402_CFG_SW_ENTER);
 	if(0 != ret) {
 		HI64XX_DSP_ERROR("%s dsp state err\n",__FUNCTION__);
+		HiLOGE("audio","hi64xx_hifi_misc", "%s dsp state err\n",__FUNCTION__);
 	}
 
 	/* switch hi6402 cfg_clk */
@@ -400,18 +394,14 @@ static void hi6402_dsp_if_set_bypass(unsigned int dsp_if_id, bool enable)
 
 	unsigned int i2s_id = dsp_if_id / 2;
 	unsigned int direct =
-		(dsp_if_id & 0x1) ? HI64XX_HIFI_PCM_OUT : HI64XX_HIFI_PCM_IN;
+		(dsp_if_id & 0x1) ? HI6402_HIFI_PCM_OUT : HI6402_HIFI_PCM_IN;
 
 	IN_FUNCTION;
 
-	if (i2s_id >= ARRAY_SIZE(hi6402_sc_src_lr_ctrls_m)) {
-		HI64XX_DSP_ERROR("i2s id error, %d\n", i2s_id);
-		WARN_ON(1);
-		return;
-	}
+	BUG_ON(i2s_id >= ARRAY_SIZE(hi6402_sc_src_lr_ctrls_m));
 
-	bit = (direct == HI64XX_HIFI_PCM_IN) ? 6 : 7;
-	if(dsp_if_id == HI64XX_HIFI_DSP_IF_PORT_8)
+	bit = (direct == HI6402_HIFI_PCM_IN) ? 6 : 7;
+	if(dsp_if_id == HI6402_HIFI_DSP_IF_PORT_8)
 		bit = 4;
 	addr = hi6402_sc_src_lr_ctrls_m[i2s_id];
 
@@ -424,69 +414,6 @@ static void hi6402_dsp_if_set_bypass(unsigned int dsp_if_id, bool enable)
 	OUT_FUNCTION;
 }
 
-static bool hi6402_check_dp_clk(void)
-{
-	unsigned int count = 1000;
-	while(--count) {
-		if(1 == hi64xx_hifi_read_reg(HI64xx_CODEC_DP_CLK_EN)) {
-			return true;
-		} else {
-			usleep_range(100, 110);
-		}
-	}
-
-	return false;
-}
-
-static int hi6402_dsp_if_set_sample_rate(unsigned int dsp_if_id,
-						unsigned int sample_rate_in, unsigned int sample_rate_out)
-{
-	unsigned int addr = 0;
-	unsigned char mask = 0;
-	unsigned char sample_rate_index = 0;
-
-	unsigned int i2s_id = dsp_if_id / 2;
-	unsigned int direct =
-		(dsp_if_id & 0x1) ? HI64XX_HIFI_PCM_OUT : HI64XX_HIFI_PCM_IN;
-
-	IN_FUNCTION;
-
-	if (i2s_id >= ARRAY_SIZE(hi6402_sc_fs_ctrls_h)) {
-		HI64XX_DSP_ERROR("i2s id error, %d\n", i2s_id);
-		WARN_ON(1);
-		return 0;
-	}
-
-	addr = hi6402_sc_fs_ctrls_h[i2s_id];
-
-	if (!hi64xx_get_sample_rate_index(sample_rate_in, &sample_rate_index)) {
-		HI64XX_DSP_ERROR("sample_rate_in is invalid %d!! \n", sample_rate_in);
-		return 0;
-	}
-
-	if (HI64XX_HIFI_DSP_IF_PORT_8 != dsp_if_id) {
-		mask = (direct == HI64XX_HIFI_PCM_IN) ? 0xf : 0xf0;
-		sample_rate_index = (direct == HI64XX_HIFI_PCM_IN)
-							? sample_rate_index : sample_rate_index << 4;
-	} else {
-		mask = (direct == HI64XX_HIFI_PCM_IN) ? 0x70 : 0xc;
-		if (HI64XX_HIFI_PCM_OUT == direct) {
-			if (HI64XX_HIFI_PCM_SAMPLE_RATE_48K > sample_rate_index) {
-				HI64XX_DSP_ERROR("unsupport sample_rate_in %d!! \n", sample_rate_in);
-				return 0;
-			}
-			sample_rate_index = sample_rate_index - HI64XX_HIFI_PCM_SAMPLE_RATE_48K;
-		}
-		sample_rate_index = (direct == HI64XX_HIFI_PCM_IN)
-							? sample_rate_index << 4 : sample_rate_index << 2;
-	}
-
-	hi64xx_hifi_reg_write_bits(addr, sample_rate_index, mask);
-
-	OUT_FUNCTION;
-
-	return 0;
-}
 
 int hi6402_hifi_config_init(struct snd_soc_codec *codec,
 				struct hi64xx_resmgr *resmgr,
@@ -528,8 +455,6 @@ int hi6402_hifi_config_init(struct snd_soc_codec *codec,
 	dsp_config.dtcm_start_addr = HI6402_DTCM_START_ADDR;
 	dsp_config.dtcm_size = HI6402_DTCM_SIZE;
 	dsp_config.bus_sel = bus_sel;
-	dsp_config.mlib_to_ap_msg_addr = HI6402_MLIB_TO_AP_MSG_ADDR;
-	dsp_config.mlib_to_ap_msg_size = HI6402_MLIB_TO_AP_MSG_SIZE;
 
 	dsp_config.dsp_ops.init = hi6402_hifi_init;
 	dsp_config.dsp_ops.deinit = hi6402_hifi_deinit;
@@ -545,10 +470,6 @@ int hi6402_hifi_config_init(struct snd_soc_codec *codec,
 	dsp_config.dsp_ops.dsp_power_ctrl = NULL;
 	dsp_config.dsp_ops.dsp_if_set_bypass = hi6402_dsp_if_set_bypass;
 	dsp_config.dsp_ops.set_dsp_div = NULL;
-	dsp_config.dsp_ops.check_dp_clk = hi6402_check_dp_clk;
-	dsp_config.dsp_ops.check_i2s2_clk = NULL;
-	dsp_config.dsp_ops.set_sample_rate = hi6402_dsp_if_set_sample_rate;
-	dsp_config.dsp_ops.config_usb_low_power = NULL;
 
 	if (codec->dev && of_property_read_bool(codec->dev->of_node, "hi6402-soundtrigger-if-4smartpa")) {
 		HI64XX_DSP_INFO("%s: cust soundtrigger fasttrans ctrl for 4smartpa\n", __FUNCTION__);

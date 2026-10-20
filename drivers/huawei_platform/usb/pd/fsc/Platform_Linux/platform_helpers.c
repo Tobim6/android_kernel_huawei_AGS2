@@ -15,22 +15,12 @@
 #include <linux/sched.h>
 #include <linux/kthread.h>
 #include <linux/irqflags.h>
-#include <linux/version.h>
+
 #include "fusb30x_global.h"                                                     // Chip structure access
 #include "../core/core.h"                                                       // Core access
 #include "platform_helpers.h"
 #include "huawei_platform/power/charger/charger_ap/direct_charger/loadswitch/rt9748/rt9748.h"
 #include "../core/platform.h"
-#include "../core/TypeC_Types.h"
-#include "../core/TypeC.h"
-#include "../core/vendor_info.h"
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-#include <uapi/linux/sched/types.h>
-#endif
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0))
-#include <linux/sched/types.h>
-#endif
 
 #ifdef CONFIG_DUAL_ROLE_USB_INTF
 #include <linux/usb/class-dual-role.h>
@@ -38,6 +28,7 @@
 #ifdef FSC_DEBUG
 #include "hostcomm.h"
 #include "../core/PD_Types.h"                                                   // State Log states
+#include "../core/TypeC_Types.h"                                                // State Log states
 #endif // FSC_DEBUG
 #ifdef CONFIG_CONTEXTHUB_PD
 extern void hw_pd_wait_dptx_ready(void);
@@ -53,6 +44,7 @@ const char* FUSB_DT_INTERRUPT_INTN =    "fsc_interrupt_int_n";      // Name of t
 #define FUSB_DT_GPIO_INTN               "fairchild,int_n"           // Name of the Int_N GPIO pin in the Device Tree
 #define FUSB_DT_GPIO_VBUS_5V            "fairchild,vbus5v"          // Name of the VBus 5V GPIO pin in the Device Tree
 #define FUSB_DT_GPIO_VBUS_OTHER         "fairchild,vbusOther"       // Name of the VBus Other GPIO pin in the Device Tree
+#define FUSB_TIMERS_DELAY               120                         // PRWap delay
 
 #ifdef FSC_DEBUG
 #define FUSB_DT_GPIO_DEBUG_SM_TOGGLE    "fairchild,dbg_sm"          // Name of the debug State Machine toggle GPIO pin in the Device Tree
@@ -63,7 +55,7 @@ const char* FUSB_DT_INTERRUPT_INTN =    "fsc_interrupt_int_n";      // Name of t
 static irqreturn_t _fusb_isr_intn(int irq, void *dev_id);
 #endif  // FSC_INTERRUPT_TRIGGERED
 
-
+extern FSC_BOOL IsPRSwap;
 
 
 
@@ -115,11 +107,10 @@ static int fusb_get_dual_role_mode(void)
 {
 	struct fusb30x_chip* chip = fusb30x_GetChip();
 	int mode = DUAL_ROLE_PROP_MODE_NONE;
-	FSC_PRINT("%s + orientation %d, sourceOrSink %d, mode %d\n", __func__, chip->orientation,sourceOrSink, mode);
-
+	FSC_PRINT("%s +\n", __func__);
 	if (chip->orientation != NONE)
 	{
-		if (sourceOrSink == SOURCE)
+		if (chip->sourceOrSink == SOURCE)
 		{
 			mode = DUAL_ROLE_PROP_MODE_DFP;
 		}
@@ -132,6 +123,7 @@ static int fusb_get_dual_role_mode(void)
 	{
 		mode = DUAL_ROLE_PROP_MODE_NONE;
 	}
+	FSC_PRINT("%s - orientation %d, sourceOrSink %d, mode %d\n", __func__, chip->orientation, chip->sourceOrSink, mode);
 	return mode;
 }
 static int fusb_dual_role_get_prop(struct dual_role_phy_instance *dual_role,
@@ -215,20 +207,17 @@ static int fusb_dual_role_prop_is_writeable(
 	struct dual_role_phy_instance *dual_role, enum dual_role_property prop)
 {
 	FSC_PRINT("%s +\n", __func__);
-
 	switch (prop) {
-	/* pr and dr return 0 */
-	case DUAL_ROLE_PROP_PR:
-	case DUAL_ROLE_PROP_DR:
-		return 0;
-
-	default:
-		return 1;
+		case DUAL_ROLE_PROP_PR:
+		case DUAL_ROLE_PROP_DR:
+			return 0;
 	}
+	return 1;
 }
 static int fusb_dual_role_set_prop(struct dual_role_phy_instance *dual_role,
 			enum dual_role_property prop, const unsigned int *val)
 {
+	struct fusb30x_chip* chip = fusb30x_GetChip();
 	int mode = DUAL_ROLE_PROP_MODE_NONE;
 	mode = fusb_get_dual_role_mode();
 	FSC_PRINT("%s +  prop= %d   val=  %d   mode = %d\n", __func__, prop, *val, mode);
@@ -245,7 +234,6 @@ static int fusb_dual_role_set_prop(struct dual_role_phy_instance *dual_role,
 			break;
 		case DUAL_ROLE_PROP_PR:
 			FSC_PRINT("%s DUAL_ROLE_PROP_PR\n", __func__);
-
 			break;
 		case DUAL_ROLE_PROP_DR:
 			FSC_PRINT("%s DUAL_ROLE_PROP_DR\n", __func__);
@@ -259,10 +247,11 @@ static int fusb_dual_role_set_prop(struct dual_role_phy_instance *dual_role,
 }
 FSC_S32 fusb_dual_role_phy_init(void)
 {
+	FSC_PRINT("%s +\n", __func__);
 	struct dual_role_phy_desc *dual_desc = NULL;
 	struct dual_role_phy_instance *dual_role = NULL;
 	struct fusb30x_chip* chip = fusb30x_GetChip();
-	FSC_PRINT("%s +\n", __func__);
+
 	if (!chip) {
 		pr_err("invalid fusb30x_chip\n");
 		return -EINVAL;
@@ -609,6 +598,11 @@ void fusb_GPIO_Cleanup(void)
     }
 
 #ifdef FSC_INTERRUPT_TRIGGERED
+    if (gpio_is_valid(chip->gpio_IntN) && chip->gpio_IntN_irq != -1)    // -1 indicates that we don't have an IRQ to free
+    {
+        devm_free_irq(&chip->client->dev, chip->gpio_IntN_irq, chip);
+    }
+
     wake_lock_destroy(&chip->fusb302_wakelock);
 #endif // FSC_INTERRUPT_TRIGGERED
 
@@ -1032,11 +1026,7 @@ enum hrtimer_restart _fusb_TimerHandler(struct hrtimer* timer)
     FSC_PRINT("FUSB  %s - Hard Reset Thread Started\n", __func__);
     //kthread_run(_send_hard_reset, (void*)&dummy, "hard_reset_thread");
     //wake_up_processs(chip->hard_reset_thread);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_queue_work(&chip->hardreset_worker, &chip->hardreset_work);
-#else
     queue_kthread_work(&chip->hardreset_worker, &chip->hardreset_work);
-#endif
     return HRTIMER_NORESTART;
 }
 
@@ -1079,11 +1069,7 @@ enum hrtimer_restart _fusb_force_state_timeout(struct hrtimer* timer)
     }
 
     FSC_PRINT("FUSB %s - Force State Timeout\n", __func__);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_queue_work(&chip->set_drp_worker, &chip->set_drp_work);
-#else
     queue_kthread_work(&chip->set_drp_worker, &chip->set_drp_work);
-#endif
 
     return HRTIMER_NORESTART;
 }
@@ -1104,11 +1090,7 @@ enum hrtimer_restart _fusb_vbus_timeout(struct hrtimer* timer)
     }
 
     FSC_PRINT("FUSB %s - Vbus Timeout\n", __func__);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_queue_work(&chip->vbus_timeout_worker, &chip->vbus_timeout_work);
-#else
     queue_kthread_work(&chip->vbus_timeout_worker, &chip->vbus_timeout_work);
-#endif
     return HRTIMER_NORESTART;
 }
 
@@ -1129,11 +1111,7 @@ enum hrtimer_restart _fusb_ccdebounce_timeout(struct hrtimer* timer)
 
     FSC_PRINT("FUSB %s - Timer Timeout\n", __func__);
     core_set_expire(CC_DEBOUNCE);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_queue_work(&chip->main_worker, &chip->main_work);
-#else
     queue_kthread_work(&chip->main_worker, &chip->main_work);
-#endif
 
     return HRTIMER_NORESTART;
 }
@@ -1156,11 +1134,7 @@ enum hrtimer_restart _fusb_pddebounce_timeout(struct hrtimer* timer)
     FSC_PRINT("FUSB %s - Timer Timeout\n", __func__);
 
     core_set_expire(PD_DEBOUNCE);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_queue_work(&chip->main_worker, &chip->main_work);
-#else
     queue_kthread_work(&chip->main_worker, &chip->main_work);
-#endif
 
     return HRTIMER_NORESTART;
 }
@@ -1183,11 +1157,7 @@ enum hrtimer_restart _fusb_statetimer_timeout(struct hrtimer* timer)
     FSC_PRINT("FUSB %s - Timer Timeout\n", __func__);
 
     core_set_expire(STATE_TIMER);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_queue_work(&chip->main_worker, &chip->main_work);
-#else
     queue_kthread_work(&chip->main_worker, &chip->main_work);
-#endif
 
     return HRTIMER_NORESTART;
 }
@@ -1210,11 +1180,7 @@ enum hrtimer_restart _fusb_policystatetimer_timeout(struct hrtimer* timer)
     FSC_PRINT("FUSB %s - Timer Timeout\n", __func__);
 
     core_set_expire(POLICY_STATE_TIMER);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_queue_work(&chip->main_worker, &chip->main_work);
-#else
     queue_kthread_work(&chip->main_worker, &chip->main_work);
-#endif
 
     return HRTIMER_NORESTART;
 }
@@ -1237,11 +1203,7 @@ enum hrtimer_restart _fusb_noresponsetimer_timeout(struct hrtimer* timer)
     FSC_PRINT("FUSB %s - Timer Timeout\n", __func__);
 
     core_set_expire(NO_RESPONSE_TIMER);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_queue_work(&chip->main_worker, &chip->main_work);
-#else
     queue_kthread_work(&chip->main_worker, &chip->main_work);
-#endif
 
     return HRTIMER_NORESTART;
 }
@@ -1264,33 +1226,25 @@ enum hrtimer_restart _fusb_loopresettimer_timeout(struct hrtimer* timer)
         return HRTIMER_NORESTART;
 }
 
-enum hrtimer_restart _fusb_vbusonlytimer_timeout(struct hrtimer* timer)
+enum hrtimer_restart _fusb_prswaptimer_timeout(struct hrtimer* timer)
 {
-        struct fusb30x_chip* chip = fusb30x_GetChip();
-
+       struct fusb30x_chip* chip = fusb30x_GetChip();
         if (!chip)
         {
                 pr_err("FUSB %s - Error: Chip structure is NULL!\n", __func__);
                 return HRTIMER_NORESTART;
         }
-
         if (!timer)
         {
                 pr_err("FUSB %s - Error: High resolution timer is NULL!\n", __func__);
                 return HRTIMER_NORESTART;
         }
-
         pr_info("FUSB %s - Timer Timeout\n", __func__);
-        core_set_expire(VBUS_ONLY_TIMER);
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-        kthread_queue_work(&chip->vbus_only_worker, &chip->vbus_only_work);
-#else
-        queue_kthread_work(&chip->vbus_only_worker, &chip->vbus_only_work);
-#endif
-
+        IsPRSwap = FALSE;
         return HRTIMER_NORESTART;
+
 }
+
 void fusb_InitializeTimer(void)
 {
     struct fusb30x_chip* chip = fusb30x_GetChip();
@@ -1332,8 +1286,11 @@ void fusb_InitializeTimer(void)
     hrtimer_init(&chip->timer_loopresettimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
     chip->timer_loopresettimer.function = _fusb_loopresettimer_timeout;
 
-    hrtimer_init(&chip->timer_vbusonlytimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-    chip->timer_vbusonlytimer.function = _fusb_vbusonlytimer_timeout;
+    if(platform_get_pr_swap_wa_enabled())
+    {
+        hrtimer_init(&chip->timer_prswaptimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+        chip->timer_prswaptimer.function = _fusb_prswaptimer_timeout;
+    }
 
     pr_debug("FUSB  %s - Timer initialized!\n", __func__);
 }
@@ -3725,8 +3682,6 @@ void fusb_InitChipData(void)
     struct device_node* node = NULL;
     struct fusb30x_chip* chip = fusb30x_GetChip();
     int ret = 0;
-    unsigned int sink_pdo_number;
-
     if (chip == NULL)
     {
         pr_err("%s - Chip structure is null!\n", __func__);
@@ -3738,42 +3693,25 @@ void fusb_InitChipData(void)
         chip->vconn_swap_to_on_supported = of_property_read_bool(node, "vconn_swap_to_on_supported");
         chip->vconn_swap_to_off_supported = of_property_read_bool(node, "vconn_swap_to_off_supported");
         chip->dp_enabled = of_property_read_bool(node, "dp_enabled");
+        chip->pr_swap_wa = of_property_read_bool(node, "pr_swap_wa");
         chip->product_type_ama = of_property_read_bool(node, "product_type_ama");
         chip->modal_operation_supported = of_property_read_bool(node, "modal_operation_supported");
-        chip->discover_mode_supported = of_property_read_bool(node, "discover_mode_supported");
-        chip->enter_mode_supported = of_property_read_bool(node, "enter_mode_supported");
-        chip->discover_svid_supported = of_property_read_bool(node, "discover_svid_supported");
-        ret = of_property_read_u32(node, "pd,sink-pdo-number", &sink_pdo_number);
-
-        if (ret) {
-            pr_err("%s - Missing pd sink-pdo-number\n", __func__);
-            chip->sink_pdo_number = Num_Snk_PDOs;
-        } else {
-            chip->sink_pdo_number = sink_pdo_number;
-        }
-
-        FSC_PRINT("FUSB %s -chip->sink_pdo_number=%d, Num_Snk_PDOs=%d, sink_pdo_number=%d,\n", __func__, chip->sink_pdo_number, Num_Snk_PDOs, sink_pdo_number);
     }
     else {
         pr_err("%s - Could not get vendor_info node\n", __func__);
         chip->vconn_swap_to_on_supported = 0;
         chip->vconn_swap_to_off_supported = 0;
         chip->dp_enabled = 0;
+        chip->pr_swap_wa = 0;
         chip->product_type_ama = 0;
         chip->modal_operation_supported =0;
-        chip->discover_mode_supported = 0;
-        chip->enter_mode_supported = 0;
-        chip->discover_svid_supported = 0;
-        chip->sink_pdo_number = Num_Snk_PDOs;
     }
     pr_err("%s Device Tree Validation Check vconn_swap_to_on_supported: %d\n", __func__,chip->vconn_swap_to_on_supported);
     pr_err("%s Device Tree Validation Check vconn_swap_to_off_supported: %d\n", __func__,chip->vconn_swap_to_off_supported);
     pr_err("%s Device Tree Validation Check dp_enabled: %d\n", __func__,chip->dp_enabled);
+    pr_err("%s Device Tree Validation Check pr_swap_wa: %d\n", __func__,chip->pr_swap_wa);
     pr_err("%s Device Tree Validation Check product_type_ama: %d\n", __func__,chip->product_type_ama);
     pr_err("%s Device Tree Validation Check modal_operation_supported: %d\n", __func__,chip->modal_operation_supported);
-    pr_err("%s Device Tree Validation Check discover_mode_supported: %d\n", __func__,chip->discover_mode_supported);
-    pr_err("%s Device Tree Validation Check enter_mode_supported: %d\n", __func__,chip->enter_mode_supported);
-    pr_err("%s Device Tree Validation Check discover_svid_supported: %d\n", __func__,chip->discover_svid_supported);
 
 #ifdef FSC_DEBUG
     chip->dbgTimerTicks = 0;
@@ -3809,6 +3747,19 @@ void fusb_InitChipData(void)
 /*********************************************************************************************************************/
 #ifdef FSC_INTERRUPT_TRIGGERED
 
+void delay_schedule_isPRSwap(void)
+{
+    struct fusb30x_chip* chip = fusb30x_GetChip();
+
+    if (!chip)
+    {
+        pr_err("FUSB %s - Error: Chip structure is NULL!\n", __func__);
+        return;
+    }
+
+    fusb_StartTimers(&chip->timer_prswaptimer, FUSB_TIMERS_DELAY);
+}
+
 static void fusb302_hardreset_work_handler(struct kthread_work *work)
 {
 	//hard reset;;
@@ -3840,23 +3791,6 @@ static void fusb302_set_drp_work_handler(struct kthread_work *work)
     core_set_try_snk();
 }
 
-static void fusb302_vbus_only_work_handler(struct kthread_work *work)
-{
-    struct fusb30x_chip* chip = fusb30x_GetChip();
-
-    if (!chip)
-    {
-        pr_err("FUSB %s - Error: Chip structure is NULL!\n", __func__);
-        return;
-    }
-
-    FSC_PRINT("FUSB - %s\n", __func__);
-
-    if (ConnState == AudioAccessory || ConnState == Unattached)
-    {
-        platform_notify_attached_vbus_only();
-    }
-}
 
 static void fusb302_main_work_handler(struct kthread_work *work)
 {
@@ -3917,7 +3851,7 @@ FSC_S32 fusb_EnableInterrupts(void)
     pr_debug("%s - Success: Requested INT_N IRQ: '%d'\n", __func__, chip->gpio_IntN_irq);
 
     /* Request threaded IRQ because we will likely sleep while handling the interrupt, trigger is active-low, don't handle concurrent interrupts */
-    ret = devm_request_threaded_irq(&chip->client->dev, chip->gpio_IntN_irq, NULL, _fusb_isr_intn, IRQF_ONESHOT | IRQF_TRIGGER_FALLING | IRQF_NO_SUSPEND, FUSB_DT_INTERRUPT_INTN, chip);  // devm_* allocation/free handled by system
+    ret = devm_request_threaded_irq(&chip->client->dev, chip->gpio_IntN_irq, NULL, _fusb_isr_intn, IRQF_ONESHOT | IRQF_TRIGGER_FALLING, FUSB_DT_INTERRUPT_INTN, chip);  // devm_* allocation/free handled by system
     if (ret)
     {
         dev_err(&chip->client->dev, "%s - Error: Unable to request threaded IRQ for INT_N GPIO! Error code: %d\n", __func__, ret);
@@ -3928,75 +3862,29 @@ FSC_S32 fusb_EnableInterrupts(void)
     enable_irq_wake(chip->gpio_IntN_irq);
 
     //B.Yang
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_init_worker(&chip->hardreset_worker);
-#else
     init_kthread_worker(&chip->hardreset_worker);
-#endif
     chip->hardreset_worker_task = kthread_run(kthread_worker_fn,
             &chip->hardreset_worker, "fusb302 hard reset");
     sched_setscheduler(chip->hardreset_worker_task, SCHED_FIFO, &param);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_init_work(&chip->hardreset_work, fusb302_hardreset_work_handler);
-#else
     init_kthread_work(&chip->hardreset_work, fusb302_hardreset_work_handler);
-#endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_init_worker(&chip->vbus_timeout_worker);
-#else
     init_kthread_worker(&chip->vbus_timeout_worker);
-#endif
     chip->vbus_timeout_worker_task = kthread_run(kthread_worker_fn,
 	    &chip->vbus_timeout_worker, "fusb302 vbus timeout");
     sched_setscheduler(chip->vbus_timeout_worker_task, SCHED_FIFO, &param);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_init_work(&chip->vbus_timeout_work, fusb302_vbus_timeout_work_handler);
-#else
     init_kthread_work(&chip->vbus_timeout_work, fusb302_vbus_timeout_work_handler);
-#endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_init_worker(&chip->main_worker);
-#else
     init_kthread_worker(&chip->main_worker);
-#endif
     chip->main_worker_task = kthread_run(kthread_worker_fn,
         &chip->main_worker, "fusb302 main worker");
     sched_setscheduler(chip->main_worker_task, SCHED_FIFO, &param);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_init_work(&chip->main_work, fusb302_main_work_handler);
-#else
     init_kthread_work(&chip->main_work, fusb302_main_work_handler);
-#endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_init_worker(&chip->set_drp_worker);
-#else
     init_kthread_worker(&chip->set_drp_worker);
-#endif
     chip->set_drp_worker_task = kthread_run(kthread_worker_fn,
         &chip->set_drp_worker, "fusb302 set drp worker");
     sched_setscheduler(chip->set_drp_worker_task, SCHED_FIFO, &param);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_init_work(&chip->set_drp_work, fusb302_set_drp_work_handler);
-#else
     init_kthread_work(&chip->set_drp_work, fusb302_set_drp_work_handler);
-#endif
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_init_worker(&chip->vbus_only_worker);
-#else
-    init_kthread_worker(&chip->vbus_only_worker);
-#endif
-    chip->vbus_only_worker_task = kthread_run(kthread_worker_fn,
-        &chip->vbus_only_worker, "vbus only worker");
-    sched_setscheduler(chip->vbus_only_worker_task, SCHED_FIFO, &param);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    kthread_init_work(&chip->vbus_only_work, fusb302_vbus_only_work_handler);
-#else
-    init_kthread_work(&chip->vbus_only_work, fusb302_vbus_only_work_handler);
-#endif
 
     return 0;
 }
@@ -4021,6 +3909,7 @@ static irqreturn_t _fusb_isr_intn(FSC_S32 irq, void *dev_id)
 
     sched_setscheduler(current, SCHED_FIFO, &param);
 
+    FSC_PRINT("FUSB _fusb_isr_intn, current)(%p)\n",current);
     fusb_StopTimers(&chip->timer_wake_unlock);
     mutex_lock(&chip->thread_lock);
     wake_lock(&chip->fusb302_wakelock);

@@ -28,6 +28,7 @@ typedef struct _tag_hwsensor
     int                                         cam_dev_num;
     struct mutex                                lock;
     hwcam_data_table_t*                         cfg;
+    struct ion_handle*                          cfg_hdl;
 } hwsensor_t;
 
 #define SENSOR_POWER_DOWN     0
@@ -37,12 +38,8 @@ typedef struct _tag_hwsensor
 #define to_hwsensor_t(i) container_of((i), hwsensor_t, lock)
 #define SD2Sensor(sd) container_of(sd, hwsensor_t, subdev)
 #define I2S(i) container_of(i, sensor_t, intf)
-extern int memset_s(void *dest, size_t destMax, int c, size_t count);
-extern int memcpy_s(void *dest, size_t destMax, const void *src, size_t count);
-extern int snprintf_s(char* strDest, size_t destMax, size_t count, const char* format, ...);
-extern int strncpy_s(char *strDest, size_t destMax, const char *strSrc, size_t count);
 
-//lint -save -e838 -e732 -e747 -e713 -e826 -e715 -e785 -e606 -e774 -esym(753,*)
+//lint -save -e838 -e732 -e747 -e713 -e826 -e715 -e785  -e774 -esym(753,*)
 //lint -save -e578 -e438 -e30 -e142 -e64 -e429 -esym(528,*)
 static int hw_sensor_subdev_internal_close(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
@@ -68,6 +65,10 @@ static int hw_sensor_subdev_internal_close(struct v4l2_subdev *sd, struct v4l2_s
 
 static int hwsensor_init(hwsensor_t* s_ctrl)
 {
+
+    //sensor_t *sensor = I2S(s_ctrl->intf);
+    cam_info("%s enter.\n", __func__);
+    //to do
     return 0;
 }
 
@@ -78,6 +79,7 @@ static int hwsensor_subdev_open(
 {
     hwsensor_t* s = NULL;
     s = SD2Sensor(sd);
+    HWCAM_CFG_INFO("instance(0x%pK). \n", s);
     hwsensor_init(s);
     return 0;
 }
@@ -88,12 +90,20 @@ hwsensor_subdev_close(
         struct v4l2_subdev_fh* fh)
 {
     hwsensor_t* s = NULL;
+    struct ion_handle* hdl = NULL;
     hwcam_data_table_t* cfg = NULL;
+    HWCAM_CFG_INFO("hwsensor_sbudev close");
     hw_sensor_subdev_internal_close(sd,fh);
 
     s = SD2Sensor(sd);
+    swap(s->cfg_hdl, hdl);
     swap(s->cfg, cfg);
+    if (hdl) {
+        HWCAM_CFG_ERR("release sensor driver data table! \n");
+        hwcam_cfgdev_release_data_table(hdl);
+    }
 
+    HWCAM_CFG_INFO("instance(0x%pK). \n", s);
     return 0;
 }
 
@@ -102,41 +112,28 @@ hwsensor_subdev_get_info(
         hwsensor_t* s,
         hwsensor_info_t* info)
 {
+    unsigned int index;
     int i=0;
-    int rc = 0;
-    sensor_t *sensor = NULL;
+	sensor_t *sensor = NULL;
     if (NULL == s || NULL == info){
         HWCAM_CFG_ERR("s or info is null");
         return -1;
     }
-
     sensor = I2S(s->intf);
-    memset_s(info->name, DEVICE_NAME_SIZE, 0, DEVICE_NAME_SIZE);
-    rc = strncpy_s(info->name, DEVICE_NAME_SIZE - 1, hwsensor_intf_get_name(s->intf),
-        strlen(hwsensor_intf_get_name(s->intf))+1);
-    if (rc != 0) {
-        cam_err("%s sensor device name copy error.\n", __func__);
-        return -1;
-    }
+    memset(info->name, 0, DEVICE_NAME_SIZE);
+    memcpy(info->name, hwsensor_intf_get_name(s->intf),
+            DEVICE_NAME_SIZE - 1);
     info->vcm_enable= sensor->board_info->vcm_enable;
 
-    memset(info->extend_name, 0, DEVICE_NAME_SIZE);
-
     memset(info->vcm_name, 0, DEVICE_NAME_SIZE);
-
     if(info->vcm_enable) {
-        rc = strncpy_s(info->vcm_name, DEVICE_NAME_SIZE -1,sensor->board_info->vcm_name,
-            strlen(sensor->board_info->vcm_name)+1);
-        if (rc != 0) {
-            cam_err("%s vcm name copy error.\n", __func__);
-            return -1;
-        }
+        memcpy(info->vcm_name, sensor->board_info->vcm_name, DEVICE_NAME_SIZE - 1);
     } else {
-        memset_s(info->vcm_name, DEVICE_NAME_SIZE, 0, DEVICE_NAME_SIZE);
+        memset(info->vcm_name, 0, DEVICE_NAME_SIZE);
     }
     info->dev_id = s->cam_dev_num;
-    info->mount_position =
-        (hwsensor_position_kind_t)sensor->board_info->sensor_index;
+    index = sensor->board_info->sensor_index;
+    info->mount_position = (hwsensor_position_kind_t)index;
     info->extisp_type = sensor->board_info->extisp_type;
     info->module_type = sensor->board_info->module_type;
     info->flash_pos_type = sensor->board_info->flash_pos_type;
@@ -144,30 +141,64 @@ hwsensor_subdev_get_info(
         info->csi_id[i] = sensor->board_info->csi_id[i];
         info->i2c_id[i] = sensor->board_info->i2c_id[i];
     }
-    info->phyinfo_count = 0;
-    if (sensor->board_info->phyinfo_valid > 0) {
-        info->phyinfo_count = sensor->board_info->phyinfo_valid;
-        memcpy(&info->phyinfo, &sensor->board_info->phyinfo, sizeof(info->phyinfo));
-    }
-    /* for test */
-
-#pragma GCC visibility push(default)
-        HWCAM_CFG_ERR("%s, info_count = %d\n, for print, not err.\n"
-			"is_master_sensor[0] = %d, is_master_sensor[1] = %d\n"
-			"phy_id[0] = %d, phy_id[1] = %d\n"
-			"phy_mode[0] = %d, phy_mode[1] = %d\n"
-			"phy_freq_mode[0] = %d, phy_freq_mode[1] = %d\n"
-			"phy_freq[0] = %d, phy_freq[1] = %d\n"
-			"phy_work_mode[0] = %d, phy_work_mode[1] = %d",
-			__func__, info->phyinfo_count,
-			info->phyinfo.is_master_sensor[0], info->phyinfo.is_master_sensor[1],
-			(int)info->phyinfo.phy_id[0], (int)info->phyinfo.phy_id[1],
-			info->phyinfo.phy_mode[0], info->phyinfo.phy_mode[1],
-			info->phyinfo.phy_freq_mode[0], info->phyinfo.phy_freq_mode[1],
-			info->phyinfo.phy_freq[0], info->phyinfo.phy_freq[1],
-			info->phyinfo.phy_work_mode[0], info->phyinfo.phy_work_mode[1]);
-#pragma GCC visibility pop
     return 0;
+}
+
+static long
+hwsensor_subdev_mount_buf(
+        hwsensor_t* s,
+        hwcam_buf_info_t* bi)
+{
+    long rc = -EINVAL;
+
+    if (NULL == s || NULL == bi) {
+        HWCAM_CFG_ERR("s or bi is null");
+        return rc;
+    }
+
+    switch (bi->kind)
+    {
+    case HWCAM_BUF_KIND_PIPELINE_PARAM:
+        if (!s->cfg) {
+            s->cfg = hwcam_cfgdev_import_data_table(
+                    "sensor_drv_cfg", bi, &s->cfg_hdl);
+            if (s->cfg) { rc = 0; }
+        }
+        break;
+
+    default:
+        HWCAM_CFG_ERR("invalid buffer kind(%d)! \n", bi->kind);
+        break;
+    }
+    return rc;
+}
+
+static long
+hwsensor_subdev_unmount_buf(
+        hwsensor_t* s,
+        hwcam_buf_info_t* bi)
+{
+    long rc = -EINVAL;
+
+    if (NULL == s || NULL == bi) {
+        HWCAM_CFG_ERR("s or bi is null");
+        return rc;
+    }
+
+    switch (bi->kind)
+    {
+    case HWCAM_BUF_KIND_PIPELINE_PARAM:
+        hwcam_cfgdev_release_data_table(s->cfg_hdl);
+        s->cfg_hdl = NULL;
+        s->cfg = NULL;
+        rc = 0;
+        break;
+
+    default:
+        HWCAM_CFG_ERR("invalid buffer kind(%d)! \n", bi->kind);
+        break;
+    }
+    return rc;
 }
 
 static long
@@ -192,24 +223,15 @@ hwsensor_subdev_ioctl(
     case HWSENSOR_IOCTL_GET_INFO:
         rc = hwsensor_subdev_get_info(s, arg);
         break;
+    case HWCAM_V4L2_IOCTL_MOUNT_BUF:
+        rc = hwsensor_subdev_mount_buf(s, arg);
+        break;
+    case HWCAM_V4L2_IOCTL_UNMOUNT_BUF:
+        rc = hwsensor_subdev_unmount_buf(s, arg);
+        break;
     case HWSENSOR_IOCTL_SENSOR_CFG:
-        if(NULL != s->intf->vtbl->config)
-        {
-            rc = s->intf->vtbl->config(s->intf,arg);
-        }
-        break;
-    case HWSENSOR_IOCTL_OTP_CFG:
-        if(NULL != s->intf->vtbl->otp_config)
-        {
-            rc = s->intf->vtbl->otp_config(s->intf,arg);
-        }
-        break;
-     case HWSENSOR_IOCTL_GET_THERMAL:
-        if(NULL != s->intf->vtbl->get_thermal)
-        {
-            rc = s->intf->vtbl->get_thermal(s->intf,arg);
-        }
-        break;
+     rc = s->intf->vtbl->config(s->intf,arg);
+     break;
     default:
         HWCAM_CFG_ERR("invalid IOCTL CMD(%d)! \n", cmd);
         break;
@@ -239,9 +261,23 @@ s_subdev_core_ops_hwsensor =
     .s_power = hwsensor_power,
 };
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0))
+static int
+hwsensor_v4l2_enum_fmt(
+        struct v4l2_subdev* sd,
+        unsigned int index,
+        enum v4l2_mbus_pixelcode* code)
+{
+    return 0;
+}
+#endif
+
 static struct v4l2_subdev_video_ops
 s_subdev_video_ops_hwsensor =
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0))
+    .enum_mbus_fmt = hwsensor_v4l2_enum_fmt,
+#endif
 };
 
 static struct v4l2_subdev_ops
@@ -333,16 +369,9 @@ hwsensor_register(
     int rc = 0;
     struct v4l2_subdev* subdev = NULL;
     hwsensor_t* sensor = NULL;
-    sensor_t* hisensor = NULL;
 
     if (NULL == pdev || NULL == si) {
         cam_err("%s pdev or si is NULL.", __func__);
-        return -EINVAL;
-    }
-
-    hisensor = I2S(si);
-    if (NULL == hisensor) {
-        cam_err("%s hisensor is NULL.", __func__);
         return -EINVAL;
     }
 
@@ -358,20 +387,25 @@ hwsensor_register(
 
     v4l2_subdev_init(subdev, &s_subdev_ops_hwsensor);
     subdev->internal_ops = &s_subdev_internal_ops_hwsensor;
-    snprintf_s(subdev->name, sizeof(subdev->name),sizeof(subdev->name)-1,
+    snprintf(subdev->name, sizeof(subdev->name),
             "%s", hwsensor_intf_get_name(si));
     subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-    v4l2_set_subdevdata(subdev, hisensor);
-    platform_set_drvdata(pdev, subdev);
+    v4l2_set_subdevdata(subdev, pdev);
+    //platform_set_drvdata(pdev, subdev);
 
-    init_subdev_media_entity(subdev,HWCAM_SUBDEV_SENSOR);
-    hwcam_cfgdev_register_subdev(subdev,HWCAM_SUBDEV_SENSOR);
+    media_entity_init(&subdev->entity, 0, NULL, 0);
+    subdev->entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
+    subdev->entity.group_id = HWCAM_SUBDEV_SENSOR;
+    subdev->entity.name = subdev->name;
+
+    hwcam_cfgdev_register_subdev(subdev);
     subdev->devnode->lock = &sensor->lock;
 
     hwcam_dev_create(&pdev->dev, &sensor->cam_dev_num);
     sensor->intf = si;
     sensor->pdev = pdev;
     sensor->cfg = NULL;
+    sensor->cfg_hdl = NULL;
 
     if (runmode_is_factory()) //just for factory
     {
@@ -389,11 +423,13 @@ register_fail:
     return rc;
 }
 
-void hwsensor_unregister(struct platform_device *pdev)
+#define Intf2Hwsensor(si) container_of(si, hwsensor_t, intf)
+void hwsensor_unregister(hwsensor_intf_t* si)
 {
-    struct v4l2_subdev *subdev = platform_get_drvdata(pdev);
-    hwsensor_t* sensor = SD2Sensor(subdev);
+    struct v4l2_subdev* subdev = NULL;
+    hwsensor_t* sensor = Intf2Hwsensor(si);
 
+    subdev = &sensor->subdev;
     media_entity_cleanup(&subdev->entity);
     hwcam_cfgdev_unregister_subdev(subdev);
 

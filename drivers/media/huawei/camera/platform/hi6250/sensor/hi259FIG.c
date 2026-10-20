@@ -13,7 +13,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 
 static hwsensor_vtbl_t s_hi259FIG_vtbl;
 static bool power_on_status = false;//false: power off, true:power on
@@ -23,7 +22,7 @@ static bool power_on_status = false;//false: power off, true:power on
 int hi259FIG_config(hwsensor_intf_t* si, void  *argp);
 
 struct sensor_power_setting hi259FIG_power_up_setting[] = {
-    //change for the power down seq
+    //MCAM1 AFVDD 3V
     {
         .seq_type = SENSOR_PWDN2,
         .config_val = SENSOR_GPIO_HIGH,
@@ -378,7 +377,22 @@ int hi259FIG_config(hwsensor_intf_t* si, void  *argp)
             mutex_unlock(&hi259FIG_power_lock);
             /*lint -e455 +esym(455,*)*/
             break;
-
+        /*
+        case SEN_CONFIG_WRITE_REG:
+            break;
+        case SEN_CONFIG_READ_REG:
+            break;
+        case SEN_CONFIG_WRITE_REG_SETTINGS:
+            break;
+        case SEN_CONFIG_READ_REG_SETTINGS:
+            break;
+        case SEN_CONFIG_ENABLE_CSI:
+            //ret = si->vtbl->csi_enable(si);
+            break;
+        case SEN_CONFIG_DISABLE_CSI:
+            //ret = si->vtbl->csi_disable(si);
+            break;
+        */
         case SEN_CONFIG_MATCH_ID:
             if(NULL == si->vtbl->match_id){
                 cam_err("%s. si->vtbl->match_id is null.", __func__);
@@ -432,7 +446,7 @@ static int32_t hi259FIG_platform_probe(struct platform_device* pdev)
     rc = rpmsg_sensor_register(pdev, (void *)&s_hi259FIG);
     if (0 != rc){
         cam_err("%s rpmsg_sensor_register fail.\n", __func__);
-        hwsensor_unregister(Sensor2Pdev(s_hi259FIG));
+        hwsensor_unregister(&s_hi259FIG.intf);
         goto hi259FIG_sensor_probe_fail;
     }
 
@@ -450,7 +464,7 @@ static int __init hi259FIG_init_module(void)
 static void __exit hi259FIG_exit_module(void)
 {
     rpmsg_sensor_unregister((void*)&s_hi259FIG);
-    hwsensor_unregister(Sensor2Pdev(s_hi259FIG));
+    hwsensor_unregister(&s_hi259FIG.intf);
     platform_driver_unregister(&s_hi259FIG_driver);
 }
 /*lint -restore*/

@@ -8,11 +8,9 @@
 #include <linux/kasan-checks.h>
 #include <linux/thread_info.h>
 #include <linux/string.h>
-#include <linux/sched.h>
 #include <asm/asm.h>
 #include <asm/page.h>
 #include <asm/smap.h>
-#include <asm/extable.h>
 
 #define VERIFY_READ 0
 #define VERIFY_WRITE 1
@@ -31,17 +29,12 @@
 #define USER_DS 	MAKE_MM_SEG(TASK_SIZE_MAX)
 
 #define get_ds()	(KERNEL_DS)
-#define get_fs()	(current->thread.addr_limit)
-static inline void set_fs(mm_segment_t fs)
-{
-	current->thread.addr_limit = fs;
-	/* On user-mode return, check fs is correct */
-	set_thread_flag(TIF_FSCHECK);
-}
+#define get_fs()	(current_thread_info()->addr_limit)
+#define set_fs(x)	(current_thread_info()->addr_limit = (x))
 
 #define segment_eq(a, b)	((a).seg == (b).seg)
 
-#define user_addr_max() (current->thread.addr_limit.seg)
+#define user_addr_max() (current_thread_info()->addr_limit.seg)
 #define __addr_ok(addr) 	\
 	((unsigned long __force)(addr) < user_addr_max())
 
@@ -74,12 +67,6 @@ static inline bool __chk_range_not_ok(unsigned long addr, unsigned long size, un
 	__chk_range_not_ok((unsigned long __force)(addr), size, limit); \
 })
 
-#ifdef CONFIG_DEBUG_ATOMIC_SLEEP
-# define WARN_ON_IN_IRQ()	WARN_ON_ONCE(!in_task())
-#else
-# define WARN_ON_IN_IRQ()
-#endif
-
 /**
  * access_ok: - Checks if a user space pointer is valid
  * @type: Type of access: %VERIFY_READ or %VERIFY_WRITE.  Note that
@@ -100,11 +87,32 @@ static inline bool __chk_range_not_ok(unsigned long addr, unsigned long size, un
  * checks that the pointer is in the user space range - after calling
  * this function, memory access functions may still return -EFAULT.
  */
-#define access_ok(type, addr, size)					\
-({									\
-	WARN_ON_IN_IRQ();						\
-	likely(!__range_not_ok(addr, size, user_addr_max()));		\
-})
+#define access_ok(type, addr, size) \
+	likely(!__range_not_ok(addr, size, user_addr_max()))
+
+/*
+ * The exception table consists of pairs of addresses relative to the
+ * exception table enty itself: the first is the address of an
+ * instruction that is allowed to fault, and the second is the address
+ * at which the program should continue.  No registers are modified,
+ * so it is entirely up to the continuation code to figure out what to
+ * do.
+ *
+ * All the routines below use bits of fixup code that are out of line
+ * with the main instruction path.  This means when everything is well,
+ * we don't even have to jump over them.  Further, they do not intrude
+ * on our cache or tlb entries.
+ */
+
+struct exception_table_entry {
+	int insn, fixup;
+};
+/* This is not the generic standard exception_table_entry format */
+#define ARCH_HAS_SORT_EXTABLE
+#define ARCH_HAS_SEARCH_EXTABLE
+
+extern int fixup_exception(struct pt_regs *regs);
+extern int early_fixup_exception(unsigned long *ip);
 
 /*
  * These are the main single-value transfer routines.  They automatically
@@ -174,9 +182,8 @@ __typeof__(__builtin_choose_expr(sizeof(x) > sizeof(0UL), 0ULL, 0UL))
 	register __inttype(*(ptr)) __val_gu asm("%"_ASM_DX);		\
 	__chk_user_ptr(ptr);						\
 	might_fault();							\
-	asm volatile("call __get_user_%P4"				\
-		     : "=a" (__ret_gu), "=r" (__val_gu),		\
-			ASM_CALL_CONSTRAINT				\
+	asm volatile("call __get_user_%P3"				\
+		     : "=a" (__ret_gu), "=r" (__val_gu)			\
 		     : "0" (ptr), "i" (sizeof(*(ptr))));		\
 	(x) = (__force __typeof__(*(ptr))) __val_gu;			\
 	__builtin_expect(__ret_gu, 0);					\
@@ -327,26 +334,7 @@ do {									\
 } while (0)
 
 #ifdef CONFIG_X86_32
-#define __get_user_asm_u64(x, ptr, retval, errret)			\
-({									\
-	__typeof__(ptr) __ptr = (ptr);					\
-	asm volatile("\n"					\
-		     "1:	movl %2,%%eax\n"			\
-		     "2:	movl %3,%%edx\n"			\
-		     "3:\n"				\
-		     ".section .fixup,\"ax\"\n"				\
-		     "4:	mov %4,%0\n"				\
-		     "	xorl %%eax,%%eax\n"				\
-		     "	xorl %%edx,%%edx\n"				\
-		     "	jmp 3b\n"					\
-		     ".previous\n"					\
-		     _ASM_EXTABLE(1b, 4b)				\
-		     _ASM_EXTABLE(2b, 4b)				\
-		     : "=r" (retval), "=&A"(x)				\
-		     : "m" (__m(__ptr)), "m" __m(((u32 *)(__ptr)) + 1),	\
-		       "i" (errret), "0" (retval));			\
-})
-
+#define __get_user_asm_u64(x, ptr, retval, errret)	(x) = __get_user_bad()
 #define __get_user_asm_ex_u64(x, ptr)			(x) = __get_user_bad()
 #else
 #define __get_user_asm_u64(x, ptr, retval, errret) \
@@ -437,7 +425,7 @@ do {									\
 #define __get_user_nocheck(x, ptr, size)				\
 ({									\
 	int __gu_err;							\
-	__inttype(*(ptr)) __gu_val;					\
+	unsigned long __gu_val;						\
 	__uaccess_begin();						\
 	__get_user_size(__gu_val, (ptr), (size), __gu_err, -EFAULT);	\
 	__uaccess_end();						\
@@ -476,13 +464,13 @@ struct __large_struct { unsigned long buf[100]; };
  * uaccess_try and catch
  */
 #define uaccess_try	do {						\
-	current->thread.uaccess_err = 0;				\
+	current_thread_info()->uaccess_err = 0;				\
 	__uaccess_begin();						\
 	barrier();
 
 #define uaccess_catch(err)						\
 	__uaccess_end();						\
-	(err) |= (current->thread.uaccess_err ? -EFAULT : 0);		\
+	(err) |= (current_thread_info()->uaccess_err ? -EFAULT : 0);	\
 } while (0)
 
 /**
@@ -686,13 +674,42 @@ unsigned long __must_check _copy_from_user(void *to, const void __user *from,
 unsigned long __must_check _copy_to_user(void __user *to, const void *from,
 					 unsigned n);
 
-extern void __compiletime_error("usercopy buffer size is too small")
-__bad_copy_user(void);
+#ifdef CONFIG_DEBUG_STRICT_USER_COPY_CHECKS
+# define copy_user_diag __compiletime_error
+#else
+# define copy_user_diag __compiletime_warning
+#endif
 
-static inline void copy_user_overflow(int size, unsigned long count)
+extern void copy_user_diag("copy_from_user() buffer size is too small")
+copy_from_user_overflow(void);
+extern void copy_user_diag("copy_to_user() buffer size is too small")
+copy_to_user_overflow(void) __asm__("copy_from_user_overflow");
+
+#undef copy_user_diag
+
+#ifdef CONFIG_DEBUG_STRICT_USER_COPY_CHECKS
+
+extern void
+__compiletime_warning("copy_from_user() buffer size is not provably correct")
+__copy_from_user_overflow(void) __asm__("copy_from_user_overflow");
+#define __copy_from_user_overflow(size, count) __copy_from_user_overflow()
+
+extern void
+__compiletime_warning("copy_to_user() buffer size is not provably correct")
+__copy_to_user_overflow(void) __asm__("copy_from_user_overflow");
+#define __copy_to_user_overflow(size, count) __copy_to_user_overflow()
+
+#else
+
+static inline void
+__copy_from_user_overflow(int size, unsigned long count)
 {
 	WARN(1, "Buffer overflow detected (%d < %lu)!\n", size, count);
 }
+
+#define __copy_to_user_overflow __copy_from_user_overflow
+
+#endif
 
 static __always_inline unsigned long __must_check
 copy_from_user(void *to, const void __user *from, unsigned long n)
@@ -703,13 +720,31 @@ copy_from_user(void *to, const void __user *from, unsigned long n)
 
 	kasan_check_write(to, n);
 
+	/*
+	 * While we would like to have the compiler do the checking for us
+	 * even in the non-constant size case, any false positives there are
+	 * a problem (especially when DEBUG_STRICT_USER_COPY_CHECKS, but even
+	 * without - the [hopefully] dangerous looking nature of the warning
+	 * would make people go look at the respecitive call sites over and
+	 * over again just to find that there's no problem).
+	 *
+	 * And there are cases where it's just not realistic for the compiler
+	 * to prove the count to be in range. For example when multiple call
+	 * sites of a helper function - perhaps in different source files -
+	 * all doing proper range checking, yet the helper function not doing
+	 * so again.
+	 *
+	 * Therefore limit the compile time checking to the constant size
+	 * case, and do only runtime checking for non-constant sizes.
+	 */
+
 	if (likely(sz < 0 || sz >= n)) {
 		check_object_size(to, n, false);
 		n = _copy_from_user(to, from, n);
-	} else if (!__builtin_constant_p(n))
-		copy_user_overflow(sz, n);
+	} else if (__builtin_constant_p(n))
+		copy_from_user_overflow();
 	else
-		__bad_copy_user();
+		__copy_from_user_overflow(sz, n);
 
 	return n;
 }
@@ -723,25 +758,20 @@ copy_to_user(void __user *to, const void *from, unsigned long n)
 
 	might_fault();
 
+	/* See the comment in copy_from_user() above. */
 	if (likely(sz < 0 || sz >= n)) {
 		check_object_size(from, n, true);
 		n = _copy_to_user(to, from, n);
-	} else if (!__builtin_constant_p(n))
-		copy_user_overflow(sz, n);
+	} else if (__builtin_constant_p(n))
+		copy_to_user_overflow();
 	else
-		__bad_copy_user();
+		__copy_to_user_overflow(sz, n);
 
 	return n;
 }
 
-/*
- * We rely on the nested NMI work to allow atomic faults from the NMI path; the
- * nested NMI paths are careful to preserve CR2.
- *
- * Caller must use pagefault_enable/disable, or run in interrupt context,
- * and also do a uaccess_ok() check
- */
-#define __copy_from_user_nmi __copy_from_user_inatomic
+#undef __copy_from_user_overflow
+#undef __copy_to_user_overflow
 
 /*
  * The "unsafe" user accesses aren't really "unsafe", but the naming

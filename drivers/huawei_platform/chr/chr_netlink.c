@@ -121,7 +121,7 @@ static void kernel_chr_receive(struct sk_buff *__skb)
 				g_user_space_pid = nlh->nlmsg_pid;
 			} else if (nlh->nlmsg_type == NETLINK_CHR_UNREG) {
 				g_user_space_pid = 0;
-			} else if (nlh->nlmsg_type == NETLINK_CHR_SET_APP_UID && nlh->nlmsg_len >= sizeof(struct tag_chr_msg2knl)) {
+			} else if (nlh->nlmsg_type == NETLINK_CHR_SET_APP_UID) {
 				hmsg = (struct tag_chr_msg2knl *)nlh;
 				set_report_app_uid(hmsg->index, hmsg->uid);
 			}
@@ -196,7 +196,9 @@ static int chr_netlink_thread(void *data)
 					g_chr_timer_state = CHR_TIMER_60;
 
 					chr_notify_event(CHR_SPEED_SLOW_EVENT,
-						g_user_space_pid, 0xffffffff, NULL);
+						g_user_space_pid,
+						netIfInfo_struct_ptr->src_addr,
+						NULL);
 				} else {
 					spin_unlock_bh(&dest_addr_timer_lock);
 				}
@@ -339,7 +341,7 @@ int chr_notify_event(int event, int pid,
 
 	/*skb will be freed in netlink_unicast*/
 	ret = netlink_unicast(g_chr_nlfd, skb, pid, MSG_DONTWAIT);
-	hwlog_info("%s:data speed is slow! collateral information=0x%x\n", __func__, src_addr);
+	hwlog_info("%s:data speed is slow!srcaddr=0x%x\n", __func__, src_addr);
 	goto end;
 
 end:

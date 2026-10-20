@@ -13,7 +13,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 #define SENSOR_REG_SETTING_DELAY_1_MS 1
 
 static hwsensor_vtbl_t s_imx258FIG_vtbl;
@@ -423,6 +422,18 @@ int imx258FIG_config(hwsensor_intf_t* si, void  *argp)
             mutex_unlock(&imx258FIG_power_lock);
             /*lint -e455 +esym(455,*)*/
             break;
+        //case SEN_CONFIG_WRITE_REG:
+            //break;
+        //case SEN_CONFIG_READ_REG:
+            //break;
+        //case SEN_CONFIG_WRITE_REG_SETTINGS:
+            //break;
+        //case SEN_CONFIG_READ_REG_SETTINGS:
+            //break;
+        //case SEN_CONFIG_ENABLE_CSI:
+            //break;
+        //case SEN_CONFIG_DISABLE_CSI:
+            //break;
         case SEN_CONFIG_MATCH_ID:
             if(NULL == si->vtbl->match_id){
                 cam_err("%s. si->vtbl->match_id is null.", __func__);
@@ -472,7 +483,7 @@ static int32_t imx258FIG_platform_probe(struct platform_device* pdev)
     rc = rpmsg_sensor_register(pdev, (void *)&s_imx258FIG);
     if (0 != rc){
         cam_err("%s rpmsg_sensor_register fail.\n", __func__);
-        hwsensor_unregister(Sensor2Pdev(s_imx258FIG));
+        hwsensor_unregister(&s_imx258FIG.intf);
         goto imx258FIG_sensor_probe_fail;
     }
 
@@ -489,7 +500,7 @@ static int __init imx258FIG_init_module(void)
 static void __exit imx258FIG_exit_module(void)
 {
     rpmsg_sensor_unregister((void *)&s_imx258FIG);
-    hwsensor_unregister(Sensor2Pdev(s_imx258FIG));
+    hwsensor_unregister(&s_imx258FIG.intf);
     platform_driver_unregister(&s_imx258FIG_driver);
 }
 //lint -restore

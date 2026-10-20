@@ -45,7 +45,7 @@ static inline struct symbol_node *litehide_sym_node_alloc(void)
 	if (!node)
 		return NULL;
 
-	node->sym = kzalloc(SYM_NAME_LEN, GFP_KERNEL);
+	node->sym = kmalloc(SYM_NAME_LEN, GFP_KERNEL);
 	if (!node->sym) {
 		kfree(node);
 		return NULL;
@@ -277,7 +277,7 @@ static __init int initialize_blacklist(void)
 			litehide_sym_node_free(node);
 			return -EINVAL;
 		}
-		(void)strncpy(node->sym, hw_litehidesymbs_blacklist[i], strlen(hw_litehidesymbs_blacklist[i]));
+		strcpy(node->sym, hw_litehidesymbs_blacklist[i]);
 
 		list_add_tail(&node->list, &hidesyms_blacklist);
 	}

@@ -35,7 +35,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 struct mutex ov13855LLDFRONT_power_lock;
 #define SENSOR_REG_SETTING_DELAY_1_MS 1
 #define SENSOR_REG_SETTING_DELAY_6_MS 6
@@ -546,7 +545,7 @@ static int32_t ov13855LLDFRONT_platform_probe(struct platform_device* pdev)
     rc = rpmsg_sensor_register(pdev, (void *)&s_ov13855LLDFRONT);
     if (0 != rc){
         cam_err("%s rpmsg_sensor_register fail.\n", __func__);
-        hwsensor_unregister(Sensor2Pdev(s_ov13855LLDFRONT));
+        hwsensor_unregister(&s_ov13855LLDFRONT.intf);
         goto ov13855LLDFRONT_sensor_probe_fail;
     }
 
@@ -563,7 +562,7 @@ static int __init ov13855LLDFRONT_init_module(void)
 static void __exit ov13855LLDFRONT_exit_module(void)
 {
     rpmsg_sensor_unregister((void*)&s_ov13855LLDFRONT);
-    hwsensor_unregister(Sensor2Pdev(s_ov13855LLDFRONT));
+    hwsensor_unregister(&s_ov13855LLDFRONT.intf);
     platform_driver_unregister(&s_ov13855LLDFRONT_driver);
 }
 //lint -restore

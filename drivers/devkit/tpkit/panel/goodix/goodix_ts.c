@@ -23,7 +23,7 @@
 #include "goodix_ts.h"
 #include "goodix_dts.h"
 
-bool gtp_detect_sucess = false;
+
 struct goodix_ts_data *goodix_ts;
 struct ts_kit_device_data *g_goodix_dev_data = NULL;
 
@@ -645,7 +645,9 @@ static int goodix_irq_bottom_half(struct ts_cmd_node *in_cmd,
 	ret = goodix_touch_evt_handler(ts, ts_fingers);
 	if (ret == 0)
 		out_cmd->command = TS_INPUT_ALGO;
-	ret = goodix_i2c_write(GTP_READ_COOR_ADDR, &sync_val, 1);
+
+	if (!ts->rawdiff_mode)
+		ret = goodix_i2c_write(GTP_READ_COOR_ADDR, &sync_val, 1);
 
 	return ret;
 }
@@ -1441,8 +1443,7 @@ static int goodix_chip_get_info(struct ts_chip_info_param *info)
 	goodix_pinctr_int_ouput_low();//gpio_direction_output(irq_gpio, 0);
 	msleep(ms);
 	goodix_pinctrl_select_normal(goodix_ts);
-	if (gpio_direction_input(irq_gpio) < 0)
-		TS_LOG_ERR("%s: gpio_direction_input fail\n", __func__);
+	gpio_direction_input(irq_gpio);
 }
 int goodix_reset_select_addr(void)
 {
@@ -1456,8 +1457,7 @@ int goodix_reset_select_addr(void)
 	msleep(2);
 	gpio_direction_output(reset_gpio, 1);
 	msleep(6);
-	if (gpio_direction_input(reset_gpio) < 0)
-		TS_LOG_ERR("%s: gpio_direction_input fail\n", __func__);
+	gpio_direction_input(reset_gpio);
 	return 0;
 }
  /**
@@ -1652,10 +1652,7 @@ static int goodix_esdcheck_func(void)
 		}else{
 			if ((esd_buf[0] == GTP_CMD_ESD_CHECK) || (esd_buf[1] != GTP_CMD_ESD_CHECK)){
 				/* ESD check IC works abnormally */
-				ret = goodix_i2c_read(GTP_REG_CMD, chk_buf, 4);
-				if (ret < 0)
-					TS_LOG_ERR("%s: goodix_i2c_read fail!\n",
-						__func__);
+				goodix_i2c_read(GTP_REG_CMD, chk_buf, 4);
 				TS_LOG_ERR("%s,%d:[Check]0x8040 = 0x%02X, 0x8041 = 0x%02X",__func__,__LINE__, chk_buf[0], chk_buf[1]);
 				if ((chk_buf[0] == GTP_CMD_ESD_CHECK) || (chk_buf[1] != GTP_CMD_ESD_CHECK)){
 				    i = CHECK_HW_STATUS_RETRY;
@@ -1826,9 +1823,6 @@ static int
 	ret = goodix_i2c_test();
 	if (ret < 0)
 		goto err_power_on;
-
-	gtp_detect_sucess = true;
-
 	return 0;
 
 err_power_on:

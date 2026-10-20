@@ -41,6 +41,6 @@ hjpeg_register(
         hjpeg_intf_t* si);
 
 extern void
-hjpeg_unregister(struct platform_device* pdev);
+hjpeg_unregister(hjpeg_intf_t* si);
 
 

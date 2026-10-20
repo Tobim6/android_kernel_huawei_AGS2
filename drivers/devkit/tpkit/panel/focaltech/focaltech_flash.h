@@ -14,6 +14,8 @@
 #define FTS_BOOT_PROJ_CODE_ADDR1	0x00
 #define FTS_BOOT_PROJ_CODE_ADDR2	0x20
 
+#define FTS_PACKAGE_SIZE		128
+
 #define FTS_REG_RESET_FW		0x07
 
 #define FTS_UPGRADE_AA			0xAA
@@ -26,8 +28,7 @@
 #define FTS_REG_VENDOR_ID		0xA8
 #define LEN_FLASH_ECC_MAX		0xFFFE
 #define FTS_8201_LEN_FLASH_ECC_MAX  (96*1024)
-#define FT8006U_LEN_FLASH_ECC_MAX		(96*1024)
-#define FT3528_LEN_FLASH_ECC_MAX	(96*1024)
+
 #define FTS_REG_PROJ_CODE		0x99
 #define FTS_REG_OFFSET_CODE		0x90
 
@@ -69,11 +70,9 @@
 #define FTS_REG_SLEEP			0xA5
 
 #define FTS_FW_IMG_ADDR_VER		0x10E
-#define FTS_5422U_FW_IMG_ADDR_VER		0x14
 #define FTS_FW_IMG_ADDR_VER_OFFSET_5X46		2
 #define FTS_FW_IC_ADDR_START		0x1000
 #define FTS_8201_FW_IC_ADDR_START		0x5000
-#define FT8006U_FW_IC_ADDR_START		0x2000
 #define FTS_FW_WRITE_STATUS_ADDR_START		0x1000
 #define FTS_FW_SEND_LENGTH	0xB0
 #define FTS_RETRY_TIMES	10
@@ -87,15 +86,6 @@
 
 #define FTS_SLEEP_TIME_1		1
 #define FTS_SLEEP_TIME_5		5
-
-#define AL2_FCS_COEF					((1 << 15) + (1 << 10) + (1 << 3))
-#define FTS_ROMBOOT_CMD_ECC				0xCC
-#define FTS_ROMBOOT_CMD_ECC_LEN			7
-#define FTS_ROMBOOT_CMD_ECC_FINISH		0xCE
-#define FTS_ROMBOOT_CMD_ECC_READ		0xCD
-
-#define FTS_ROMBOOT_CMD_GET_STA			0xF2
-#define PROJECT_ID_ADDR					0x007812
 
 struct focal_delay_time {
 	int hard_reset_delay;

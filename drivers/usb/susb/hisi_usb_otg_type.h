@@ -393,6 +393,7 @@ struct otg_dev {
 	int bc_again_flag;
 	int bc_unknown_again_flag;
 	unsigned int bc_again_delay_time;
+	struct notifier_block conndone_nb;
 	struct delayed_work bc_again_work;
 
 	unsigned int vdp_src_enable;
@@ -430,8 +431,6 @@ static inline struct usb_phy_ops *get_usb_phy_ops(struct otg_dev *dev_p)
  */
 #define BC_AGAIN_DELAY_TIME_1 200
 #define BC_AGAIN_DELAY_TIME_2 8000
-#define BC_AGAIN_ONCE	1
-#define BC_AGAIN_TWICE	2
 void notify_charger_type(struct otg_dev *dev_p);
 void schdule_bc_again(struct otg_dev *dev_p);
 void cancel_bc_again(struct otg_dev *dev_p, int sync);

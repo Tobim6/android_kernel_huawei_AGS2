@@ -41,26 +41,17 @@ enum {
 #define END_TERMINATOR_SIZE 1
 #define DEV_DETECT_DEFAULT \
 "0000000000000000000000000000000000000000000000000000000000000000"
-
-/*
- * save the detect result, if device's probe function is completed,
- * set dev_detect_result[dev_id] = '1'
- */
+/* save the detect result, if device's probe function is completed,
+set dev_detect_result[dev_id] = '1' */
 static char dev_detect_result[DEV_DETECT_NUMS + 1] = DEV_DETECT_DEFAULT;
-
-/*
- * save the config message of device, which need to detect
- * at board check
- */
+/* save the config message of device, which need to detect
+at board check */
 static char dbc_detect_flag[DEV_DETECT_NUMS + 1] = DEV_DETECT_DEFAULT;
 static char rt_detect_flag[DEV_DETECT_NUMS + 1] = DEV_DETECT_DEFAULT;
 static char mmi1_detect_flag[DEV_DETECT_NUMS + 1] = DEV_DETECT_DEFAULT;
 static char mmi2_detect_flag[DEV_DETECT_NUMS + 1] = DEV_DETECT_DEFAULT;
-
-/*
- * the device detect's flag is shown in sysfs node property,
- * with ending terminator and new line
- */
+/* the device detect's flag is shown in sysfs node property,
+with ending terminator and new line */
 #define PRINT_CHECK_MAX_LENGTH (DEV_DETECT_NUMS + NEW_LINE_SIZE +\
 END_TERMINATOR_SIZE)
 #define RETURN_FAIL (-1)
@@ -79,7 +70,7 @@ static struct detect_flag_device {
 };
 
 static int dev_detect_probe_flag;
-/*
+/**
  * function: set the device detect flag corresponding to dev_id in
  * dev_detect_result[].
  * It is used in the device's probe function, which device need to detect.
@@ -103,8 +94,7 @@ int set_hw_dev_detect_result(const size_t dev_id)
 	dev_id);
 	return false;
 }
-
-/*
+/**
  *   function: get the device detect's attribute value.
  *   input:
  *       np: the device node .
@@ -115,9 +105,9 @@ int set_hw_dev_detect_result(const size_t dev_id)
  *       return 0 if get the value successfully, others indicates fail.
  */
 static int get_hw_dts_devdetect_value(struct device_node *np,
-			const char *dev_name, unsigned int *type)
+const char *dev_name, unsigned int *type)
 {
-	if ((np == NULL) || (dev_name == NULL) || (type == NULL)) {
+	if ((NULL == np) || (NULL == dev_name) || (NULL == type)) {
 		hwlog_err("[%s] parameter is NULL!\n", __func__);
 		return RETURN_FAIL;
 	}
@@ -131,8 +121,9 @@ static int get_hw_dts_devdetect_value(struct device_node *np,
 	return result;
 }
 
-/*
+/**
  * show the device detect result
+ *
  * Parameters do not need to be checked, because @dev in this driver
  * the probe function has been created the device, @attr: In the device
  * structure device_attribute has been defined by __ATTR(), @buf: in the
@@ -140,7 +131,7 @@ static int get_hw_dts_devdetect_value(struct device_node *np,
  * application to acquire buf memory.
  */
 static ssize_t dev_detect_result_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
+struct device_attribute *attr, char *buf)
 {
 	hwlog_info("now checking the device, and dev_detect_result is:%s!\n",
 	dev_detect_result);
@@ -148,12 +139,12 @@ static ssize_t dev_detect_result_show(struct device *dev,
 	dev_detect_result);
 }
 
-/*
+/**
  * show the config result which set in the dts, when we need to
  * detect at the board detect.
  */
 static ssize_t dbc_detect_flag_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
+struct device_attribute *attr, char *buf)
 {
 	hwlog_info("now checking the device, and dbc_detect_flag is:%s !\n",
 	dbc_detect_flag);
@@ -161,12 +152,12 @@ static ssize_t dbc_detect_flag_show(struct device *dev,
 	dbc_detect_flag);
 }
 
-/*
+/**
  * show the config result which set in the dts, when we need to
  * detect at the running detect.
  */
 static ssize_t rt_detect_flag_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
+struct device_attribute *attr, char *buf)
 {
 	hwlog_info("now checking the device, and rt_detect_flag is:%s !\n",
 	rt_detect_flag);
@@ -174,12 +165,12 @@ static ssize_t rt_detect_flag_show(struct device *dev,
 	rt_detect_flag);
 }
 
-/*
+/**
  * show the config result which set in the dts, when we need to
  * detect at the mmi1 detect.
  */
 static ssize_t mmi1_detect_flag_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
+struct device_attribute *attr, char *buf)
 {
 	hwlog_info("now checking the device, and mmi1_detect_flag is:%s !\n",
 	mmi1_detect_flag);
@@ -187,12 +178,12 @@ static ssize_t mmi1_detect_flag_show(struct device *dev,
 	mmi1_detect_flag);
 }
 
-/*
+/**
  * show the config result which set in the dts, when we need to
  * detect at the mmi2 detect.
  */
 static ssize_t mmi2_detect_flag_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
+struct device_attribute *attr, char *buf)
 {
 	hwlog_info("now checking the device, and mmi2_detect_flag is:%s !\n",
 	mmi2_detect_flag);
@@ -228,14 +219,14 @@ static int dev_detect_probe(struct platform_device *pdev)
 
 	hwlog_info("[%s] function begin!\n", __func__);
 
-	if (pdev == NULL) {
+	if (NULL == pdev) {
 		hwlog_err("[%s] none device!\n", __func__);
 		return -ENODEV;
 	}
 
 	struct device_node *np = pdev->dev.of_node;
 
-	if (np == NULL) {
+	if (NULL == np) {
 		hwlog_err("[%s] Unable to find %s device node!\n", __func__,
 		DTS_COMP_DEVICE_DETECT_NAME);
 		return -ENODEV;
@@ -260,7 +251,7 @@ static int dev_detect_probe(struct platform_device *pdev)
 		device_array[index].dev = device_create(myclass, NULL,
 			MKDEV(0, device_array[index].index),
 			NULL, device_array[index].name);
-		if (device_array[index].dev == NULL) {
+		if (NULL == device_array[index].dev) {
 			hwlog_err("[%s] Failed to create %s device\n", __func__,
 			device_array[index].name);
 			ret = RETURN_FAIL;
@@ -295,19 +286,19 @@ static int dev_detect_probe(struct platform_device *pdev)
 			hw_detect_device_array[i].device_name, &type);
 		if (!result) {
 			dbc_detect_flag[i] =
-				((type != NO_DETECT) && (type & DBC_DETECT))
+				((NO_DETECT != type) && (type & DBC_DETECT))
 				? FLAG_SET : FLAG_NOT_SET;
 			rt_detect_flag[i] =
-				((type != NO_DETECT) && (type & RT_DETECT))
+				((NO_DETECT != type) && (type & RT_DETECT))
 				? FLAG_SET : FLAG_NOT_SET;
 			mmi1_detect_flag[i] =
-				((type != NO_DETECT) && (type & MMI1_DETECT))
+				((NO_DETECT != type) && (type & MMI1_DETECT))
 				? FLAG_SET : FLAG_NOT_SET;
 			mmi2_detect_flag[i] =
-				((type != NO_DETECT) && (type & MMI2_DETECT))
+				((NO_DETECT != type) && (type & MMI2_DETECT))
 				? FLAG_SET : FLAG_NOT_SET;
 		} else {
-			hwlog_err("get devid:%zu device name:%s value fail\n",
+			hwlog_err("get devid:%zu device name:%s 's value fail\n",
 				i, hw_detect_device_array[i].device_name);
 			dbc_detect_flag[i] = FLAG_NOT_SET;
 			rt_detect_flag[i] = FLAG_NOT_SET;
@@ -342,6 +333,7 @@ static const struct of_device_id device_detect_match_table[] = {
 	},
 };
 MODULE_DEVICE_TABLE(of, device_detect_match_table);
+
 
 static struct platform_driver dev_detect_driver = {
 	.driver = {

@@ -21,9 +21,6 @@
 #include <linux/hisi/util.h>
 #include <linux/mfd/hisi_pmic.h>
 #include <mntn_public_interface.h>
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_BOOTUP_KEYPOINT_TAG
-#include "blackbox/rdr_print.h"
 
 static u32 g_last_bootup_keypoint;
 static u64 g_bootup_keypoint_addr;
@@ -40,7 +37,7 @@ Return:         NA
 void set_boot_keypoint(u32 value)
 {
 	if (value < STAGE_KERNEL_BOOTANIM_COMPLETE || value > STAGE_END) {
-		BB_PRINT_ERR("value[%d] is invilad.\n", value);
+		printk("value[%d] is invilad.\n", value);
 		return;
 	}
 	if (STAGE_BOOTUP_END == value) {
@@ -50,7 +47,7 @@ void set_boot_keypoint(u32 value)
 		if (!g_bootup_keypoint_addr) {
 			return;
 		}
-		writel(value, (void *)(uintptr_t)g_bootup_keypoint_addr);
+		writel(value, (void *)g_bootup_keypoint_addr);
 	} else {
 		hisi_pmic_reg_write(BOOTUP_KEYPOINT_OFFSET, value);/*lint !e747*/
 	}
@@ -71,7 +68,7 @@ u32 get_boot_keypoint(void)
 		if (!g_bootup_keypoint_addr) {
 			return 0;
 		}
-		value = readl((void *)(uintptr_t)g_bootup_keypoint_addr);
+		value = readl((void *)g_bootup_keypoint_addr);
 	} else {
 		value = hisi_pmic_reg_read(BOOTUP_KEYPOINT_OFFSET);/*lint !e747*/
 	}
@@ -100,7 +97,7 @@ Return:         NA
 static int __init early_last_bootup_keypoint_cmdline(char *last_bootup_keypoint_cmdline)
 {
 	g_last_bootup_keypoint = atoi(last_bootup_keypoint_cmdline);
-	pr_debug("g_last_bootup_keypoint is [%d]\n", g_last_bootup_keypoint);
+	printk("g_last_bootup_keypoint is [%d]\n", g_last_bootup_keypoint);
 	return 0;
 }
 
@@ -115,7 +112,7 @@ Return:         OK:success
 ********************************************************************************/
 static int clear_dfx_happen(void *arg)
 {
-	pr_debug("clear_dfx_happen start\n");
+	printk("clear_dfx_happen start\n");
 	down(&clear_dfx_sem);
 	clear_dfx_tempbuffer();
 
@@ -133,7 +130,7 @@ static int __init hisi_bootup_keypoint_init(void)
 {
 	sema_init(&clear_dfx_sem, 0);
 	if (!kthread_run(clear_dfx_happen, NULL, "clear_dfx_happen")) {
-		BB_PRINT_ERR("create thread clear_dfx_happen faild.\n");
+		printk("create thread clear_dfx_happen faild.\n");
 	}
 
 	return 0;
@@ -155,23 +152,23 @@ static void bootup_keypoint_addr_init(void)
 
 	np = of_find_compatible_node(NULL, NULL, "hisilicon,hisifb");
 	if (!np) {
-		BB_PRINT_ERR("NOT FOUND device node 'hisilicon,hisifb'!\n");
+		printk("NOT FOUND device node 'hisilicon,hisifb'!\n");
 		return;
 	}
 	ret = of_property_read_u32(np, "fpga_flag", &fpga_flag);
 	if (ret) {
-		BB_PRINT_ERR("failed to get fpga_flag resource.\n");
+		printk("failed to get fpga_flag resource.\n");
 		return;
 	}
 	if (fpga_flag == FPGA) {
 		bootup_keypoint_addr = FPGA_BOOTUP_KEYPOINT_ADDR;
-		g_bootup_keypoint_addr = (uintptr_t)
+		g_bootup_keypoint_addr = (unsigned long long)
 			ioremap_wc(bootup_keypoint_addr, sizeof(int));
 		if (!g_bootup_keypoint_addr) {
-			BB_PRINT_ERR(KERN_ERR "get bootup_keypoint_addr error\n");
+			printk(KERN_ERR "get bootup_keypoint_addr error\n");
 			return;
 		}
-		pr_debug("bootup_keypoint_addr is %llx\n", g_bootup_keypoint_addr);
+		printk("bootup_keypoint_addr is %llx\n", g_bootup_keypoint_addr);
 	}
 
 	return;

@@ -22,7 +22,7 @@ struct shmid_kernel /* private to the kernel */
 	/* The task created the shm object.  NULL if the task is dead. */
 	struct task_struct	*shm_creator;
 	struct list_head	shm_clist;	/* list by creator */
-} __randomize_layout;
+};
 
 /* shm_mode upper byte flags */
 #define	SHM_DEST	01000	/* segment will be destroyed on last detach */
@@ -52,7 +52,7 @@ struct sysv_shm {
 
 long do_shmat(int shmid, char __user *shmaddr, int shmflg, unsigned long *addr,
 	      unsigned long shmlba);
-bool is_file_shm_hugepages(struct file *file);
+int is_file_shm_hugepages(struct file *file);
 void exit_shm(struct task_struct *task);
 #define shm_init_task(task) INIT_LIST_HEAD(&(task)->sysvshm.shm_clist)
 #else
@@ -66,9 +66,9 @@ static inline long do_shmat(int shmid, char __user *shmaddr,
 {
 	return -ENOSYS;
 }
-static inline bool is_file_shm_hugepages(struct file *file)
+static inline int is_file_shm_hugepages(struct file *file)
 {
-	return false;
+	return 0;
 }
 static inline void exit_shm(struct task_struct *task)
 {

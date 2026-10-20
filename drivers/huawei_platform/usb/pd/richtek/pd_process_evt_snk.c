@@ -98,10 +98,6 @@ DECL_PE_STATE_REACTION(PD_HW_MSG_VBUS_ABSENT);
 DECL_PE_STATE_TRANSITION(PD_HW_MSG_TX_FAILED) = {
 	{ PE_SNK_SOFT_RESET, PE_SNK_HARD_RESET },
 	{ PE_SNK_SEND_SOFT_RESET, PE_SNK_HARD_RESET },
-
-#ifdef CONFIG_PD_DFP_RESET_CABLE
-	{ PE_DFP_CBL_SEND_SOFT_RESET, PE_SNK_READY },
-#endif /* CONFIG_PD_DFP_RESET_CABLE */
 };
 DECL_PE_STATE_REACTION(PD_HW_MSG_TX_FAILED);
 
@@ -140,10 +136,6 @@ DECL_PE_STATE_TRANSITION(PD_TIMER_SENDER_RESPONSE) = {
 	{ PE_SNK_SEND_SOFT_RESET, PE_SNK_HARD_RESET },
 
 	{ PE_DR_SNK_GET_SINK_CAP, PE_SNK_READY },
-
-#ifdef CONFIG_PD_DFP_RESET_CABLE
-	{ PE_DFP_CBL_SEND_SOFT_RESET, PE_SNK_READY },
-#endif /* CONFIG_PD_DFP_RESET_CABLE */
 };
 DECL_PE_STATE_REACTION(PD_TIMER_SENDER_RESPONSE);
 
@@ -417,7 +409,6 @@ static inline void pd_report_typec_only_charger(pd_port_t *pd_port)
 	/* TODO: pd_set_rx_enable(pd_port, PD_RX_CAP_PE_DISABLE);*/
 	PE_INFO("TYPE-C Only Charger!\r\n");
 	pd_dpm_sink_vbus(pd_port, true);
-	pd_notify_pe_hard_reset_completed(pd_port);
 	pd_update_connect_state(pd_port, PD_CONNECT_TYPEC_ONLY);
 }
 

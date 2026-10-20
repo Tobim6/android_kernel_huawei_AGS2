@@ -11,12 +11,6 @@
 
 static inline void print_irq_desc(unsigned int irq, struct irq_desc *desc)
 {
-	struct irqaction *irq_action;
-	static DEFINE_RATELIMIT_STATE(ratelimit, 5 * HZ, 5);
-
-	if (!__ratelimit(&ratelimit))
-		return;
-
 	printk("irq %d, desc: %p, depth: %d, count: %d, unhandled: %d\n",
 		irq, desc, desc->depth, desc->irq_count, desc->irqs_unhandled);
 	printk("->handle_irq():  %p, ", desc->handle_irq);
@@ -24,10 +18,9 @@ static inline void print_irq_desc(unsigned int irq, struct irq_desc *desc)
 	printk("->irq_data.chip(): %p, ", desc->irq_data.chip);
 	print_symbol("%s\n", (unsigned long)desc->irq_data.chip);
 	printk("->action(): %p\n", desc->action);
-	irq_action = desc->action;
-	if (irq_action) {
-		printk("->action->handler(): %p, ", irq_action->handler);
-		print_symbol("%s\n", (unsigned long)irq_action->handler);
+	if (desc->action) {
+		printk("->action->handler(): %p, ", desc->action->handler);
+		print_symbol("%s\n", (unsigned long)desc->action->handler);
 	}
 
 	___P(IRQ_LEVEL);

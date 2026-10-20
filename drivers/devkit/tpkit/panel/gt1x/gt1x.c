@@ -14,7 +14,7 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
- *
+ * 
  */
 
 #include <linux/irq.h>
@@ -22,15 +22,9 @@
 #include <linux/delay.h>
 #include <linux/ctype.h>
 #include <linux/firmware.h>
-#include <linux/module.h>
 #include "gt1x.h"
 #include "gt1x_dts.h"
 #include <linux/completion.h>
-#include <linux/module.h>
-
-#if defined (CONFIG_TEE_TUI)
-#include "tui.h"
-#endif
 
 #define INDEX_0					0
 #define INDEX_1 				1
@@ -55,9 +49,6 @@
 #define GT1X_BIT_AND_0x0F		0x0f
 #define GT1X_BIT_AND_0x40		0x40
 extern u8 cypress_ts_kit_color[GOODIX_TP_COLOR_SIZE];
-#if defined (CONFIG_TEE_TUI)
-extern struct ts_tui_data tee_tui_data;
-#endif
 extern void gt1x_test_free(void);
 static struct completion roi_data_done;
 struct gt1x_ts_data *gt1x_ts = NULL;
@@ -364,15 +355,15 @@ static int gt1x_switch_wrokmode(int wrokmode)
 static int gt1x_feature_switch(struct gt1x_ts_data *ts,
 		enum gt1x_ts_feature fea, int on)
 {
+	struct ts_feature_info *info = &ts->dev_data->ts_platform_data->feature_info;
 	struct gt1x_ts_config *config = NULL;
-	struct ts_feature_info *info = NULL;
 	int ret = 0;
 
-	if ((ts == NULL) || (ts->dev_data->ts_platform_data == NULL)) {
+	if (!ts || !info){
 		TS_LOG_ERR("%s:invalid param\n", __func__);
 		return -EINVAL;
 	}
-	info = &ts->dev_data->ts_platform_data->feature_info;
+
 	if (on == SWITCH_ON) {
 		switch (fea) {
 		case TS_FEATURE_NONE:
@@ -636,10 +627,8 @@ static int gt1x_cache_roidata_device(struct gt1x_ts_roi *roi)
 		TS_LOG_ERR("%s:roi is not support or invalid parameter\n", __func__);
 		return -EINVAL;
 	}
-	mutex_lock(&roi->mutex);
 
 	roi->data_ready = false;
-	mutex_unlock(&roi->mutex);
 
 	ret = gt1x_i2c_read(ts->gt1x_roi_data_add, status, ROI_HEAD_LEN);
 	if (ret) {
@@ -833,9 +822,7 @@ static int gt1x_request_evt_handler(struct gt1x_ts_data *ts)
 		break;
 	case GTP_RQST_RESET:
 		TS_LOG_INFO("%s: Request Reset.\n", __func__);
-		ret = gt1x_i2c_read(0x5097, &rqst_data, 1);
-		if (ret)
-			TS_LOG_ERR("Failed read rqst_data.\n");
+		gt1x_i2c_read(0x5097, &rqst_data, 1);
 		TS_LOG_INFO("%s: Reason code[0x5097]:0x%02x\n", __func__, rqst_data);
 		gt1x_chip_reset();
 		gt1x_feature_resume(ts);
@@ -879,6 +866,7 @@ static int gt1x_touch_evt_handler(struct gt1x_ts_data  *ts,
 				struct ts_fingers *info)
 {
 	u8 touch_data[1 + 8 * GTP_MAX_TOUCH + 2] = {0};
+	cur_index = 0;
 	u8 touch_num;
 	u8 *coor_data = NULL;
 	u8 check_sum = 0;
@@ -886,10 +874,9 @@ static int gt1x_touch_evt_handler(struct gt1x_ts_data  *ts,
 	int xer = 0;
 	int yer = 0;
 	int ret = -1;
+	int res = 0;
 	u8 touch_ewxy[GT1X_EDGE_DATA_SIZE] = {0};
-	u8 touch_wxy[GT1X_EDGE_DATA_SIZE] = {0};
 
-	cur_index = 0;
 	ret = gt1x_i2c_read(GTP_READ_COOR_ADDR, &touch_data[0], 1 + 8 + 2);
 	if (unlikely(ret))
 		goto exit;
@@ -910,12 +897,6 @@ static int gt1x_touch_evt_handler(struct gt1x_ts_data  *ts,
 
 	if ((ts->gt1x_edge_add != 0) && (touch_num > 0)) {
 		ret = ts->ops.i2c_read(ts->gt1x_edge_add,touch_ewxy,GT1X_EDGE_DATA_SIZE);
-		if (ret) {
-			goto exit;
-		}
-	}
-	if((touch_num > 0) && (0 != ts->gt1x_support_wxy) && (0 != ts->gt1x_wxy_data_add)) {
-		ret = ts->ops.i2c_read(ts->gt1x_wxy_data_add, touch_wxy, GT1X_EDGE_DATA_SIZE);
 		if (ret) {
 			goto exit;
 		}
@@ -989,15 +970,11 @@ static int gt1x_touch_evt_handler(struct gt1x_ts_data  *ts,
 
 		info->fingers[id].ewx = touch_ewxy[2 * id];
 		info->fingers[id].ewy = touch_ewxy[2 * id + 1];
-		if(ts->gt1x_support_wxy) {
-			info->fingers[id].wx = touch_wxy[2 * id];
-			info->fingers[id].wy = touch_wxy[2 * id + 1];
-		}
 		info->fingers[id].pressure = w;
 		info->fingers[id].status = TP_FINGER;
 		cur_index |= 1 << id;
-		TS_LOG_DEBUG("%s:[%d](ewx = %d, ewy =  %d, xer=%d, yer=%d, wx=%d, wy=%d)\n", __func__,
-			id, info->fingers[id].ewx, info->fingers[id].ewy, xer, yer,touch_wxy[2 * id], touch_wxy[2 * id + 1]);
+		TS_LOG_DEBUG("%s:[%d](%d, %d, %d,ewx = %d, ewy =  %d, xer=%d,yer=%d)\n", __func__,
+			id, x, y, w, info->fingers[id].ewx, info->fingers[id].ewy,xer,yer);
 	}
 	info->cur_finger_number = touch_num;
 exit:
@@ -1057,6 +1034,7 @@ static void gt1x_double_tap_event(struct gt1x_ts_data *ts, struct ts_fingers *in
 		*/
 		x = get_unaligned_le16(&buf[i * 4]);
 		y = get_unaligned_le16(&buf[ i *4 + 2]);
+		TS_LOG_DEBUG("%s: x=%d, y = %d\n", __func__, x, y);
 		ts->dev_data->ts_platform_data->chip_data->easy_wakeup_info.easywake_position[i] = 
 				x << 16 |y;
 	}
@@ -1285,27 +1263,19 @@ static void gt1x_put_regulators(void)
 
 static void gt1x_power_on_gpio_set(void)
 {
-	int ret;
 	struct gt1x_ts_data *ts = gt1x_ts;
 
 	gt1x_pinctrl_select_normal();
-	ret = gpio_direction_input(ts->dev_data->ts_platform_data->irq_gpio);
-	if (ret)
-		TS_LOG_ERR("%s: set irq gpio direction input error\n",
-			__func__);
+	gpio_direction_input(ts->dev_data->ts_platform_data->irq_gpio);
 	gpio_direction_output(ts->dev_data->ts_platform_data->reset_gpio, 1);
 }
 
 static void gt1x_power_off_gpio_set(void)
 {
-	int ret;
 	struct gt1x_ts_data *ts = gt1x_ts;
 
 	gt1x_pinctrl_select_suspend();
-	ret = gpio_direction_input(ts->dev_data->ts_platform_data->irq_gpio);
-	if (ret)
-		TS_LOG_ERR("%s: set irq gpio direction input error\n",
-			__func__);
+	gpio_direction_input(ts->dev_data->ts_platform_data->irq_gpio);
 	gpio_direction_output(ts->dev_data->ts_platform_data->reset_gpio, 0);
 }
 /**
@@ -1388,55 +1358,27 @@ static int gt1x_pinctrl_init(void)
 		return ret;
 	}
 
-	if(0 == ts->qcom_adapter_flag)
-	{
-		ts->pins_default = pinctrl_lookup_state(ts->pinctrl, "default");
-		if (IS_ERR_OR_NULL(ts->pins_default)) {
-			TS_LOG_ERR("%s: Pin state[default] not found\n", __func__);
-			ret = PTR_ERR(ts->pins_default);
-			goto exit_put;
-		}
-
-		ts->pins_suspend = pinctrl_lookup_state(ts->pinctrl, "idle");
-		if (IS_ERR_OR_NULL(ts->pins_suspend)) {
-			TS_LOG_ERR("%s: Pin state[suspend] not found\n", __func__);
-			ret = PTR_ERR(ts->pins_suspend);
-			goto exit_put;
-		}
-		ts->pins_release = NULL;
+	ts->pins_default = pinctrl_lookup_state(ts->pinctrl, "default");
+	if (IS_ERR_OR_NULL(ts->pins_default)) {
+		TS_LOG_ERR("%s: Pin state[default] not found\n", __func__);
+		ret = PTR_ERR(ts->pins_default);
+		goto exit_put;
 	}
-	else
-	{
-		ts->pins_default = pinctrl_lookup_state(ts->pinctrl, "pmx_ts_active");
-		if (IS_ERR_OR_NULL(ts->pins_default)) {
-			TS_LOG_ERR("%s: Pin state[default] not found\n", __func__);
-			ret = PTR_ERR(ts->pins_default);
-			goto exit_put;
-		}
 
-		ts->pins_suspend = pinctrl_lookup_state(ts->pinctrl, "pmx_ts_suspend");
-		if (IS_ERR_OR_NULL(ts->pins_suspend)) {
-			TS_LOG_ERR("%s: Pin state[suspend] not found\n", __func__);
-			ret = PTR_ERR(ts->pins_suspend);
-			goto exit_put;
-		}
-
-		ts->pins_release = pinctrl_lookup_state(ts->pinctrl, "pmx_ts_release");
-		if (IS_ERR_OR_NULL(ts->pins_release)) {
-			TS_LOG_ERR("%s: Pin state[release] not found\n", __func__);
-			ret = PTR_ERR(ts->pins_release);
-			goto exit_put;
-		}
+	ts->pins_suspend = pinctrl_lookup_state(ts->pinctrl, "idle");
+	if (IS_ERR_OR_NULL(ts->pins_suspend)) {
+		TS_LOG_ERR("%s: Pin state[suspend] not found\n", __func__);
+		ret = PTR_ERR(ts->pins_suspend);
+		goto exit_put;
 	}
+
 	return ret;
 exit_put:
 	if(ts->pinctrl){
 		devm_pinctrl_put(ts->pinctrl);
 		ts->pinctrl = NULL;
-		ts->pins_default = NULL;
 		ts->pins_suspend = NULL;
-		ts->pins_release = NULL;
-
+		ts->pins_default = NULL;
 	}
 	return ret;
 }
@@ -1451,8 +1393,6 @@ static void gt1x_pinctrl_release(void)
 	ts->pins_gesture = NULL;
 	ts->pins_suspend = NULL;
 	ts->pins_default = NULL;
-	ts->pins_release = NULL;
-
 }
 
 /**
@@ -1507,6 +1447,68 @@ static int gt1x_pinctrl_select_gesture(void)
 	}
 	
 	return ret;
+}
+
+static unsigned int gt1x_get_chip_id(u8 *chip_name)
+{
+	int chip_id = 0;
+
+	if(!memcmp(chip_name, GT1X_1151Q_CHIP_ID, GT1X_PRODUCT_ID_LEN)){ /* GT1151Q */
+		chip_id = GT_1151Q_ID;
+	}else{
+		TS_LOG_ERR("%s:invalid chip id failed[%s]!\n", __func__,chip_name);
+		chip_id = GT_DEFALT_ID;
+	}
+
+	return chip_id;
+}
+
+static void gt1x_get_vendor_name(unsigned int vendor_id)
+{
+	char vendor_name[MAX_STR_LEN] ={0};
+	struct gt1x_ts_data *ts = gt1x_ts;
+
+	switch (vendor_id) {
+		case MODULE_OFILM_ID:
+			strncpy(vendor_name, "ofilm", MAX_STR_LEN);
+			break;
+		case MODULE_EELY_ID:
+			strncpy(vendor_name, "eely", MAX_STR_LEN);
+			break;
+		case MODULE_TRULY_ID:
+			strncpy(vendor_name, "truly", MAX_STR_LEN);
+			break;  
+		default:
+			TS_LOG_ERR("%s:user default string!\n", __func__);
+			strncpy(vendor_name, "default", MAX_STR_LEN);
+	}
+
+	memset(ts->dev_data->module_name, 0, MAX_STR_LEN);
+	strncpy(ts->dev_data->module_name, vendor_name, MAX_STR_LEN -1);
+}
+
+/**
+ * gt1x_creat_project_id - get project_id.
+ * @value: 0 is create project_id, other is use default project
+ */
+static void gt1x_creat_project_id(void)
+{
+	struct gt1x_ts_data *ts = gt1x_ts;
+	unsigned int chip_id = 0;
+
+	if(ts->create_project_id_supported && !ts->fw_damage_flag){
+		memset(ts->project_id, 0, sizeof(ts->project_id));
+
+		chip_id = gt1x_get_chip_id(ts->hw_info.product_id);
+		snprintf(ts->project_id, MAX_STR_LEN, "%s%02d%02d0",
+				ts->dev_data->ts_platform_data->product_name,
+				chip_id, ts->dev_data->ts_platform_data->panel_id);
+	}else{
+		TS_LOG_INFO("%s: no support create_project_id, use default project_id\n", __func__);
+	}
+
+	TS_LOG_INFO("%s: project_id = %s\n", __func__, ts->project_id);
+	return; 
 }
 
 /**
@@ -1638,37 +1640,29 @@ static int gt1x_prepar_parse_dts(struct ts_kit_platform_data *pdata)
 								&value);
 	if (ret) {
 		TS_LOG_ERR("%s:get device slave_address failed, use default value\n", __func__);
-		value = GT1X_DEFAULT_SLAVE_ADDR;
+		value = GT1X_DEFAULT_SLAVE_ADDR; 
 	}
 	pdata->client->addr = value;
 
-	ret = of_property_read_u32(pdata->chip_data->cnode, GTP_POWER_SELF_CTRL,
+	ret = of_property_read_u32(pdata->chip_data->cnode, GTP_POWER_SELF_CTRL, 
 								&ts->power_self_ctrl);
 	if (ret) {
 		TS_LOG_ERR("%s : get power_self_ctrl failed\n", __func__);
 		ret = -EINVAL;
 		return ret;
 	}
-
-	ret = of_property_read_u32(pdata->chip_data->cnode, "qcom_adapter_flag",
-								&ts->qcom_adapter_flag);
-	if (ret) {
-		TS_LOG_ERR("%s : get qcom_adapter_flag failed, set this flag to 0 !\n", __func__);
-		ts->qcom_adapter_flag = 0;
-	}
-
-	ret = of_property_read_u32(pdata->chip_data->cnode, GTP_VCI_POWER_TYPE,
+	ret = of_property_read_u32(pdata->chip_data->cnode, GTP_VCI_POWER_TYPE, 
 								&ts->vci_power_type);
 	if (ret) {
-		TS_LOG_ERR("%s : get vci_power_type failed, use default type (gpio)!\n", __func__);
+		TS_LOG_ERR("%s : get vci_power_type failed\n", __func__);
 		ret = -EINVAL;
 		return ret;
 	}
 
-	ret = of_property_read_u32(pdata->chip_data->cnode, GTP_VDDIO_POWER_TYPE,
+	ret = of_property_read_u32(pdata->chip_data->cnode, GTP_VDDIO_POWER_TYPE, 
 								&ts->vddio_power_type);
 	if (ret) {
-		TS_LOG_ERR("%s : get vddio_power_type failed, use default type (gpio)! \n", __func__);
+		TS_LOG_ERR("%s : get vddio_power_type failed\n", __func__);
 		ret = -EINVAL;
 		return ret;
 	}
@@ -1678,7 +1672,7 @@ static int gt1x_prepar_parse_dts(struct ts_kit_platform_data *pdata)
 		value = 0;
 		TS_LOG_INFO("%s : vddio_ldo_need not setting,use default value\n", __func__);
 	}
-	chip_data->regulator_ctr.need_set_vddio_value = value;
+	chip_data->regulator_ctr.need_set_vddio_value = value; 
 
 	ret = of_property_read_u32(pdata->chip_data->cnode, GTP_VCI_LDO_VALUE,
 						&chip_data->regulator_ctr.vci_value);
@@ -1693,15 +1687,7 @@ static int gt1x_prepar_parse_dts(struct ts_kit_platform_data *pdata)
 		TS_LOG_INFO("%s: Use default vddio voltage:1.8v\n", __func__);
 	}
 
-	ret = of_property_read_u32(pdata->chip_data->cnode, "rawdata_newformatflag",&value);
-	if (ret) {
-		chip_data->rawdata_newformatflag = 0; /* 0 old format */
-		TS_LOG_INFO("%s: Use default raw data format:1.8v\n", __func__);
-	}else{
-		chip_data->rawdata_newformatflag = value;
-	}
-
-	TS_LOG_INFO("%s :power_ctrl=%d,vci_power_type=%d,vddio_power_type=%d,vddio_ldo_need=%d\n",
+	TS_LOG_INFO("%s :power_ctrl=%d,vci_power_type=%d,vddio_power_type=%d,vddio_ldo_need=%d\n", 
 		__func__, ts->power_self_ctrl,ts->vci_power_type, ts->vddio_power_type,
 		chip_data->regulator_ctr.need_set_vddio_value);
 
@@ -1718,39 +1704,7 @@ static void gt1x_strtolower(const char *str, const int len)
 		ts->project_id[index] = tolower(str[index]); 
 	}
 }
-static int gt1x_get_lcd_hide_module_name(char *module_name)
-{
-	struct device_node *dev_node = NULL;
-	char *lcd_hide_module_name = NULL;
 
-	char comp_name[MAX_STR_LEN+GT1X_OF_NAME_LEN+1] = {0};
-
-	int ret = 0;
-
-	ret = snprintf(comp_name, MAX_STR_LEN+GT1X_OF_NAME_LEN+1, "%s-%s", GT1X_OF_NAME, module_name);
-	if (ret >= MAX_STR_LEN+GT1X_OF_NAME_LEN+1) {
-		TS_LOG_INFO("%s:%s, ret=%d, size=%d\n", __func__,
-			"compatible_name out of range", ret, MAX_STR_LEN+GT1X_OF_NAME_LEN+1);
-		return -EINVAL;
-	}
-
-	dev_node = of_find_compatible_node(NULL, NULL, comp_name);
-	if (!dev_node) {
-		TS_LOG_ERR("%s: NOT found device node[%s]!\n", __func__, comp_name);
-		return -EINVAL;
-	}
-
-	lcd_hide_module_name = (char*)of_get_property(dev_node, "lcd_hide_module_name", NULL);
-	if(!lcd_hide_module_name){
-		TS_LOG_ERR("%s: Get lcd_hide_module_name faile!\n", __func__);
-		return -EINVAL ;
-	}
-
-	strncpy(gt1x_ts->lcd_hide_module_name, lcd_hide_module_name, MAX_STR_LEN-1);
-	TS_LOG_INFO("lcd_hide_module_name = %s.\n", gt1x_ts->lcd_hide_module_name);
-	return 0;
-
-}
 static int  gt1x_get_lcd_module_name(void)
 {
 	char temp[LCD_PANEL_INFO_MAX_LEN] = {0};
@@ -1764,11 +1718,7 @@ static int  gt1x_get_lcd_module_name(void)
 		}
 		gt1x_ts->lcd_module_name[i] = tolower(temp[i]);
 	}
-	if(gt1x_ts->hide_plain_lcd_log) {
-		return gt1x_get_lcd_hide_module_name(gt1x_ts->lcd_module_name);			
-	} else {
-		TS_LOG_INFO("lcd_module_name = %s.\n", gt1x_ts->lcd_module_name);
-	}
+	TS_LOG_INFO("lcd_module_name = %s.\n", gt1x_ts->lcd_module_name);
 	return 0;
 }
 static int gt1x_get_lcd_panel_info(void)
@@ -1787,6 +1737,7 @@ static int gt1x_get_lcd_panel_info(void)
 	}
 
 	strncpy(gt1x_ts->lcd_panel_info, lcd_type, LCD_PANEL_INFO_MAX_LEN-1);
+	TS_LOG_INFO("lcd_panel_info = %s.\n", gt1x_ts->lcd_panel_info);
 	return 0;
 }
 
@@ -1873,14 +1824,6 @@ static int gt1x_parse_dts(void)
 	ts->fw_only_depend_on_lcd = value;
 	TS_LOG_INFO("%s: fw_only_depend_on_lcd = %d  \n", __func__,ts->fw_only_depend_on_lcd);
 
-	ret = of_property_read_u32(device, GTP_HIDE_PLAIN_LCD_LOG, &value);
-	if (ret) {
-		TS_LOG_INFO("%s get hide_plain_lcd_log from dts failed, use default(0).\n", __func__);
-		value = 0;
-	}
-	ts->hide_plain_lcd_log = 	value;
-	TS_LOG_INFO("%s: hide_plain_lcd_log = %d  \n", __func__,ts->hide_plain_lcd_log);
-
 	ret = of_property_read_u32(device, GTP_EDGE_ADD, &value);
 	if (ret) {
 		TS_LOG_ERR("%s:edge_add read failed, Use default value: 0\n", __func__);
@@ -1896,24 +1839,6 @@ static int gt1x_parse_dts(void)
 	}
 	ts->gt1x_edge_support_xyer= value;
 	TS_LOG_INFO("%s:gt1x_edge_support_xyer value: %d\n", __func__, ts->gt1x_edge_support_xyer);
-
-	ret = of_property_read_u32(device, GTP_SUPPORT_WXY, &value);
-	if (ret) {
-		TS_LOG_ERR("%s:support wx wy read failed, Use default value: 0\n", __func__);
-		value = 0;
-	}
-	ts->gt1x_support_wxy = value;
-	TS_LOG_INFO("%s:gt1x_support_wxy value: [%d]\n", __func__, ts->gt1x_support_wxy);
-
-	if(ts->gt1x_support_wxy) {
-		ret = of_property_read_u32(device, GTP_WXY_DATA_ADD, &value);
-		if (ret) {
-			TS_LOG_ERR("%s:gt1x_wxy_data_add read failed, Use default value: 0\n", __func__);
-			value = 0;
-		}
-		ts->gt1x_wxy_data_add = value;
-		TS_LOG_INFO("%s:gt1x_wxy_data_add value: [%x]\n", __func__, ts->gt1x_wxy_data_add);
-	}
 
 	ret = of_property_read_u32(device, GTP_ROI_DATA_ADD, &value);
 	if (ret) {
@@ -2136,7 +2061,7 @@ static int gt1x_parse_specific_dts(void)
 	u8 sid_is_exist = GT1X_NOT_EXIST;
 	
 	if (getU32(cfg_bin->data) + BIN_CFG_START_LOCAL != cfg_bin->size) {
-		TS_LOG_ERR("%s:Bad firmware!(file length: %lu, header define: %d)\n",
+		TS_LOG_ERR("%s:Bad firmware!(file length: %d, header define: %d)\n", 
 			__func__, cfg_bin->size, getU32(cfg_bin->data));
 		goto exit;
 	}
@@ -2268,12 +2193,11 @@ static int gt1x_get_cfg_parms(struct gt1x_ts_data *ts, const char *filename)
 	
 	// compare file length with the length field in the firmware header
 	if ((cfg_bin->size) < CFG_BIN_SIZE_MIN || cfg_bin->data == NULL) {
-		TS_LOG_ERR("%s:Bad firmware!(config firmware sizle: %lu)\n",
-			__func__, cfg_bin->size);
+		TS_LOG_ERR("%s:Bad firmware!(config firmware sizle: %u)\n", __func__, cfg_bin->size);
 		goto exit;
 	}
 
-	TS_LOG_INFO("%s: cfg_bin_size=%lu\n", __func__, cfg_bin->size);
+	TS_LOG_INFO("%s: cfg_bin_size=%u\n", __func__, cfg_bin->size);
 	/* parse normal config data */
 	ret = gt1x_get_cfg_data(cfg_bin,GT1X_NORMAL_CONFIG, &ts->normal_config);
 	if (ret < 0) {
@@ -2354,11 +2278,7 @@ static int gt1x_init_configs(struct gt1x_ts_data *ts)
 			ret = gt1x_get_lcd_module_name();
 			if(!ret) {
 				strncat(filename, "_", GT1X_FW_NAME_LEN - strlen(filename));
-				if(gt1x_ts->hide_plain_lcd_log) {
-					strncat(filename, ts->lcd_hide_module_name, GT1X_FW_NAME_LEN - strlen(filename));
-				} else {
-					strncat(filename, ts->lcd_module_name, GT1X_FW_NAME_LEN - strlen(filename));
-				}
+				strncat(filename, ts->lcd_module_name, GT1X_FW_NAME_LEN - strlen(filename));
 			}
 		}
 	}
@@ -2405,11 +2325,6 @@ static int gt1x_chip_detect(struct ts_kit_platform_data *pdata)
 	if (ret < 0){
 		TS_LOG_ERR("%s: pinctrl_init fail\n", __func__);
 		goto err_regulator;
-	}
-
-	if(gt1x_ts->qcom_adapter_flag)
-	{
-		gt1x_pinctrl_select_normal();
 	}
 
 	ret = gt1x_set_voltage();
@@ -2462,11 +2377,6 @@ static int gt1x_chip_init(void)
 	int ret = -1;
 	u8 reg_val[1] = {0};
 	cypress_ts_kit_color[0]= 0xFF;
-
-#if defined (CONFIG_TEE_TUI)
-	strncpy(tee_tui_data.device_name, "gt1x", strlen("gt1x"));
-	tee_tui_data.device_name[strlen("gt1x")] = '\0';
-#endif
 
 	/* check main system firmware */
 	ret = gt1x_i2c_read_dbl_check(GTP_REG_FW_CHK_MAINSYS,
@@ -2609,7 +2519,7 @@ static int gt1x_chip_resume(void)
 	switch (ts->dev_data->easy_wakeup_info.sleep_mode) {
 	case TS_POWER_OFF_MODE:
 		gt1x_pinctrl_select_normal();
-		if (!g_tskit_pt_station_flag && (GT1X_POWER_CONTRL_BY_SELF == ts->power_self_ctrl)){
+		if (!g_tskit_pt_station_flag){
 			gt1x_power_switch(SWITCH_ON);
 		}
 		break;
@@ -2642,7 +2552,7 @@ static int gt1x_chip_suspend(void)
 	switch (ts->dev_data->easy_wakeup_info.sleep_mode) {
 	case TS_POWER_OFF_MODE:
 		gt1x_pinctrl_select_suspend();
-		if (!g_tskit_pt_station_flag && (GT1X_POWER_CONTRL_BY_SELF == ts->power_self_ctrl)){
+		if (!g_tskit_pt_station_flag){
 			TS_LOG_INFO("%s: enter power_off mode\n", __func__);
 			gt1x_power_switch(SWITCH_OFF);
 		}else{
@@ -2721,25 +2631,18 @@ static int gt1x_chip_get_info(struct ts_chip_info_param *info)
 	struct gt1x_ts_data *ts = gt1x_ts;
 	int len = 0;
 
-	TS_LOG_INFO("%s: enter\n", __func__);
-	if (!info || !ts || !ts->dev_data || !ts->dev_data->ts_platform_data){
-		TS_LOG_ERR("%s: info or ts is null\n", __func__);
+	if (!info){
+		TS_LOG_ERR("%s: info is null\n", __func__);
 		return -EINVAL;
 	}
-
+	TS_LOG_INFO("%s: enter\n", __func__);
 	memset(info->ic_vendor, 0, sizeof(info->ic_vendor));
 	memset(info->mod_vendor, 0, sizeof(info->mod_vendor));
 	memset(info->fw_vendor, 0, sizeof(info->fw_vendor));
 
-	if(!ts->dev_data->ts_platform_data->hide_plain_id) {
-		len = (sizeof(info->ic_vendor) - 1) > sizeof(GT1X_OF_NAME) ?
-				sizeof(GT1X_OF_NAME) : (sizeof(info->ic_vendor) - 1);
-		strncpy(info->ic_vendor, GT1X_OF_NAME, len);
-	} else {
-		len = (sizeof(info->ic_vendor) - 1) > strlen(ts->project_id) ?
-			strlen(ts->project_id) : (sizeof(info->ic_vendor) - 1);
-		strncpy(info->ic_vendor, ts->project_id, len);
-	}
+	len = (sizeof(info->ic_vendor) -1 ) > sizeof(GT1X_OF_NAME)? 
+			sizeof(GT1X_OF_NAME) :(sizeof(info->ic_vendor) -1 );
+	strncpy(info->ic_vendor, GT1X_OF_NAME, len);
 
 	len = (sizeof(info->mod_vendor) -1 ) > strlen(ts->project_id)? 
 		strlen(ts->project_id): (sizeof(info->mod_vendor) -1 );
@@ -2751,47 +2654,20 @@ static int gt1x_chip_get_info(struct ts_chip_info_param *info)
 	return NO_ERR;
 }
 
-static void goodix_reset_select_addr(void)
-{
-	TS_LOG_DEBUG("%s: Start to make chip-selection for 0x14 slave sddress!\n", __func__);
-	gpio_direction_output(gt1x_ts->dev_data->ts_platform_data->reset_gpio, 0);
-	mdelay(5);
-	//Here to pull up irq for chip-selection  with 0x14 slave address.
-	gpio_direction_output(gt1x_ts->dev_data->ts_platform_data->irq_gpio,1);
-	mdelay(10);
-	gpio_direction_output(gt1x_ts->dev_data->ts_platform_data->reset_gpio, 1);
-	return;
-}
-
 /**
  * gt1x_chip_reset - reset chip
  */
 int gt1x_chip_reset(void)
 {
-	int ret;
-	int irq_gpio;
-	int reset_gpio;
+	int reset_gpio = 0;
 
 	reset_gpio = gt1x_ts->dev_data->ts_platform_data->reset_gpio;
-	irq_gpio = gt1x_ts->dev_data->ts_platform_data->irq_gpio;
 	TS_LOG_INFO("%s: Chip reset\n", __func__);
-	/* chip select for 0x14 slave address */
-	if(gt1x_ts->qcom_adapter_flag)
-	{
-		goodix_reset_select_addr();
-		msleep(80); /* chip initialize */
-		ret = gpio_direction_input(irq_gpio);
-		if (ret)
-			TS_LOG_ERR("%s: set irq gpio direction input error\n",
-				__func__);
-	}
-	else
-	{
-		gpio_direction_output(reset_gpio, 0);
-		udelay(150);
-		gpio_direction_output(reset_gpio, 1);
-		msleep(80); /* chip initialize */
-	}
+
+	gpio_direction_output(reset_gpio, 0);
+	udelay(150);
+	gpio_direction_output(reset_gpio, 1);
+	msleep(80); /* chip initialize */
 
 	return gt1x_init_watchdog();
 }
@@ -3279,8 +3155,8 @@ static void gt1x_chip_touch_switch(void)
 	int error = 0;
 	unsigned int i = 0, cnt = 0;
 	struct gt1x_ts_data *ts = gt1x_ts;
+	struct ts_feature_info *info = &ts->dev_data->ts_platform_data->feature_info;
 	struct gt1x_ts_config *config = NULL;
-	struct ts_feature_info *info = NULL;
 
 	TS_LOG_INFO("%s enter\n", __func__);
 
@@ -3288,7 +3164,7 @@ static void gt1x_chip_touch_switch(void)
 		TS_LOG_ERR("%s, error chip data\n",__func__);
 		goto out;
 	}
-	info = &ts->dev_data->ts_platform_data->feature_info;
+
 	/* SWITCH_OPER,ENABLE_DISABLE,PARAM */
 	memcpy(in_data, ts->dev_data->touch_switch_info, MAX_STR_LEN -1);
 	TS_LOG_INFO("%s, in_data:%s\n",__func__, in_data);

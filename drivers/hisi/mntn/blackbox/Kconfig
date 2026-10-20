@@ -23,11 +23,6 @@ config HISI_BB_DEBUG
 	  etc
 
 # need_other_module_clear
-config HISI_MNTN_SP
-	bool "hisi ap core register sp record"
-	depends on  HISI_LPMCU_BB
-	default n
-
 config HISI_LPMCU_BB
 	bool "hisi lpmcu bbox"
 	depends on  HISI_BB
@@ -56,20 +51,5 @@ config HISI_DFX_CORE
 	help
 	  This module can record some data to dfx partition.
 
-config HISI_MNTN_ESUBTYPE
-	bool "hisi exception subtype"
-	depends on HISI_BB
-	default n
-	help
-	  This module can record exception subtype.
-
-config HISI_BB_DIAGINFO
-	bool "hisi diaginfo"
-	depends on HISI_BB
-	default n
-	help
-	  This module used to record nonreset exception.
-
 source "drivers/hisi/mntn/blackbox/platform_ap/Kconfig"
-source "drivers/hisi/hifi_dsp/Kconfig"
 endmenu

@@ -1,6 +1,6 @@
 /* dvb-usb-firmware.c is part of the DVB USB library.
  *
- * Copyright (C) 2004-6 Patrick Boettcher (patrick.boettcher@posteo.de)
+ * Copyright (C) 2004-6 Patrick Boettcher (patrick.boettcher@desy.de)
  * see dvb-usb-init.c for copyright information.
  *
  * This file contains functions for downloading the firmware to Cypress FX 1 and 2 based devices.
@@ -36,18 +36,16 @@ static int usb_cypress_writemem(struct usb_device *udev,u16 addr,u8 *data, u8 le
 int usb_cypress_load_firmware(struct usb_device *udev, const struct firmware *fw, int type)
 {
 	struct hexline *hx;
-	u8 *buf;
-	int ret, pos = 0;
-	u16 cpu_cs_register = cypress[type].cpu_cs_register;
+	u8 reset;
+	int ret,pos=0;
 
-	buf = kmalloc(sizeof(*hx), GFP_KERNEL);
-	if (!buf)
+	hx = kmalloc(sizeof(*hx), GFP_KERNEL);
+	if (!hx)
 		return -ENOMEM;
-	hx = (struct hexline *)buf;
 
 	/* stop the CPU */
-	buf[0] = 1;
-	if (usb_cypress_writemem(udev, cpu_cs_register, buf, 1) != 1)
+	reset = 1;
+	if ((ret = usb_cypress_writemem(udev,cypress[type].cpu_cs_register,&reset,1)) != 1)
 		err("could not stop the USB controller CPU.");
 
 	while ((ret = dvb_usb_get_hexline(fw, hx, &pos)) > 0) {
@@ -64,21 +62,21 @@ int usb_cypress_load_firmware(struct usb_device *udev, const struct firmware *fw
 	}
 	if (ret < 0) {
 		err("firmware download failed at %d with %d",pos,ret);
-		kfree(buf);
+		kfree(hx);
 		return ret;
 	}
 
 	if (ret == 0) {
 		/* restart the CPU */
-		buf[0] = 0;
-		if (usb_cypress_writemem(udev, cpu_cs_register, buf, 1) != 1) {
+		reset = 0;
+		if (ret || usb_cypress_writemem(udev,cypress[type].cpu_cs_register,&reset,1) != 1) {
 			err("could not restart the USB controller CPU.");
 			ret = -EINVAL;
 		}
 	} else
 		ret = -EIO;
 
-	kfree(buf);
+	kfree(hx);
 
 	return ret;
 }

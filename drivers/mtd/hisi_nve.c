@@ -23,6 +23,7 @@
 #include <linux/semaphore.h>
 #include <linux/compat.h>
 
+
 #include <linux/syscalls.h>
 #include <asm/uaccess.h>
 #include <linux/delay.h>
@@ -36,7 +37,6 @@
 
 static struct semaphore nv_sem;
 static struct class *nve_class;
-static unsigned int dev_major_num;
 static struct NVE_struct *g_nve_struct;
 static int hisi_nv_setup_ok = 0;
 static char *nve_block_device_name = NULL;
@@ -44,7 +44,6 @@ static char log_nv_info[NV_INFO_LEN];
 static char temp_nv_info[NV_INFO_LEN];
 #if CONFIG_HISI_NVE_WHITELIST
 extern unsigned int get_userlock(void);
-static int nve_whitelist_en = 1;
 #endif
 
 /*
@@ -89,18 +88,18 @@ static int check_crc_for_valid_items(int nv_item_start, int check_items, struct 
 	int nv_number;
 	/*nv_item_start means the start nv number, range is 0-1022*/
 	if(nv_item_start >= NV_ITEMS_MAX_NUMBER || nv_item_start < 0){
-		pr_err("invalid nv_item_start in check crc fuction, nv_item_start = %d\n", nv_item_start);
+		printk(KERN_ERR "invalid nv_item_start in check crc fuction, nv_item_start = %d\n", nv_item_start);
 		return -1;
 	}
 	/*check_items means the number of chek nv items, range is 1-1023*/
 	if(check_items > NV_ITEMS_MAX_NUMBER || check_items <= 0){
-		pr_err("invalid check_items in check crc fuction, check_items = %d\n", check_items);
+		printk(KERN_ERR "invalid check_items in check crc fuction, check_items = %d\n", check_items);
 		return -1;
 	}
 	for(i = 0;i < check_items;i++){
 		nv_number = nv_item_start + i;
 		if(nv_number >= NV_ITEMS_MAX_NUMBER){
-			pr_err("invalid nv number in check crc fuction, nv_item_start = %d, check_items = %d\n", nv_item_start, check_items);
+			printk(KERN_ERR "invalid nv number in check crc fuction, nv_item_start = %d, check_items = %d\n", nv_item_start, check_items);
 			return -1;
 		}
 		nv_item = &nve_ramdisk->NV_items[nv_number];
@@ -109,14 +108,14 @@ static int check_crc_for_valid_items(int nv_item_start, int check_items, struct 
 		temp_crc = ~ crc32c_nve(CRC32C_REV_SEED, crc_data, sizeof(crc_data));
 
 		if(nv_item->crc != temp_crc){
-			pr_err("kernel nv item {%d}, old_crc_value = 0x%x, new_crc_value = 0x%x, crc_data = %s\n", nv_number, nv_item->crc, temp_crc, crc_data);
+			printk(KERN_ERR "kernel nv item {%d}, old_crc_value = 0x%x, new_crc_value = 0x%x, crc_data = %s\n", nv_number, nv_item->crc, temp_crc, crc_data);
 			break;
 		}
 	}
 	if(i == check_items)
 		return 0;
 	else{
-		pr_err("crc check failed, item_num = %d\n", i);
+		printk(KERN_ERR"crc check failed, item_num = %d\n", i);
 		return -1;
 	}
 }
@@ -148,7 +147,7 @@ static void caculate_crc_for_valid_items(struct NV_items_struct *nv_items)
 static void nve_increment(struct NVE_struct *nvep)
 {
 	if(nvep == NULL){
-		pr_err("[NVE][%s]nve struct is not init %d.\n",__func__, __LINE__);
+		printk(KERN_ERR"[NVE][%s]nve struct is not init %d.\n",__func__, __LINE__);
 		return;
 	}
 	if (nvep->nve_current_id >= nvep->nve_partition_count - 1)
@@ -167,7 +166,7 @@ static void nve_increment(struct NVE_struct *nvep)
 static void nve_decrement(struct NVE_struct *nvep)
 {
 	if(nvep == NULL){
-		pr_err("[NVE][%s]nve struct is not init %d.\n",__func__, __LINE__);
+		printk(KERN_ERR"[NVE][%s]nve struct is not init %d.\n",__func__, __LINE__);
 		return;
 	}
 	/*we only use 1-7 partition, if id is 1, next decrement id is 7, after init nvep->nve_partition_count is 8*/
@@ -192,22 +191,24 @@ static int nve_read(loff_t from, size_t len, u_char *buf)
 {
 	int ret;
 	int fd;
-	/*lint -e501*/
 	mm_segment_t oldfs = get_fs();
+	/*lint -e501*/
 	set_fs(get_ds());
 	/*lint +e501*/
 	fd = (int)sys_open(nve_block_device_name, O_RDONLY,
 		      (int)S_IRWXU | S_IRWXG | S_IRWXO);
 
 	if (fd < 0) {
-		pr_err("[NVE][%s]open nv block device failed, and fd = %x!\n",__func__, fd);
+		printk(KERN_ERR
+		       "[NVE][%s]open nv block device failed, and fd = %x!\n",
+		       __func__, fd);
 		ret = -ENODEV;
 		goto out;
 	}
 
 	ret = (int)sys_lseek((unsigned int)fd, from, SEEK_SET);
 	if (ret == -1) {
-		pr_err("[NVE][%s] Fatal seek error, read flash from = "
+		printk(KERN_ERR "[NVE][%s] Fatal seek error, read flash from = "
 				"0x%llx, len = 0x%zx, ret = 0x%x.\n",
 		       __func__, from, len, ret);
 		ret = -EIO;
@@ -216,7 +217,7 @@ static int nve_read(loff_t from, size_t len, u_char *buf)
 
 	ret = (int)sys_read((unsigned int)fd, (char *)buf, len);
 	if (ret == -1) {
-		pr_err("[NVE][%s] Fatal read error, read flash from = "
+		printk(KERN_ERR "[NVE][%s] Fatal read error, read flash from = "
 				"0x%llx, len = 0x%zx, ret = 0x%x.\n",
 		       __func__, from, len, ret);
 		ret = -EIO;
@@ -250,15 +251,16 @@ static int nve_write(loff_t from, size_t len, u_char *buf)
 {
 	int ret;
 	int fd;
-	/*lint -e501*/
 	mm_segment_t oldfs = get_fs();
+	/*lint -e501*/
 	set_fs(get_ds());
 	/*lint +e501*/
 	fd = (int)sys_open(nve_block_device_name, O_RDWR,
 		      (int)S_IRWXU | S_IRWXG | S_IRWXO);
 
 	if (fd < 0) {
-		pr_err("[NVE][%s]open nv block device failed, and fd = %x!\n",
+		printk(KERN_ERR
+		       "[NVE][%s]open nv block device failed, and fd = %x!\n",
 		       __func__, fd);
 		ret = -ENODEV;
 		goto out;
@@ -266,7 +268,7 @@ static int nve_write(loff_t from, size_t len, u_char *buf)
 
 	ret = (int)sys_lseek((unsigned int)fd, from, SEEK_SET);
 	if (ret == -1) {
-		pr_err("[NVE][%s] Fatal seek error, read flash from = "
+		printk(KERN_ERR "[NVE][%s] Fatal seek error, read flash from = "
 				"0x%llx, len = 0x%zx, ret = 0x%x.\n",
 		       __func__, from, len, ret);
 		ret = -EIO;
@@ -275,7 +277,7 @@ static int nve_write(loff_t from, size_t len, u_char *buf)
 
 	ret = (int)sys_write((unsigned int)fd, (char *)buf, len);
 	if (ret == -1) {
-		pr_err("[NVE][%s] Fatal write error, read flash from "
+		printk(KERN_ERR "[NVE][%s] Fatal write error, read flash from "
 				"= 0x%llx, len = 0x%zx, ret = 0x%x.\n",
 		       __func__, from, len, ret);
 		ret = -EIO;
@@ -284,7 +286,7 @@ static int nve_write(loff_t from, size_t len, u_char *buf)
 
 	ret = (int)sys_fsync((unsigned int)fd);
 	if (ret < 0) {
-		pr_err("[NVE][%s] Fatal sync error, read flash from = "
+		printk(KERN_ERR "[NVE][%s] Fatal sync error, read flash from = "
 				"0x%llx, len = 0x%zx, ret = 0x%x.\n",
 		       __func__, from, len, ret);
 		ret = -EIO;
@@ -320,7 +322,7 @@ static int nve_check_partition(struct NVE_partittion *ramdisk, uint32_t index)
 
 	ret = nve_read((loff_t)index * NVE_PARTITION_SIZE, (size_t)NVE_PARTITION_SIZE, (u_char *)ramdisk);
 	if (ret) {
-		pr_err("[NVE][%s]nve_read error in line %d!\n",
+		printk(KERN_ERR "[NVE][%s]nve_read error in line %d!\n",
 		       __func__, __LINE__);
 	}else{
 		/*update for valid nvme items*/
@@ -338,8 +340,8 @@ static int nve_check_partition(struct NVE_partittion *ramdisk, uint32_t index)
 			/*check the crc for valid nvme items*/
 			ret = check_crc_for_valid_items(0, (int)nve_partition_header->valid_items, ramdisk);
 			if(ret){
-				pr_err("nve_check_partition{%d} valid_items:%d, version = %d, crc_support = %d\n", index, nve_partition_header->valid_items, nve_partition_header->nve_version, nve_partition_header->nve_crc_support);
-				pr_err("nve crc check error:ret = %d, index = %d\n", ret, index);
+				printk(KERN_ERR"nve_check_partition{%d} valid_items:%d, version = %d, crc_support = %d\n", index, nve_partition_header->valid_items, nve_partition_header->nve_version, nve_partition_header->nve_crc_support);
+				printk(KERN_ERR"nve crc check error:ret = %d, index = %d\n", ret, index);
 			}
 		}
 		#endif
@@ -373,7 +375,7 @@ static void nve_find_valid_partition(struct NVE_struct *nvep)
 		}
 	}
 
-	pr_info("[NVE][%s]current_id = %d valid_items = %d, version = %d, crc_support = %d\n", __func__, nvep->nve_current_id, nve_partition_header->valid_items, nve_partition_header->nve_version, nve_partition_header->nve_crc_support);
+	printk(KERN_INFO"[NVE][%s]current_id = %d valid_items = %d, version = %d, crc_support = %d\n", __func__, nvep->nve_current_id, nve_partition_header->valid_items, nve_partition_header->nve_version, nve_partition_header->nve_crc_support);
 
 	return;
 }
@@ -384,7 +386,7 @@ static int write_ramdisk_to_device(unsigned int id, struct NVE_partittion *ramdi
 	loff_t start_addr;
 	unsigned int nve_update_age = nve_partition_header->nve_age + 1;
 	if(id >= NVE_PARTITION_COUNT){
-		pr_err("[NVE][%s]invalid id in line %d!\n", __func__, __LINE__);
+		printk(KERN_ERR "[NVE][%s]invalid id in line %d!\n", __func__, __LINE__);
 		return -1;
 	}
 	/*write to next partition a invalid age*/
@@ -393,7 +395,7 @@ static int write_ramdisk_to_device(unsigned int id, struct NVE_partittion *ramdi
 	start_addr = (((loff_t)id + 1) * NVE_PARTITION_SIZE) - 512;
 	ret = nve_write(start_addr, (size_t)512, ((unsigned char *)ramdisk + NVE_PARTITION_SIZE - 512));
 	if(ret){
-		pr_err("[NVE][%s]write old nv partition head failed in line %d!\n", __func__, __LINE__);
+		printk(KERN_ERR "[NVE][%s]write old nv partition head failed in line %d!\n", __func__, __LINE__);
 		/*recover the age*/
 		nve_partition_header->nve_age = nve_update_age - 1;
 		return ret;
@@ -402,7 +404,7 @@ static int write_ramdisk_to_device(unsigned int id, struct NVE_partittion *ramdi
 	start_addr = (loff_t)id * NVE_PARTITION_SIZE;
 	ret = nve_write(start_addr, (size_t)NVE_PARTITION_SIZE - 512, (unsigned char *)ramdisk);
 	if(ret){
-		pr_err("[NVE][%s]write nv partition data failed in line %d!\n", __func__, __LINE__);
+		printk(KERN_ERR "[NVE][%s]write nv partition data failed in line %d!\n", __func__, __LINE__);
 		/*recover the age*/
 		nve_partition_header->nve_age = nve_update_age - 1;
 		return ret;
@@ -411,7 +413,7 @@ static int write_ramdisk_to_device(unsigned int id, struct NVE_partittion *ramdi
 	 /*after writing partition to device, read the partition again to check, if check not pass, return error and not update header age*/
 	ret = nve_check_partition(ramdisk, id);
 	if(ret){
-		pr_err("[NVE][%s]after writing partition to device, read the partition again to check failed!\n", __func__);
+		printk(KERN_ERR "[NVE][%s]after writing partition to device, read the partition again to check failed!\n", __func__);
 		/*recover the age*/
 		nve_partition_header->nve_age = nve_update_age - 1;
 		return ret;
@@ -423,7 +425,7 @@ static int write_ramdisk_to_device(unsigned int id, struct NVE_partittion *ramdi
 	start_addr = (((loff_t)id + 1) * NVE_PARTITION_SIZE) - 512;
 	ret = nve_write(start_addr, (size_t)512, ((unsigned char *)ramdisk + NVE_PARTITION_SIZE - 512));
 	if(ret){
-		pr_err("[NVE][%s]write nv latest partition head failed in line %d!\n", __func__, __LINE__);
+		printk(KERN_ERR "[NVE][%s]write nv latest partition head failed in line %d!\n", __func__, __LINE__);
 		return ret;
 	}
 	return ret;
@@ -433,7 +435,7 @@ static int erase_ramdisk_to_device(unsigned int id, struct NVE_partittion *ramdi
 	int ret;
 	loff_t start_addr;
 	if(id >= NVE_PARTITION_COUNT){
-		pr_err("[NVE][%s]invalid id in line %d!\n", __func__, __LINE__);
+		printk(KERN_ERR "[NVE][%s]invalid id in line %d!\n", __func__, __LINE__);
 		return -1;
 	}
 	(void)memset((void *)ramdisk, 0, (unsigned long)NVE_PARTITION_SIZE);
@@ -441,14 +443,14 @@ static int erase_ramdisk_to_device(unsigned int id, struct NVE_partittion *ramdi
 	start_addr = (((loff_t)id + 1) * NVE_PARTITION_SIZE) - 512;
 	ret = nve_write(start_addr,  (size_t)512, ((unsigned char *)ramdisk + NVE_PARTITION_SIZE - 512));
 	if(ret){
-		pr_err("[NVE][%s]erase partition head failed in line %d!\n", __func__, __LINE__);
+		printk(KERN_ERR "[NVE][%s]erase partition head failed in line %d!\n", __func__, __LINE__);
 		return ret;
 	}
 	/*erase partition data*/
 	start_addr = (loff_t)id * NVE_PARTITION_SIZE;
 	ret = nve_write(start_addr, (size_t)NVE_PARTITION_SIZE - 512, (unsigned char *)ramdisk);
 	if(ret){
-		pr_err("[NVE][%s]erase partition data failed in line %d!\n", __func__, __LINE__);
+		printk(KERN_ERR "[NVE][%s]erase partition data failed in line %d!\n", __func__, __LINE__);
 		return ret;
 	}
 	return ret;
@@ -474,7 +476,7 @@ int nve_update_and_check_item(unsigned int update_items, unsigned int valid_chec
 		if(i < valid_check_items){
 			/*check the name is normal and reserved*/
 			if(strncmp(nve_store_ramdisk->NV_items[i].nv_name, nve_update_ramdisk->NV_items[i].nv_name, (unsigned int)sizeof(nve_store_ramdisk->NV_items[i].nv_name))){
-				pr_err("current nv [%d] name is different, please notoce!\n", i);
+				printk(KERN_ERR"current nv [%d] name is different, please notoce!\n", i);
 			}
 			if (nve_store_ramdisk->NV_items[i].nv_property){
 				#ifdef CONFIG_CRC_SUPPORT
@@ -491,7 +493,7 @@ int nve_update_and_check_item(unsigned int update_items, unsigned int valid_chec
 				continue;
 			}
 			if(nve_store_ramdisk->NV_items[i].valid_size != nve_update_ramdisk->NV_items[i].valid_size)
-				pr_warn("current nv [%d] valid size is different, old valid size = %d, new valid size = %d!\n", i, nve_store_ramdisk->NV_items[i].valid_size, nve_update_ramdisk->NV_items[i].valid_size);
+				printk(KERN_WARNING  "current nv [%d] valid size is different, old valid size = %d, new valid size = %d!\n", i, nve_store_ramdisk->NV_items[i].valid_size, nve_update_ramdisk->NV_items[i].valid_size);
 		}
 		/*update current partition ram*/
 		memcpy((void *)&nve_store_ramdisk->NV_items[i], (void *)&nve_update_ramdisk->NV_items[i], sizeof(struct NV_items_struct));
@@ -522,7 +524,7 @@ static int nve_restore(struct NVE_struct *nvep)
 	if (NVE_INVALID_NVM == nvep->nve_current_id) {
 		ret = nve_read((loff_t)0, (size_t)NVE_PARTITION_SIZE, (u_char *)nvep->nve_store_ramdisk);
 		if (ret) {
-			pr_err("[NVE][%s] nve read error %d in line [%d].\n",  __func__, ret, __LINE__);
+			printk(KERN_ERR "[NVE][%s] nve read error %d in line [%d].\n",  __func__, ret, __LINE__);
 			return -ENODEV;
 		}
 		/*update nv ram's header valid items*/
@@ -533,7 +535,7 @@ static int nve_restore(struct NVE_struct *nvep)
 		update_items = nve_store_partition_header->valid_items;
 	} else {
 		if (nve_read((loff_t)nvep->nve_current_id * NVE_PARTITION_SIZE, (size_t)NVE_PARTITION_SIZE, (u_char *)nvep->nve_store_ramdisk)) {
-				pr_err("[NVE][%s] nve read error in line [%d].\n", __func__, __LINE__);
+				printk(KERN_ERR "[NVE][%s] nve read error in line [%d].\n", __func__, __LINE__);
 				return -EFAULT;
 		}
 		/*update nv ram's header valid items*/
@@ -541,7 +543,7 @@ static int nve_restore(struct NVE_struct *nvep)
 		nve_store_partition_header = &nvep->nve_store_ramdisk->header;
 
 		if (nve_read((loff_t)0, (size_t)NVE_PARTITION_SIZE, (u_char *)nvep->nve_update_ramdisk)) {
-				pr_err("[NVE][%s] nve read error in line [%d].\n", __func__, __LINE__);
+				printk(KERN_ERR "[NVE][%s] nve read error in line [%d].\n", __func__, __LINE__);
 				return -EFAULT;
 		}
 		/*update nv ram's header valid items*/
@@ -554,18 +556,18 @@ static int nve_restore(struct NVE_struct *nvep)
 		/*get the max items in partition 0 and current partition*/
 		/*if 0 partition valid item is less than current partition , the delete items should also be updated*/
 		update_items = max(nve_store_partition_header->valid_items, nve_update_partition_header->valid_items);
-		pr_info("valid_items [%d] and update_items [%d], update version = %d, crc_support = %d!\n", valid_check_items, update_items, nve_update_partition_header->nve_version, nve_update_partition_header->nve_crc_support);
+		printk(KERN_INFO "valid_items [%d] and update_items [%d], update version = %d, crc_support = %d!\n", valid_check_items, update_items, nve_update_partition_header->nve_version, nve_update_partition_header->nve_crc_support);
 
 		ret = nve_update_and_check_item(update_items, valid_check_items, nvep->nve_store_ramdisk, nvep->nve_update_ramdisk);
 		if(ret){
-			pr_err("[nve_restore]ERROR!!!nve_update_and_check_item failed!\n");
+			printk(KERN_ERR "[nve_restore]ERROR!!!nve_update_and_check_item failed!\n");
 			return ret;
 		}
 
 		/*when current partition header is not valid, we will update the header and set the age*/
 		if (strncmp(NVE_HEADER_NAME, nve_store_partition_header->nve_partition_name, (unsigned int)strlen(NVE_HEADER_NAME))) {
 			/*nve partition is corrupt,we need to recover the header too*/
-			pr_err("[nve_restore]ERROR!!! partition %d is corrupted invalidly,recover the header!\n", nvep->nve_current_id);
+			printk(KERN_ERR"[nve_restore]ERROR!!! partition %d is corrupted invalidly,recover the header!\n", nvep->nve_current_id);
 			/*store the orignal age*/
 			nve_age_temp = nve_store_partition_header->nve_age;
 			/*update current header*/
@@ -583,9 +585,7 @@ static int nve_restore(struct NVE_struct *nvep)
 	/*write to next partition*/
 	ret = write_ramdisk_to_device(nvep->nve_current_id, nvep->nve_store_ramdisk);
 	if(ret){
-		pr_err("[NVE][%s]write to device failed in line [%d].\n", __func__, __LINE__);
-		/*recover the current id*/
-		nve_decrement(nvep);
+		printk(KERN_ERR "[NVE][%s]write to device failed in line [%d].\n", __func__, __LINE__);
 		return ret;
 	}
 
@@ -595,9 +595,7 @@ static int nve_restore(struct NVE_struct *nvep)
 		/*write to next partition*/
 		ret = write_ramdisk_to_device(nvep->nve_current_id, nvep->nve_store_ramdisk);
 		if(ret){
-			pr_err("[NVE][%s]write to device failed in line [%d].\n", __func__, __LINE__);
-			/*recover the current id*/
-			nve_decrement(nvep);
+			printk(KERN_ERR "[NVE][%s]write to device failed in line [%d].\n", __func__, __LINE__);
 			return ret;
 		}
 	}
@@ -606,7 +604,7 @@ static int nve_restore(struct NVE_struct *nvep)
 	/*clear 0 partition*/
 	ret = erase_ramdisk_to_device(0, nvep->nve_update_ramdisk);
 	if(ret){
-		pr_err("[NVE][%s]erase 0 partition failed in line [%d].\n", __func__, __LINE__);
+		printk(KERN_ERR "[NVE][%s]erase 0 partition failed in line [%d].\n", __func__, __LINE__);
 		return ret;
 	}
 
@@ -632,46 +630,23 @@ uint64_t g_nve_cost_time;
 struct hisi_nve_info_user nv_read_info;
 struct hisi_nve_info_user nv_write_info;
 struct hisi_nve_info_user nv_init_info;
-#if CONFIG_HISI_NVE_WHITELIST
-void nve_whitelist_en_set(int en_whitelist)
-{
-	nve_whitelist_en = en_whitelist;
-}
-
-void nve_dump_whitelist(void)
-{
-	unsigned int i;
-
-	pr_err("nv_num whitelist:\n");
-	for (i = 0; i < ARRAY_SIZE(nv_num_whitelist); i++) {
-		pr_err("%d ", nv_num_whitelist[i]);
-	}
-	pr_err("\n\n");
-
-	for (i = 0; i < ARRAY_SIZE(nv_process_whitelist); i++) {
-		pr_err("%s\n", nv_process_whitelist[i]);
-	}
-	pr_err("\n");
-}
-#endif /* CONFIG_HISI_NVE_WHITELIST */
-
 static int nve_print_partition_test(struct NVE_partittion *nve_partition)
 {
 	struct NVE_partition_header *nve_partiiton_header;
 	uint32_t i;
 	nve_partiiton_header = &nve_partition->header;
 
-	pr_err("[NVE]partition name  :%s\n", nve_partiiton_header->nve_partition_name);
-	pr_err("[NVE]nve version     :%d\n", nve_partiiton_header->nve_version);
-	pr_err("[NVE]nve age         :%d\n", nve_partiiton_header->nve_age);
-	pr_err("[NVE]nve blockid     :%d\n", nve_partiiton_header->nve_block_id);
-	pr_err("[NVE]nve blockcount  :%d\n", nve_partiiton_header->nve_block_count);
-	pr_err("[NVE]valid items:%d\n", nve_partiiton_header->valid_items);
-	pr_err("nv checksum     :%d\n", nve_partiiton_header->nv_checksum);
-	pr_err("nv crc support     :%d\n", nve_partiiton_header->nve_crc_support);
+	printk(KERN_ERR "[NVE]partition name  :%s\n", nve_partiiton_header->nve_partition_name);
+	printk(KERN_ERR "[NVE]nve version     :%d\n", nve_partiiton_header->nve_version);
+	printk(KERN_ERR "[NVE]nve age         :%d\n", nve_partiiton_header->nve_age);
+	printk(KERN_ERR "[NVE]nve blockid     :%d\n", nve_partiiton_header->nve_block_id);
+	printk(KERN_ERR "[NVE]nve blockcount  :%d\n", nve_partiiton_header->nve_block_count);
+	printk(KERN_ERR "[NVE]valid items:%d\n", nve_partiiton_header->valid_items);
+	printk(KERN_ERR "nv checksum     :%d\n", nve_partiiton_header->nv_checksum);
+	printk(KERN_ERR "nv crc support     :%d\n", nve_partiiton_header->nve_crc_support);
 
 	for (i = 0; i < nve_partiiton_header->valid_items; i++) {
-		pr_err("%d %s %d %d 0x%x %s\n",
+		printk(KERN_ERR"%d %s %d %d 0x%x %s\n",
 			nve_partition->NV_items[i].nv_number,
 			nve_partition->NV_items[i].nv_name,
 			nve_partition->NV_items[i].nv_property,
@@ -699,13 +674,14 @@ int nve_write_test(uint32_t nv_item_num, uint32_t valid_size)
 
 	ret = hisi_nve_direct_access(&nv_write_info);
 	if (ret == 0) {
-		pr_err("test nv write 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x success!\n",
+		printk(KERN_ERR
+		       "test nv write 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x success!\n",
 		       nv_write_info.nv_data[0], nv_write_info.nv_data[1],
 		       nv_write_info.nv_data[2], nv_write_info.nv_data[3],
 		       nv_write_info.nv_data[4], nv_write_info.nv_data[5]);
 		return NVE_TEST_OK;
 	} else {
-		pr_err("test nv write faild!\n");
+		printk(KERN_ERR "test nv write faild!\n");
 		return NVE_TEST_ERR;
 	}
 }
@@ -722,14 +698,15 @@ int nve_read_init_value(uint32_t nv_item_num, uint32_t valid_size){
 
 	ret = hisi_nve_direct_access(&nv_init_info);
 	if (ret == 0) {
-		pr_err("test nv read 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x success!\n",
+		printk(KERN_ERR
+		       "test nv read 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x success!\n",
 		       nv_init_info.nv_data[0], nv_init_info.nv_data[1],
 		       nv_init_info.nv_data[2], nv_init_info.nv_data[3],
 		       nv_init_info.nv_data[4], nv_init_info.nv_data[5]);
-		pr_err("test nv read value:%s!\n", nv_init_info.nv_data);
+		printk(KERN_ERR "test nv read value:%s!\n", nv_init_info.nv_data);
 		return NVE_TEST_OK;
 	} else {
-		pr_err("test nv read faild!\n");
+		printk(KERN_ERR "test nv read faild!\n");
 		return NVE_TEST_ERR;
 	}
 }
@@ -739,13 +716,14 @@ int nve_write_init_value(void){
 	nv_init_info.nv_operation = NV_WRITE;
 	ret = hisi_nve_direct_access(&nv_init_info);
 	if (ret == 0) {
-		pr_err("test nv write 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x success!\n",
+		printk(KERN_ERR
+		       "test nv write 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x success!\n",
 		       nv_init_info.nv_data[0], nv_init_info.nv_data[1],
 		       nv_init_info.nv_data[2], nv_init_info.nv_data[3],
 		       nv_init_info.nv_data[4], nv_init_info.nv_data[5]);
 		return NVE_TEST_OK;
 	} else {
-		pr_err("test nv write faild!\n");
+		printk(KERN_ERR "test nv write faild!\n");
 		return NVE_TEST_ERR;
 	}
 }
@@ -763,14 +741,15 @@ int nve_read_test(uint32_t nv_item_num, uint32_t valid_size)
 
 	ret = hisi_nve_direct_access(&nv_read_info);
 	if (ret == 0) {
-		pr_err("test nv read 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x success!\n",
+		printk(KERN_ERR
+		       "test nv read 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x success!\n",
 		       nv_read_info.nv_data[0], nv_read_info.nv_data[1],
 		       nv_read_info.nv_data[2], nv_read_info.nv_data[3],
 		       nv_read_info.nv_data[4], nv_read_info.nv_data[5]);
-		pr_err("test nv read value:%s!\n", nv_read_info.nv_data);
+		printk(KERN_ERR "test nv read value:%s!\n", nv_read_info.nv_data);
 		return NVE_TEST_OK;
 	} else {
-		pr_err("test nv read faild!\n");
+		printk(KERN_ERR "test nv read faild!\n");
 		return NVE_TEST_ERR;
 	}
 }
@@ -782,36 +761,36 @@ int nve_read_write_auto(uint32_t nv_item_num, uint32_t valid_size)
 	int ret;
 	ret = nve_read_init_value(nv_item_num, valid_size);
 	if(ret){
-		pr_err("nve_read_init_value test failed!\n");
+		printk(KERN_ERR "nve_read_init_value test failed!\n");
 		return ret;
 	}
 	for (i = 0; i < NVE_TEST_TIMES; i++) {
 		ret = nve_write_test(nv_item_num, valid_size);
 		if(ret){
-			pr_err("nve_write_test test failed!\n");
+			printk(KERN_ERR "nve_write_test test failed!\n");
 			return ret;
 		}
 		ret = nve_read_test(nv_item_num, valid_size);
 		if(ret){
-			pr_err("nve_read_test test failed!\n");
+			printk(KERN_ERR "nve_read_test test failed!\n");
 			return ret;
 		}
 		if (strncmp((const char*)nv_read_info.nv_data, (const char*)nv_write_info.nv_data,
 			    (size_t)NVE_TEST_VALID_SIZE) == 0){
-			pr_err("test nve write and read value is same, test "
+			printk(KERN_ERR "test nve write and read value is same, test "
 			       "successed!\n");
 		}else{
-			pr_err("test nve write and read value is not same, "
+			printk(KERN_ERR "test nve write and read value is not same, "
 			       "test failed!\n");
 			return NVE_TEST_ERR;
 		}
 	}
 	ret = nve_write_init_value();
 	if(ret){
-		pr_err("nve_write_init_value test failed!\n");
+		printk(KERN_ERR "nve_write_init_value test failed!\n");
 		return ret;
 	}
-	pr_err("test nve auto end!\n");
+	printk(KERN_ERR "test nve auto end!\n");
 	return ret;
 }
 
@@ -825,7 +804,7 @@ uint64_t nve_write_time_test(uint32_t nv_item_num, uint32_t valid_size)
 	int ret;
 	ret = nve_read_init_value(nv_item_num, valid_size);
 	if(ret){
-		pr_err("nve_read_init_value test failed!\n");
+		printk(KERN_ERR "nve_read_init_value test failed!\n");
 		return NVE_TEST_ERR;
 	}
 	for(i = 0;i < NVE_TEST_STRESS_TIMES;i++){
@@ -833,17 +812,17 @@ uint64_t nve_write_time_test(uint32_t nv_item_num, uint32_t valid_size)
 		ret = nve_write_test(nv_item_num, valid_size);
 		g_nve_write_end_time = hisi_getcurtime();
 		if(ret){
-			pr_err("nve_write_test test failed!\n");
+			printk(KERN_ERR "nve_write_test test failed!\n");
 			return NVE_TEST_ERR;
 		}
 		g_nve_cost_time = g_nve_write_end_time - g_nve_write_start_time;
 		total_nve_write_time += g_nve_cost_time;
-		pr_err("test nv cost time [%llu]ns,test_time = %d!\n", g_nve_cost_time, i);
+		printk(KERN_ERR "test nv cost time [%llu]ns,test_time = %d!\n", g_nve_cost_time, i);
 		msleep(2);
 	}
 	ret = nve_write_init_value();
 	if(ret){
-		pr_err("nve_write_init_value test failed!\n");
+		printk(KERN_ERR "nve_write_init_value test failed!\n");
 		return NVE_TEST_ERR;
 	}
 	average_nve_write_time = total_nve_write_time / NVE_TEST_STRESS_TIMES;
@@ -863,12 +842,12 @@ uint64_t nve_read_time_test(uint32_t nv_item_num, uint32_t valid_size)
 		ret = nve_read_test(nv_item_num, valid_size);
 		g_nve_read_end_time = hisi_getcurtime();
 		if(ret){
-			pr_err("nve_write_test test failed!\n");
+			printk(KERN_ERR "nve_write_test test failed!\n");
 			return NVE_TEST_ERR;
 		}
 		g_nve_cost_time = g_nve_read_end_time - g_nve_read_start_time;
 		total_nve_read_time += g_nve_cost_time;
-		pr_err("test nv cost time [%llu]ns,test_time = %d!\n", g_nve_cost_time, i);
+		printk(KERN_ERR "test nv cost time [%llu]ns,test_time = %d!\n", g_nve_cost_time, i);
 		msleep(2);
 	}
 	average_nve_read_time = total_nve_read_time / NVE_TEST_STRESS_TIMES;
@@ -885,7 +864,7 @@ uint64_t nve_item_check_crc_test(int nv_number){
 	uint64_t check_crc_start_time;
 	uint64_t check_crc_end_time;
 	if(g_nve_struct->nve_current_ramdisk->header.nve_crc_support != NVE_CRC_SUPPORT_VERSION){
-		pr_err("current partition is not support CRC!\n");
+		printk(KERN_ERR "current partition is not support CRC!\n");
 		return NVE_TEST_ERR;
 	}
 	for(i = 0;i < NVE_TEST_STRESS_TIMES;i++){
@@ -893,9 +872,9 @@ uint64_t nve_item_check_crc_test(int nv_number){
 		ret = check_crc_for_valid_items(nv_number, 1, g_nve_struct->nve_current_ramdisk);
 		check_crc_end_time = hisi_getcurtime();
 		if(!ret)
-			pr_err("NVE item CRC check success!cost time [%llu]ns,test_time = %d\n!", (check_crc_end_time - check_crc_start_time), i);
+			printk(KERN_ERR "NVE item CRC check success!cost time [%llu]ns,test_time = %d\n!", (check_crc_end_time - check_crc_start_time), i);
 		else{
-			pr_err("NVE item CRC check failed!\n");
+			printk(KERN_ERR "NVE item CRC check failed!\n");
 			return NVE_TEST_ERR;
 		}
 		total_check_crc_time += (check_crc_end_time - check_crc_start_time);
@@ -915,7 +894,7 @@ uint64_t nve_current_partition_check_crc_test(void){
 	uint64_t check_crc_end_time;
 	struct NVE_partition_header *nve_partition_header = &g_nve_struct->nve_current_ramdisk->header;
 	if(nve_partition_header->nve_crc_support != NVE_CRC_SUPPORT_VERSION){
-		pr_err("current partition is not support CRC!");
+		printk(KERN_ERR "current partition is not support CRC!");
 		return NVE_TEST_ERR;
 	}
 
@@ -924,9 +903,9 @@ uint64_t nve_current_partition_check_crc_test(void){
 		ret = check_crc_for_valid_items(0, (int)nve_partition_header->valid_items, g_nve_struct->nve_current_ramdisk);
 		check_crc_end_time = hisi_getcurtime();
 		if(!ret)
-			pr_err("NVE partition CRC check success!cost time [%llu]ns,test_time = %d!\n", (check_crc_end_time - check_crc_start_time), i);
+			printk(KERN_ERR "NVE partition CRC check success!cost time [%llu]ns,test_time = %d!\n", (check_crc_end_time - check_crc_start_time), i);
 		else{
-			pr_err("NVE partition CRC check failed!\n");
+			printk(KERN_ERR "NVE partition CRC check failed!\n");
 			return NVE_TEST_ERR;
 		}
 		total_check_crc_time += (check_crc_end_time - check_crc_start_time);
@@ -957,7 +936,7 @@ static int read_nve_to_ramdisk(void)
 	/*the driver is not initialized successfully, return error*/
 	if (NULL == g_nve_struct) {
 		ret = -ENOMEM;
-		pr_err("[NVE][%s]:g_nve_struct has not been alloced.\n", __func__);
+		printk(KERN_ERR "[NVE][%s]:g_nve_struct has not been alloced.\n", __func__);
 		goto out;
 	}
 
@@ -980,14 +959,14 @@ static int read_nve_to_ramdisk(void)
 
 	if (!ret) {
 		/*partiton 0 is valid, restore it to current partition*/
-		pr_info("[NVE]partition0 is valid, restore it to "
+		printk(KERN_INFO "[NVE]partition0 is valid, restore it to "
 				"current partition.\n");
 		ret = nve_restore(g_nve_struct);
 	}
 
 	if (ret) {
 		if (NVE_INVALID_NVM == g_nve_struct->nve_current_id) {
-			pr_err("[NVE][%s]: no valid NVM.\n", __func__);
+			printk(KERN_ERR "[NVE][%s]: no valid NVM.\n", __func__);
 			ret = -ENODEV;
 			goto out;
 		} else
@@ -996,7 +975,7 @@ static int read_nve_to_ramdisk(void)
 
 	/*read the current NV partiton and store into Ramdisk */
 	if (nve_read((unsigned long)g_nve_struct->nve_current_id * NVE_PARTITION_SIZE, (size_t)NVE_PARTITION_SIZE, (unsigned char *)g_nve_struct->nve_current_ramdisk)) {
-		pr_err("[init_nve]nve_read error!\n");
+		printk(KERN_ERR "[init_nve]nve_read error!\n");
 		return -1;
 	}
 	update_header_valid_nvme_items(g_nve_struct->nve_current_ramdisk);
@@ -1018,19 +997,18 @@ static void nve_out_log(struct hisi_nve_info_user *user_info, int isRead)
 {
 	int index;
 	if (NULL == user_info) {
-		pr_err("[NVE][%s]:user_info is null! \n",
+		printk(KERN_DEBUG "[NVE][%s]:user_info is null! \n",
 		       __func__);
 		return;
 	}
-#ifndef CONFIG_HISI_FACTORY_VERSION
 	if (isRead) {
-		pr_err("[NVE][%s]:read data; not factory version,Forbid print nve info!\n", __func__);
+		printk(KERN_DEBUG "[NVE][%s]:read nv:ID= %d \n", __func__,
+		       user_info->nv_number);
 	} else {
-		pr_err("[NVE][%s]:write data; not factory version,Forbid print nve info!\n", __func__);
+		printk(KERN_DEBUG "[NVE][%s]:write nv:ID= %d \n", __func__,
+		       user_info->nv_number);
 	}
-	return;
-#endif
-	memset(log_nv_info, 0, sizeof(log_nv_info));/*lint !e527*/
+	memset(log_nv_info, 0, sizeof(log_nv_info));
 	memset(temp_nv_info, 0, sizeof(temp_nv_info));
 	for (index = 0; index < (int)user_info->valid_size; index++) {
 		snprintf(temp_nv_info, (size_t)(NV_INFO_LEN - 1), "%s,0x%x", log_nv_info,
@@ -1038,20 +1016,27 @@ static void nve_out_log(struct hisi_nve_info_user *user_info, int isRead)
 		memset(log_nv_info, 0, sizeof(log_nv_info));
 		snprintf(log_nv_info, (size_t)(NV_INFO_LEN - 1), "%s", temp_nv_info);
 		if ((index % 20 == 0) && (index > 0)) {
-			pr_err("%s\n", log_nv_info);
+			printk(KERN_DEBUG "%s\n", log_nv_info);
 			memset(log_nv_info, 0, sizeof(log_nv_info));
 		}
 		memset(temp_nv_info, 0, sizeof(temp_nv_info));
 	}
-	pr_devel("%s\n", log_nv_info);
+	printk(KERN_DEBUG "%s\n", log_nv_info);
+#ifdef CONFIG_HISI_FACTORY_VERSION
 	if (isRead) {
-		pr_err("[NVE][%s]:read data = %s; read nv:ID= %d\n", __func__,
-		       user_info->nv_data,user_info->nv_number);
+		printk(KERN_DEBUG "[NVE][%s]:read data = %s\n", __func__,
+		       user_info->nv_data);
 	} else {
-		pr_err("[NVE][%s]:write data = %s; read nv:ID= %d\n", __func__,
-		       user_info->nv_data,user_info->nv_number);
+		printk(KERN_DEBUG "[NVE][%s]:write data = %s\n", __func__,
+		       user_info->nv_data);
 	}
-	return;
+#else
+	if (isRead) {
+		printk(KERN_DEBUG "[NVE][%s]:read data.\n", __func__);
+	} else {
+		printk(KERN_DEBUG "[NVE][%s]:write data.\n", __func__);
+	}
+#endif
 }
 #ifdef CONFIG_CRC_SUPPORT
 int nve_check_crc_and_recover(int nv_item_start, int check_items, struct NVE_struct *nvep)
@@ -1061,16 +1046,16 @@ int nve_check_crc_and_recover(int nv_item_start, int check_items, struct NVE_str
 	ret = check_crc_for_valid_items(nv_item_start, check_items, nvep->nve_current_ramdisk);
 	/*retry to read to ramdisk*/
 	if(ret){
-		pr_err("[NVE], one item crc check failed, %d!\n", ret);
+		printk(KERN_ERR"[NVE], one item crc check failed, %d!\n", ret);
 		/*this place can optmize*/
 		nve_find_valid_partition(nvep);
 		if(NVE_INVALID_NVM == nvep->nve_current_id){
-			pr_err("[NVE]can't find the valid partition in 1-7!\n");
+			printk(KERN_ERR"[NVE]can't find the valid partition in 1-7!\n");
 			return -EIO;
 		}else{
 			/*read the current NV partiton and store into Ramdisk */
 			if (nve_read((unsigned long)nvep->nve_current_id * NVE_PARTITION_SIZE, NVE_PARTITION_SIZE, (unsigned char *)nvep->nve_current_ramdisk)) {
-				pr_err("[NVE]nve_read error!\n");
+				printk(KERN_ERR"[NVE]nve_read error!\n");
 				return -EIO;
 			}
 			update_header_valid_nvme_items(nvep->nve_current_ramdisk);
@@ -1112,16 +1097,16 @@ static int hisi_nve_whitelist_check(struct hisi_nve_info_user *user_info)
 
 	/*input parameter invalid, return.*/
 	if (NULL == user_info) {
-		pr_err("[NVE][%s] input parameter is NULL.\n", __func__);
+		printk(KERN_ERR "[NVE][%s] input parameter is NULL.\n", __func__);
 		return -1;
 	}
 
-	if (nve_whitelist_en && (user_info->nv_operation != NV_READ)) {
+	if (user_info->nv_operation != NV_READ) {
 		if ( nve_number_in_whitelist(user_info->nv_number) && (!nve_process_in_whitelist() || !get_userlock()) ) {
 			pr_err("%s nv_number: %d process %s is not in whitelist, or phone was unlocked. Forbid write to NVE!\n",
 					__func__, user_info->nv_number, current->comm);
 
-			return -EPERM;
+			return -1;
 		}
 	}
 
@@ -1138,20 +1123,22 @@ int hisi_nve_direct_access_for_ramdisk(struct hisi_nve_info_user *user_info){
 #if CONFIG_HISI_NVE_WHITELIST
 	if (hisi_nve_whitelist_check(user_info)) {
 		pr_err("%s hisi_nve_whitelist_check Failed!\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
 #else
 	/*input parameter invalid, return.*/
 	if (NULL == user_info) {
-		pr_err("[NVE][%s] input parameter is NULL.\n", __func__);
-		return -1;
+		printk(KERN_ERR "[NVE][%s] input parameter is NULL.\n", __func__);
+		ret = -EINVAL;
+		goto out;
 	}
 #endif /* CONFIG_HISI_NVE_WHITELIST */
 
 	/*get nve partition header to check nv number*/
 	nve_partition_header = &g_nve_struct->nve_current_ramdisk->header;
 	if (user_info->nv_number >= nve_partition_header->valid_items) {
-		pr_err("[NVE][%s] The input NV items[%d] is out of range,not exist.\n", __func__, user_info->nv_number);
+		printk(KERN_ERR "[NVE][%s] NV items[%d] is not defined.\n", __func__, user_info->nv_number);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1159,11 +1146,11 @@ int hisi_nve_direct_access_for_ramdisk(struct hisi_nve_info_user *user_info){
 	/*check nv valid size, it is same to old*/
 	nv_item = &g_nve_struct->nve_current_ramdisk->NV_items[user_info->nv_number];
 	if (user_info->valid_size > nv_item->valid_size || user_info->valid_size == 0) {
-		pr_err("[NVE][%s]Bad parameter:valid size is error, %d, %d!\n", __func__, user_info->nv_number, user_info->valid_size);
+		printk(KERN_INFO "[NVE][%s]Bad parameter:valid size is error, %d, %d!\n", __func__, user_info->nv_number, user_info->valid_size);
 		user_info->valid_size = nv_item->valid_size;
 	}
 	if(user_info->valid_size > NVE_NV_DATA_SIZE){
-		pr_err("[NVE][%s] user info valid size is error, %d.\n", __func__, user_info->valid_size);
+		printk(KERN_ERR "[NVE][%s] user info valid size is error, %d.\n", __func__, user_info->valid_size);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1172,7 +1159,7 @@ int hisi_nve_direct_access_for_ramdisk(struct hisi_nve_info_user *user_info){
 		if(nve_partition_header->nve_crc_support == NVE_CRC_SUPPORT_VERSION){
 			ret = nve_check_crc_and_recover((int)user_info->nv_number, 1, g_nve_struct);
 			if(ret){
-				pr_err("[NVE]nve_check_crc_and_recover failed, ret = %d\n", ret);
+				printk(KERN_ERR "[NVE]nve_check_crc_and_recover failed, ret = %d\n", ret);
 				return ret;
 			}
 		}
@@ -1185,7 +1172,7 @@ int hisi_nve_direct_access_for_ramdisk(struct hisi_nve_info_user *user_info){
 		if(nve_partition_header->nve_crc_support == NVE_CRC_SUPPORT_VERSION){
 			ret = nve_check_crc_and_recover(0, (int)nve_partition_header->valid_items, g_nve_struct);
 			if(ret){
-				pr_err("[NVE]nve_check_crc_and_recover failed, ret = %d\n", ret);
+				printk(KERN_ERR "[NVE]nve_check_crc_and_recover failed, ret = %d\n", ret);
 				return ret;
 			}
 		}
@@ -1206,7 +1193,7 @@ int hisi_nve_direct_access_for_ramdisk(struct hisi_nve_info_user *user_info){
 		/*write the total ramdisk to device*/
 		ret = write_ramdisk_to_device(g_nve_struct->nve_current_id, g_nve_struct->nve_current_ramdisk);
 		if(ret){
-			pr_err("[NVE][%s]write to device failed in line %d, and nv_number = %d!\n", __func__, __LINE__, user_info->nv_number);
+			printk(KERN_ERR "[NVE][%s]write to device failed in line %d, and nv_number = %d!\n", __func__, __LINE__, user_info->nv_number);
 			/*if write to device failed, we will recover something*/
 			/*recover the item*/
 			memcpy(nv_item, &nv_item_backup, sizeof(struct NV_items_struct));
@@ -1229,27 +1216,20 @@ int hisi_nve_direct_access_for_ramdisk(struct hisi_nve_info_user *user_info){
  * Parameters:
  *          @ user_info:struct hisi_nve_info_user pointer.
  * return value:
- *          @      0 - success.
- *          @ -error - failure.
- * errors:
- *          @  ENOMEM - Out of memory
- *          @  ENODEV - No NVE device
- *          @  EBUSY  - Device or resource busy
- *          @  EFAULT - Bad address
- *          @  EINVAL - Invalid argument
- *          @  ENOTTY - Unknow command
+ *          @ 0 - success.
+ *          @ -1- failure.
  */
 int hisi_nve_direct_access(struct hisi_nve_info_user *user_info)
 {
 	int ret;
 
 	if(g_nve_struct == NULL){
-		pr_err("[NVE][%s] NVE struct not alloc.\n", __func__);
+		printk(KERN_ERR "[NVE][%s] NVE struct not alloc.\n", __func__);
 		return -ENOMEM;
 	}
 	/*the interface check the nv init*/
 	if(g_nve_struct->initialized == 0){
-		pr_err("[NVE][%s] NVE init is not done, please wait.\n" ,__func__);
+		printk(KERN_ERR "[NVE][%s] NVE init is not done, please wait.\n" ,__func__);
 		return -ENODEV;
 	}
 
@@ -1260,7 +1240,7 @@ int hisi_nve_direct_access(struct hisi_nve_info_user *user_info)
 
 	ret = hisi_nve_direct_access_for_ramdisk(user_info);
 	if(ret){
-		pr_err("[NVE][%s]access for nve according ramdisk failed in line %d!\n", __func__, __LINE__);
+		printk(KERN_ERR "[NVE][%s]access for nve according ramdisk failed in line %d!\n", __func__, __LINE__);
 		goto out;
 	}
 out:
@@ -1273,16 +1253,13 @@ out:
  * Function name:nve_open.
  * Discription:open NV device in terms of calling nve_open_ex().
  * return value:
- *          @      0 - success.
- *          @ -error - failure.
- * errors:
- *          @  ENOMEM - Out of memory
- *          @  ENODEV - No NVE device
+ *          @ 0 - success.
+ *          @ -1- failure.
  */
 static int nve_open(struct inode *inode, struct file *file)
 {
 	if(g_nve_struct == NULL){
-		pr_err("[NVE][%s] NVE struct not alloc.\n" ,__func__);
+		printk(KERN_ERR "[NVE][%s] NVE struct not alloc.\n" ,__func__);
 		return -ENOMEM;
 	}
 	if(g_nve_struct->initialized)
@@ -1300,15 +1277,8 @@ static int nve_close(struct inode *inode, struct file *file)
  * Function name:nve_ioctl.
  * Discription:complement read or write NV by terms of sending command-words.
  * return value:
- *          @      0 - on success.
- *          @ -error - on error.
- * errors:
- *          @  ENOMEM - Out of memory
- *          @  ENODEV - No NVE device
- *          @  EBUSY  - Device or resource busy
- *          @  EFAULT - Bad address
- *          @  EINVAL - Invalid argument
- *          @  ENOTTY - Unknow command
+ *          @ 0 - success.
+ *          @ -1- failure.
  */
 static long nve_ioctl(struct file *file, u_int cmd, u_long arg)
 {
@@ -1319,12 +1289,12 @@ static long nve_ioctl(struct file *file, u_int cmd, u_long arg)
 
 	/*make sure nve is init*/
 	if(g_nve_struct == NULL){
-		pr_err("[NVE][%s] NVE struct not alloc.\n", __func__);
+		printk(KERN_ERR "[NVE][%s] NVE struct not alloc.\n", __func__);
 		return -ENOMEM;
 	}
 	/*the interface check the nv init*/
 	if(g_nve_struct->initialized == 0){
-		pr_err("[NVE][%s] NVE init is not done, please wait.\n" ,__func__);
+		printk(KERN_ERR "[NVE][%s] NVE init is not done, please wait.\n" ,__func__);
 		return -ENODEV;
 	}
 
@@ -1335,8 +1305,8 @@ static long nve_ioctl(struct file *file, u_int cmd, u_long arg)
 	size = ((cmd & IOCSIZE_MASK) >> IOCSIZE_SHIFT);
 
 	if (cmd & IOC_IN) {
-		if (!access_ok(VERIFY_READ, arg, size)) {
-			pr_err("[NVE][%s]access_in error!\n",
+		if (!access_ok(VERIFY_READ, argp, size)) {
+			printk(KERN_ERR "[NVE][%s]access_in error!\n",
 			       __func__);
 			up(&nv_sem);
 			return -EFAULT;
@@ -1344,8 +1314,8 @@ static long nve_ioctl(struct file *file, u_int cmd, u_long arg)
 	}
 
 	if (cmd & IOC_OUT) {
-		if (!access_ok(VERIFY_WRITE, arg, size)) {
-			pr_err("[NVE][%s]access_out error!\n",
+		if (!access_ok(VERIFY_WRITE, argp, size)) {
+			printk(KERN_ERR "[NVE][%s]access_out error!\n",
 			       __func__);
 			up(&nv_sem);
 			return -EFAULT;
@@ -1361,7 +1331,7 @@ static long nve_ioctl(struct file *file, u_int cmd, u_long arg)
 		}
 		ret = hisi_nve_direct_access_for_ramdisk(&info);
 		if(ret){
-			pr_err("[NVE][%s]nve access failed in line %d!\n", __func__, __LINE__);
+			printk(KERN_ERR "[NVE][%s]nve access failed in line %d!\n", __func__, __LINE__);
 			goto out;
 		}
 		if (NV_READ == info.nv_operation) {
@@ -1373,7 +1343,7 @@ static long nve_ioctl(struct file *file, u_int cmd, u_long arg)
 		}
 		break;
 	default:
-		pr_err("[NVE][%s] Unknow command!\n", __func__);
+		printk(KERN_ERR "[NVE][%s] Unknow command!\n", __func__);
 		ret = -ENOTTY;
 		break;
 	}
@@ -1409,7 +1379,8 @@ static int __init init_nve(void)
 	/*alloc nve_struct*/
 	g_nve_struct = kzalloc(sizeof(struct NVE_struct), GFP_KERNEL);
 	if (g_nve_struct == NULL) {
-		pr_err("[NVE][%s]failed to allocate driver data in line %d.\n",
+		printk(KERN_ERR
+		       "[NVE][%s]failed to allocate driver data in line %d.\n",
 		       __func__, __LINE__);
 		return -NVE_ERROR_NO_MEM;
 	}
@@ -1417,7 +1388,7 @@ static int __init init_nve(void)
 	/*alloc ramdisk*/
 	g_nve_struct->nve_current_ramdisk = (struct NVE_partittion *)kzalloc((size_t)NVE_PARTITION_SIZE, GFP_KERNEL);
 	if (NULL == g_nve_struct->nve_current_ramdisk) {
-		pr_err("[NVE][%s]failed to allocate current ramdisk buffer in "
+		printk(KERN_ERR "[NVE][%s]failed to allocate current ramdisk buffer in "
 				"line %d.\n",
 		       __func__, __LINE__);
 		error = -NVE_ERROR_NO_MEM;
@@ -1426,7 +1397,7 @@ static int __init init_nve(void)
 
 	g_nve_struct->nve_update_ramdisk = (struct NVE_partittion *)kzalloc((size_t)NVE_PARTITION_SIZE, GFP_KERNEL);
 	if (NULL == g_nve_struct->nve_update_ramdisk) {
-		pr_err("[NVE][%s]failed to allocate update ramdisk buffer in "
+		printk(KERN_ERR "[NVE][%s]failed to allocate update ramdisk buffer in "
 				"line %d.\n",
 		       __func__, __LINE__);
 		error = -NVE_ERROR_NO_MEM;
@@ -1435,7 +1406,7 @@ static int __init init_nve(void)
 
 	g_nve_struct->nve_store_ramdisk = (struct NVE_partittion *)kzalloc((size_t)NVE_PARTITION_SIZE, GFP_KERNEL);
 	if (NULL == g_nve_struct->nve_store_ramdisk) {
-		pr_err("[NVE][%s]failed to allocate store ramdisk buffer in "
+		printk(KERN_ERR "[NVE][%s]failed to allocate store ramdisk buffer in "
 				"line %d.\n",
 		       __func__, __LINE__);
 		error = -NVE_ERROR_NO_MEM;
@@ -1445,7 +1416,7 @@ static int __init init_nve(void)
 	/* register a device in kernel, return the number of major device */
 	g_nve_struct->nve_major_number = register_chrdev(0, "nve", &nve_fops);
 	if (g_nve_struct->nve_major_number < 0) {
-		pr_err("[NVE]Can't allocate major number for "
+		printk(KERN_ERR "[NVE]Can't allocate major number for "
 				"Non-Volatile memory Extension device.\n");
 		error = -NVE_ERROR_NO_MEM;
 		goto failed_free_store_ramdisk;
@@ -1455,7 +1426,7 @@ static int __init init_nve(void)
 	 * "/dev" */
 	nve_class = class_create(THIS_MODULE, "nve");
 	if (IS_ERR(nve_class)) {
-		pr_err("[NVE]Error creating nve class.\n");
+		printk(KERN_ERR "[NVE]Error creating nve class.\n");
 		unregister_chrdev((unsigned int)g_nve_struct->nve_major_number, "nve");
 		error = -NVE_ERROR_NO_MEM;
 		goto failed_free_store_ramdisk;
@@ -1479,7 +1450,6 @@ failed_free_driver_data:
 
 static void __exit cleanup_nve(void)
 {
-	device_destroy(nve_class, MKDEV(dev_major_num, 0));
 	class_destroy(nve_class);
 	if (NULL != g_nve_struct) {
 		unregister_chrdev((unsigned int)g_nve_struct->nve_major_number, "nve");
@@ -1497,13 +1467,12 @@ static void __exit cleanup_nve(void)
 	return;
 }
 
-static int nve_setup(const char *val, const struct kernel_param *kp)
+static int nve_setup(const char *val, struct kernel_param *kp)
 {
 	int ret;
-	struct device *nve_dev = NULL;
-
+	unsigned int dev_major_num;
 	if (1 == hisi_nv_setup_ok) {
-		pr_err("[NVE][%s]has been done.\n",__func__);
+		printk(KERN_ERR "[NVE][%s]has been done.\n",__func__);
 		return 0;
 	}
 	/*get param by cmdline*/
@@ -1511,28 +1480,24 @@ static int nve_setup(const char *val, const struct kernel_param *kp)
 		return -EINVAL;
 	nve_block_device_name = kzalloc(strlen(val) + 1, GFP_KERNEL);
 	if(nve_block_device_name == NULL){
-		pr_err("[NVE][%s]failed to allocate nve_block_device_name mem in line %d.\n",
+		printk(KERN_ERR
+		       "[NVE][%s]failed to allocate nve_block_device_name mem in line %d.\n",
 		       __func__, __LINE__);
 		return -ENOMEM;
 	}
 
 	memcpy(nve_block_device_name, val, strlen(val) + 1);
-	pr_info("[NVE][%s] device name = %s\n", __func__, nve_block_device_name);
+	printk(KERN_INFO "[NVE][%s] device name = %s\n", __func__, nve_block_device_name);
 
 	/*read nve partition to ramdisk*/
 	ret = read_nve_to_ramdisk();
 	if (ret < 0){
-		pr_err("[NVE][%s] read nve to ramdisk failed!\n",__func__);
+		printk(KERN_ERR "[NVE][%s] read nve to ramdisk failed!\n",__func__);
 		return -1;
 	}
 	dev_major_num = (unsigned int)(g_nve_struct->nve_major_number);
 	/* create a device node for application*/
-	nve_dev = device_create(nve_class, NULL, MKDEV(dev_major_num, 0), NULL, "nve0");
-	if(IS_ERR(nve_dev)){
-		pr_err("[NVE][%s]failed to create nve device in line %d.\n",__func__, __LINE__);
-		return PTR_ERR(nve_dev);
-	}
-
+	device_create(nve_class, NULL, MKDEV(dev_major_num, 0), NULL, "nve0");
 	hisi_nv_setup_ok = 1;
 
 	return 0;

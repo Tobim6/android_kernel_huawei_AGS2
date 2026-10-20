@@ -215,6 +215,12 @@ EXPORT_SYMBOL(local_flush_tlb_page);
 
 static DEFINE_RAW_SPINLOCK(tlbivax_lock);
 
+static int mm_is_core_local(struct mm_struct *mm)
+{
+	return cpumask_subset(mm_cpumask(mm),
+			      topology_sibling_cpumask(smp_processor_id()));
+}
+
 struct tlb_flush_param {
 	unsigned long addr;
 	unsigned int pid;
@@ -634,7 +640,9 @@ static void early_init_this_mmu(void)
 		 * transient mapping would cause problems.
 		 */
 #ifdef CONFIG_SMP
-		if (hweight32(get_tensr()) > 1)
+		if (cpu != boot_cpuid &&
+		    (cpu != cpu_first_thread_sibling(cpu) ||
+		     cpu == cpu_first_thread_sibling(boot_cpuid)))
 			map = false;
 #endif
 

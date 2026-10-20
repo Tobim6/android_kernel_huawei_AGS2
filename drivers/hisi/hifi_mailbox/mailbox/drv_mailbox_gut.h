@@ -1,4 +1,21 @@
+/******************************************************************************
 
+				  版权所有 (C), 2001-2012, 华为技术有限公司
+
+ ******************************************************************************
+  文 件 名	 : drv_mailbox_gut.h
+  版 本 号	 : 初稿
+  作	者	 : 莫南 00176101
+  生成日期	 : 2012年9月20日
+  最近修改	 :
+  功能描述	 : drv_mailbox_gut.c 的头文件
+  函数列表	 :
+  修改历史	 :
+  1.日	  期   : 2012年9月20日
+	作	  者   : 莫南 00176101
+	修改内容   : 创建文件
+
+******************************************************************************/
 #ifndef __DRV_MAILBOX_GUT_H__
 #define __DRV_MAILBOX_GUT_H__
 
@@ -229,7 +246,7 @@ MAILBOX_EXTERN int mailbox_release_buff(struct mb_buff * mb_buf);
 
 MAILBOX_EXTERN  int mailbox_write_buff(
                 struct mb_queue      *queue,
-                 const char          *data,
+                 char                *data,
                 unsigned int         size);
 
 MAILBOX_EXTERN int mailbox_read_buff(

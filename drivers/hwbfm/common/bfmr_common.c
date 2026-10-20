@@ -24,11 +24,8 @@
 #include <linux/syscalls.h>
 #include <linux/rtc.h>
 #include <linux/statfs.h>
-#include <linux/delay.h>
-#include <asm/io.h>
 #include <chipset_common/bfmr/public/bfmr_public.h>
 #include <chipset_common/bfmr/common/bfmr_common.h>
-#include <log/log_usertype.h>
 
 
 /*----local macroes------------------------------------------------------------------*/
@@ -37,7 +34,6 @@
 #define BFMR_CRC32_MULTINOMIAL_VALUE (0xedb88320)
 #define BFM_PROC_MOUNTS_PATH "/proc/mounts"
 #define BFM_RW_FLAGS "rw,"
-#define BFM_HISI_WAIT_FOR_VERSION_PART_TIMEOUT (40)
 
 
 /*----local prototypes----------------------------------------------------------------*/
@@ -46,13 +42,7 @@
 /*----local variables-----------------------------------------------------------------*/
 
 static unsigned int s_crc32_table[BFMR_CRC32_TABLE_ELEMENT_COUNT] = {0};
-static bool s_is_first_get_usertype = true;
 static int s_crc32_table_created = 0;
-static bfmr_partition_mount_result_info_t s_bfmr_mount_result[3] = {
-    {"/log", false},
-    {"/data", false},
-    {"/splash2", false},
-};
 
 
 /*----global variables-----------------------------------------------------------------*/
@@ -65,7 +55,6 @@ static bfmr_partition_mount_result_info_t s_bfmr_mount_result[3] = {
 
 static long bfmr_full_rw_file(int fd, char *buf, size_t buf_size, bool read_file);
 static long bfmr_full_rw_file_with_file_path(const char *pfile_path, char *buf, size_t buf_size, bool read_file);
-static int bfmr_rw_rrecord_misc_msg(bfmr_rrecord_misc_msg_param_t *pparam, bool read_misc);
 
 
 /*----function definitions--------------------------------------------------------------*/
@@ -130,7 +119,7 @@ void bfmr_change_own_mode(char *path, int uid, int gid, int mode)
 
     if (unlikely(NULL == path))
     {
-        BFMR_PRINT_INVALID_PARAMS("path.\n");
+        BFMR_PRINT_INVALID_PARAMS("path: %p\n", path);
         return;
     }
 
@@ -163,7 +152,7 @@ void bfmr_change_file_ownership(char *path, uid_t uid, gid_t gid)
 
     if (unlikely((NULL == path) || (-1 == (int)uid) || (-1 == (int)gid)))
     {
-        BFMR_PRINT_INVALID_PARAMS("path or uid or gid.\n");
+        BFMR_PRINT_INVALID_PARAMS("path: %p, uid: %x, gid: %x\n", path, (unsigned int)uid, (unsigned int)gid);
         return;
     }
 
@@ -188,7 +177,7 @@ void bfmr_change_file_mode(char *path, umode_t mode)
 
     if (unlikely(NULL == path))
     {
-        BFMR_PRINT_INVALID_PARAMS("path.\n");
+        BFMR_PRINT_INVALID_PARAMS("path: %p\n", path);
         return;
     }
 
@@ -214,7 +203,7 @@ int bfmr_get_file_ownership(char *pfile_path, uid_t *puid, gid_t *pgid)
 
     if (unlikely((NULL == pfile_path) || (NULL == puid) || (NULL == pgid)))
     {
-        BFMR_PRINT_INVALID_PARAMS("path or puid or pgid.\n");
+        BFMR_PRINT_INVALID_PARAMS("path: %p, puid: %p, pgid: %p\n", pfile_path, puid, pgid);
         return -1;
     }
 
@@ -252,7 +241,7 @@ int bfmr_read_emmc_raw_part(const char *dev_path,
 
     if (unlikely(NULL == dev_path) || unlikely(NULL == buf))
     {
-        BFMR_PRINT_INVALID_PARAMS("dev_path or buf.\n");
+        BFMR_PRINT_INVALID_PARAMS("dev_path:%p, buf: %p\n", dev_path, buf);
         return -1;
     }
 
@@ -313,7 +302,7 @@ int bfmr_write_emmc_raw_part(const char *dev_path,
 
     if (unlikely(NULL == dev_path) || unlikely(NULL == buf))
     {
-        BFMR_PRINT_INVALID_PARAMS("dev_path or buf.\n");
+        BFMR_PRINT_INVALID_PARAMS("dev_path: %p buf: %p\n", dev_path, buf);
         return -1;
     }
 
@@ -370,7 +359,7 @@ bool bfmr_is_file_existed(char *pfile_path)
 
     if (unlikely(NULL == pfile_path))
     {
-        BFMR_PRINT_INVALID_PARAMS("pfile_path.\n");
+        BFMR_PRINT_INVALID_PARAMS("pfile_path: %p\n", pfile_path);
         return false;
     }
 
@@ -402,7 +391,8 @@ int bfmr_save_log(char *logpath, char *filename, void *buf, unsigned int len, un
     BFMR_PRINT_ENTER();
     if (logpath == NULL || filename == NULL || buf == NULL || len <= 0)
     {
-        BFMR_PRINT_INVALID_PARAMS("logpath or filename or buf or len.\n");
+        BFMR_PRINT_INVALID_PARAMS("logpath:%p, filename:%p buf:%p len:%u\n",
+            logpath, filename, buf, len);
         return -1;
     }
 
@@ -474,7 +464,7 @@ long bfmr_get_proc_file_length(const char *pfile_path)
 
     if (unlikely(NULL == pfile_path))
     {
-        BFMR_PRINT_INVALID_PARAMS("pfile_path.\n");
+        BFMR_PRINT_INVALID_PARAMS("pfile_path: %p\n", pfile_path);
         return 0;
     }
 
@@ -504,46 +494,108 @@ __out:
 }
 
 
-void bfmr_set_mount_state(char *bfmr_mount_point, bool mount_result)
-{
-    int i = 0;
-    int count = sizeof(s_bfmr_mount_result) / sizeof(s_bfmr_mount_result[0]);
-
-    if (unlikely(NULL == bfmr_mount_point))
-    {
-        BFMR_PRINT_INVALID_PARAMS("bfmr_mount_name.\n");
-        return;
-    }
-
-    for (i = 0; i < count; i++)
-    {
-        if (0 == strncmp(s_bfmr_mount_result[i].mount_point, bfmr_mount_point, BFMR_MOUNT_NAME_SIZE))
-        {
-            s_bfmr_mount_result[i].mount_result = mount_result;
-        }
-    }
-}
-
-
 bool bfmr_is_part_mounted_rw(const char *pmount_point)
 {
-    int i = 0;
-    int count = sizeof(s_bfmr_mount_result) / sizeof(s_bfmr_mount_result[0]);
+    mm_segment_t old_fs;
+    int fd = -1;
+    char *data_buf = NULL;
+    char *log_part_mount_info = NULL;
+    char *pstart = NULL;
+    char *pend = NULL;
     bool part_mounted_rw = false;
+    long file_size = 0;
+    long bytes_read = 0;
+    long log_part_mount_info_len = 0L;
 
     if (unlikely(NULL == pmount_point))
     {
-        BFMR_PRINT_INVALID_PARAMS("pmount_point.\n");
-        return part_mounted_rw;
+        BFMR_PRINT_INVALID_PARAMS("pmount_point: %p\n", pmount_point);
+        return false;
     }
 
-    for (i = 0; i < count; i++)
+    old_fs = get_fs();
+    set_fs(KERNEL_DS);
+
+    /* 1. get file length */
+    file_size = bfmr_get_proc_file_length(BFM_PROC_MOUNTS_PATH);
+    if (file_size <= 0)
     {
-        if (0 == strncmp(s_bfmr_mount_result[i].mount_point, pmount_point, BFMR_MOUNT_NAME_SIZE))
-        {
-            part_mounted_rw = s_bfmr_mount_result[i].mount_result;
-        }
+        goto __out;
     }
+
+    /* 2. open file for read */
+    fd = sys_open(BFM_PROC_MOUNTS_PATH, O_RDONLY, 0);
+    if (fd < 0)
+    {
+        goto __out;
+    }
+
+    data_buf = (char *)bfmr_malloc(file_size + 1);
+    if (NULL == data_buf)
+    {
+        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
+        goto __out;
+    }
+    memset(data_buf, 0, file_size + 1);
+
+    log_part_mount_info = (char *)bfmr_malloc(BFMR_MAX_PATH + 1);
+    if (NULL == log_part_mount_info)
+    {
+        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
+        goto __out;
+    }
+    memset(log_part_mount_info, 0, BFMR_MAX_PATH + 1);
+
+    bytes_read = bfmr_full_read(fd, data_buf, file_size);
+    if (bytes_read != file_size)
+    {
+        BFMR_PRINT_ERR("read [%s] failed, bytes read: %ld it should be: %ld\n",
+            BFM_PROC_MOUNTS_PATH, bytes_read, file_size);
+        goto __out;
+    }
+
+    pstart = strstr(data_buf, pmount_point);
+    if (NULL == pstart)
+    {
+        goto __out;
+    }
+
+    pend = strstr(pstart, "\n");
+    if (NULL != pend)
+    {
+        log_part_mount_info_len = pend - pstart + 1;
+        memcpy((void *)log_part_mount_info, (void *)pstart, (log_part_mount_info_len >= BFMR_MAX_PATH)
+            ? (BFMR_MAX_PATH) : (log_part_mount_info_len));
+        pstart = log_part_mount_info;
+    }
+
+    pend = strstr(pstart, BFM_RW_FLAGS);
+    if (NULL != pend)
+    {
+        part_mounted_rw = true;
+    }
+    else
+    {
+        part_mounted_rw = false;
+    }
+
+__out:
+    if (fd >= 0)
+    {
+        sys_close(fd);
+    }
+
+    if (NULL != data_buf)
+    {
+        bfmr_free(data_buf);
+    }
+
+    if (NULL != log_part_mount_info)
+    {
+        bfmr_free(log_part_mount_info);
+    }
+
+    set_fs(old_fs);
 
     return part_mounted_rw;
 }
@@ -557,7 +609,7 @@ long bfmr_get_file_length(const char *pfile_path)
 
     if (unlikely(NULL == pfile_path))
     {
-        BFMR_PRINT_INVALID_PARAMS("pfile_path.\n");
+        BFMR_PRINT_INVALID_PARAMS("pfile_path: %p\n", pfile_path);
         return 0L;
     }
 
@@ -587,7 +639,7 @@ long long bfmr_get_fs_available_space(const char *pmount_point)
 
     if (unlikely(NULL == pmount_point))
     {
-        BFMR_PRINT_INVALID_PARAMS("pmount_point.\n");
+        BFMR_PRINT_INVALID_PARAMS("pmount_point: %p\n", pmount_point);
         return 0LL;
     }
 
@@ -640,7 +692,7 @@ int bfmr_wait_for_part_mount_without_timeout(const char *pmount_point)
 
     if (unlikely(NULL == pmount_point))
     {
-        BFMR_PRINT_INVALID_PARAMS("pmount_point.\n");
+        BFMR_PRINT_INVALID_PARAMS("pmount_point:%p\n", pmount_point);
         return -1;
     }
 
@@ -664,7 +716,7 @@ int bfmr_wait_for_part_mount_with_timeout(const char *pmount_point, int timeouts
 
     if (unlikely(NULL == pmount_point))
     {
-        BFMR_PRINT_INVALID_PARAMS("pmount_point.\n");
+        BFMR_PRINT_INVALID_PARAMS("pmount_point: %p\n", pmount_point);
         return -1;
     }
 
@@ -698,7 +750,7 @@ static int __bfmr_create_dir(char *path)
 
     if (unlikely(path == NULL))
     {
-        BFMR_PRINT_INVALID_PARAMS("path.\n");
+        BFMR_PRINT_INVALID_PARAMS("path: %p\n", path);
         return -1;
     }
 
@@ -730,7 +782,7 @@ static int bfmr_create_dir(const char *path)
 
     if (unlikely(path == NULL))
     {
-        BFMR_PRINT_INVALID_PARAMS("path.\n");
+        BFMR_PRINT_INVALID_PARAMS("path: %p\n", path);
         return -1;
     }
 
@@ -772,7 +824,7 @@ int bfmr_create_log_path(char *path)
 
     if (unlikely(NULL == path))
     {
-        BFMR_PRINT_INVALID_PARAMS("path.\n");
+        BFMR_PRINT_INVALID_PARAMS("path: %p\n", path);
         return -1;
     }
 
@@ -818,7 +870,7 @@ char* bfmr_reverse_find_string(const char *psrc, const char *pstr_to_be_found)
 
     if (unlikely((NULL == psrc) || (NULL == pstr_to_be_found)))
     {
-        BFMR_PRINT_INVALID_PARAMS("psrc or pstr_to_be_found.\n");
+        BFMR_PRINT_INVALID_PARAMS("psrc: %p pstr_to_be_found: %p\n", psrc, pstr_to_be_found);
         return NULL;
     }
 
@@ -842,7 +894,7 @@ bool bfm_get_symbol_link_path(char *file_path, char *psrc_path, size_t src_path_
 
     if (unlikely((NULL == file_path) || (NULL == psrc_path) || (0 == src_path_size)))
     {
-        BFMR_PRINT_INVALID_PARAMS("file_path or src_path.\n");
+        BFMR_PRINT_INVALID_PARAMS("file_path: %p, src_path: %p\n", file_path, psrc_path);
         return false;
     }
 
@@ -868,7 +920,7 @@ static long bfmr_full_rw_file(int fd, char *buf, size_t buf_size, bool read_file
 
     if (unlikely((fd < 0) || (NULL == buf)))
     {
-        BFMR_PRINT_INVALID_PARAMS("fd or buf.\n");
+        BFMR_PRINT_INVALID_PARAMS("fd: %d, buf: %p\n", fd, (void *)buf);
         return -1;
     }
 
@@ -877,10 +929,9 @@ static long bfmr_full_rw_file(int fd, char *buf, size_t buf_size, bool read_file
     while (bytes_total_to_rw > 0)
     {
         bytes_this_time = read_file ? sys_read(fd, ptemp, bytes_total_to_rw) : sys_write(fd, ptemp, bytes_total_to_rw);
-        if (read_file ? (bytes_this_time <= 0) : (bytes_this_time < 0))
+        if (bytes_this_time < 0)
         {
-            BFMR_PRINT_ERR("%s\n", read_file ? ((0 == bytes_this_time) ? ("End of file!\n")
-                : ("Failed to read file!")) : ("Failed to write file!"));
+            BFMR_PRINT_ERR("Failed to read file!\n");
             break;
         }
         ptemp += bytes_this_time;
@@ -913,7 +964,7 @@ static long bfmr_full_rw_file_with_file_path(const char *pfile_path, char *buf, 
 
     if (unlikely((NULL == pfile_path) || (NULL == buf)))
     {
-        BFMR_PRINT_INVALID_PARAMS("pfile_path or buf.\n");
+        BFMR_PRINT_INVALID_PARAMS("pfile_path: %d, buf: %p\n", pfile_path, (void *)buf);
         return -1;
     }
 
@@ -959,7 +1010,7 @@ void bfmr_unlink_file(char *pfile_path)
 
     if (unlikely(NULL == pfile_path))
     {
-        BFMR_PRINT_INVALID_PARAMS("pfile_path.\n");
+        BFMR_PRINT_INVALID_PARAMS("pfile_path: %p!\n", pfile_path);
         return;
     }
 
@@ -977,7 +1028,7 @@ int bfmr_get_uid_gid(uid_t *puid, gid_t *pgid)
 
     if (unlikely((NULL == puid) || (NULL == pgid)))
     {
-        BFMR_PRINT_INVALID_PARAMS("puid or pgid.\n");
+        BFMR_PRINT_INVALID_PARAMS("puid: %p, pgid: %p!\n", puid, pgid);
         return -1;
     }
 
@@ -989,173 +1040,6 @@ int bfmr_get_uid_gid(uid_t *puid, gid_t *pgid)
 
     return 0;
 }
-
-
-static int bfmr_rw_rrecord_misc_msg(bfmr_rrecord_misc_msg_param_t *pparam, bool read_misc)
-{
-    int ret = -1;
-    char *dev_path = NULL;
-
-    if (NULL == pparam)
-    {
-        BFMR_PRINT_INVALID_PARAMS("reason_param.\n");
-        return -1;
-    }
-
-    dev_path = (char *)bfmr_malloc(BFMR_DEV_FULL_PATH_MAX_LEN + 1);
-    if (NULL == dev_path)
-    {
-        BFMR_PRINT_ERR("bfmr_malloc failed!\n");
-        return -1;
-    }
-    memset((void *)dev_path, 0, BFMR_DEV_FULL_PATH_MAX_LEN + 1);
-
-    ret = bfmr_get_device_full_path(BFR_RRECORD_PART_NAME, dev_path, BFMR_DEV_FULL_PATH_MAX_LEN);
-    if (0 != ret)
-    {
-        BFMR_PRINT_ERR("get full path of device [%s] failed!\n", BFR_RRECORD_PART_NAME);
-        goto __out;
-    }
-
-    ret = read_misc ? bfmr_read_emmc_raw_part(dev_path, BFR_MISC_PART_OFFSET,
-        (char *)pparam, (unsigned long long)sizeof(bfmr_rrecord_misc_msg_param_t))
-        : bfmr_write_emmc_raw_part(dev_path, BFR_MISC_PART_OFFSET,
-        (char *)pparam, (unsigned long long)sizeof(bfmr_rrecord_misc_msg_param_t));
-    if (0 != ret)
-    {
-        BFMR_PRINT_ERR("%s [%s] failed!\n", dev_path, (read_misc) ? ("read") : ("write"));
-        goto __out;
-    }
-
-__out:
-    if (NULL != dev_path)
-    {
-        bfmr_free(dev_path);
-    }
-
-    return ret;
-}
-
-
-int bfmr_read_rrecord_misc_msg(bfmr_rrecord_misc_msg_param_t *pparam)
-{
-    return bfmr_rw_rrecord_misc_msg(pparam, true);
-}
-
-
-int bfmr_write_rrecord_misc_msg(bfmr_rrecord_misc_msg_param_t *pparam)
-{
-    return bfmr_rw_rrecord_misc_msg(pparam, false);
-}
-
-
-char* bfm_get_boot_stage_name(unsigned int boot_stage)
-{
-    char *boot_stage_name = NULL;
-
-    if (bfmr_is_bl1_stage(boot_stage))/*lint !e648 */
-    {
-        boot_stage_name = "BL1";
-    }
-    else if (bfmr_is_bl2_stage(boot_stage))/*lint !e648 */
-    {
-        boot_stage_name = "BL2";
-    }
-    else if (bfmr_is_kernel_stage(boot_stage))/*lint !e648 */
-    {
-        boot_stage_name = "kernel";
-    }
-    else if (bfmr_is_native_stage(boot_stage))/*lint !e648 */
-    {
-            boot_stage_name = "native";
-    }
-    else if (bfmr_is_android_framework_stage(boot_stage))/*lint !e648 */
-    {
-        boot_stage_name = "framework";
-    }
-    else if (bfmr_is_boot_success(boot_stage))/*lint !e648 */
-    {
-        boot_stage_name = "boot-success";
-    }
-    else
-    {
-        boot_stage_name = "unknown";
-    }
-
-    return boot_stage_name;
-}
-
-
-static unsigned int bfm_get_version_type(void)
-{
-	int i;
-	unsigned int user_flag = 0;
-
-	if (s_is_first_get_usertype) {
-		for (i = 0; i < BFM_HISI_WAIT_FOR_VERSION_PART_TIMEOUT; i++) {
-			user_flag = get_logusertype_flag();
-			if (user_flag != 0)
-				break;
-			msleep(1000);
-		}
-		s_is_first_get_usertype = false;
-	} else {
-		user_flag = get_logusertype_flag();
-	}
-
-	return user_flag;
-}
-
-
-bool bfm_is_beta_version(void)
-{
-    unsigned int usertype = bfm_get_version_type();
-
-    return ((BETA_USER == usertype) || (OVERSEA_USER == usertype));
-}
-
-
-bool bfmr_is_oversea_commercail_version(void)
-{
-    unsigned int usertype = bfm_get_version_type();
-
-    return ((BETA_USER != usertype) && (OVERSEA_USER != usertype) && (COMMERCIAL_USER != usertype));
-}
-
-
-static inline int bfm_write_reserved_phys_mem(unsigned int magic_num, void *phys_addr)
-{
-    void *paddr = NULL;
-
-	paddr = ioremap_nocache((phys_addr_t)phys_addr, sizeof(magic_num));
-    if (NULL != paddr)
-    {
-        writel(magic_num, (void *)paddr);
-        iounmap(paddr);
-        return 0;
-    }
-
-    return -1;
-}
-
-
-int bfm_write_sub_bootfail_magic_num(unsigned int magic_num, void *phys_addr)
-{
-    return bfm_write_reserved_phys_mem(magic_num, phys_addr);
-}
-
-
-int bfm_write_sub_bootfail_num(unsigned int bootfail_errno, void *phys_addr)
-{
-    return bfm_write_reserved_phys_mem(bootfail_errno, phys_addr);
-}
-
-
-int bfm_write_sub_bootfail_count(unsigned int bootfail_count, void *phys_addr)
-{
-    return bfm_write_reserved_phys_mem(bootfail_count, phys_addr);
-}
-
 
 int bfmr_common_init(void)
 {

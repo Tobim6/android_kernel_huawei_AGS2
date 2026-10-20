@@ -26,7 +26,6 @@
 #include <linux/delay.h>
 
 #include "goodix_ts.h"
-#include "goodix_dts.h"
 
 #define GT9XX_FW_NAME "gt9xx.BIN"
 
@@ -170,7 +169,6 @@ s32 gup_i2c_write(u8 *buffer,u32 len)
 	struct ts_bus_info *bops = g_goodix_dev_data->ts_platform_data->bops;
 	u8 stack_mem[32], *data;
 	int ret;
-	int ret2;
 	u16 addr;
 
 u8 buf[1024];
@@ -201,9 +199,7 @@ ret = goodix_i2c_write(addr, &buffer[2], len-2);
 
 #if 1
 
-	ret2 = goodix_i2c_read(addr, &buf[0], len - 2);
-	if (ret2 < 0)
-		TS_LOG_ERR("%s: goodix_i2c_read fail\n", __func__);
+ goodix_i2c_read(addr, &buf[0], len-2);
  GTP_DEBUG("write-ro-read-array-----:");
  GTP_DEBUG_ARRAY(&buf[0], len-2);
 #endif
@@ -414,8 +410,7 @@ s32 gup_enter_update_mode(void)
 void gup_leave_update_mode(void)
 {
 	int irq_gpio = goodix_ts->dev_data->ts_platform_data->irq_gpio;
-	if (gpio_direction_input(irq_gpio) < 0)
-		TS_LOG_ERR("%s: gpio_direction_input fail\n", __func__);
+    gpio_direction_input(irq_gpio);
 
     GTP_DEBUG("[leave_update_mode]reset chip.");
     goodix_chip_reset();
@@ -611,7 +606,7 @@ static s8 gup_update_config(void)
     update_msg.cfg_file->f_op->llseek(update_msg.cfg_file, 0, SEEK_SET);
 
     GTP_DEBUG("[update_cfg]Read config from file.");
-    ret = vfs_read(update_msg.cfg_file, pre_buf, file_len, &update_msg.cfg_file->f_pos);
+    ret = update_msg.cfg_file->f_op->read(update_msg.cfg_file, (char*)pre_buf, file_len, &update_msg.cfg_file->f_pos);
     if(ret<0)
     {
         GTP_ERROR("[update_cfg]Read config file failed.");
@@ -852,7 +847,7 @@ static u8 gup_check_update_file(st_fw_head* fw_head)
     GTP_DEBUG("Bin firmware actual size: %d(%dK)", update_msg.fw_total_len, update_msg.fw_total_len/1024);
 
     update_msg.file->f_op->llseek(update_msg.file, 0, SEEK_SET);
-    ret = vfs_read(update_msg.file, buf, FW_HEAD_LENGTH, &update_msg.file->f_pos);
+    ret = update_msg.file->f_op->read(update_msg.file, (char*)buf, FW_HEAD_LENGTH, &update_msg.file->f_pos);
     if (ret < 0)
     {
 		set_fs(update_msg.old_fs);
@@ -867,7 +862,7 @@ static u8 gup_check_update_file(st_fw_head* fw_head)
     for(i=0; i<update_msg.fw_total_len; i+=2)
     {
         u16 temp;
-        ret = vfs_read(update_msg.file, buf, 2, &update_msg.file->f_pos);
+        ret = update_msg.file->f_op->read(update_msg.file, (char*)buf, 2, &update_msg.file->f_pos);
         if (ret < 0)
         {
 			set_fs(update_msg.old_fs);
@@ -989,7 +984,7 @@ static u8 gup_load_section_file(u8 *buf, u32 offset, u16 length, u8 set_or_end)
             update_msg.file->f_pos = update_msg.fw_total_len + FW_HEAD_LENGTH - offset;
         }
 
-        ret = vfs_read(update_msg.file, buf, length, &update_msg.file->f_pos);
+        ret = update_msg.file->f_op->read(update_msg.file, (char *)buf, length, &update_msg.file->f_pos);
 
         if (ret < 0)
         {

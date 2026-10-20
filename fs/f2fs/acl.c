@@ -192,6 +192,9 @@ static struct posix_acl *__f2fs_get_acl(struct inode *inode, int type,
 		acl = ERR_PTR(retval);
 	kfree(value);
 
+	if (!IS_ERR(acl))
+		set_cached_acl(inode, type, acl);
+
 	return acl;
 }
 
@@ -207,16 +210,15 @@ static int __f2fs_set_acl(struct inode *inode, int type,
 	void *value = NULL;
 	size_t size = 0;
 	int error;
-	umode_t mode = inode->i_mode;
 
 	switch (type) {
 	case ACL_TYPE_ACCESS:
 		name_index = F2FS_XATTR_INDEX_POSIX_ACL_ACCESS;
-		if (acl && !ipage) {
-			error = posix_acl_update_mode(inode, &mode, &acl);
+		if (acl) {
+			error = posix_acl_update_mode(inode, &inode->i_mode, &acl);
 			if (error)
 				return error;
-			set_acl_inode(inode, mode);
+			set_acl_inode(inode, inode->i_mode);
 		}
 		break;
 
@@ -234,7 +236,7 @@ static int __f2fs_set_acl(struct inode *inode, int type,
 		value = f2fs_acl_to_disk(F2FS_I_SB(inode), acl, &size);
 		if (IS_ERR(value)) {
 			clear_inode_flag(inode, FI_ACL_MODE);
-			return PTR_ERR(value);
+			return (int)PTR_ERR(value);
 		}
 	}
 
@@ -250,9 +252,6 @@ static int __f2fs_set_acl(struct inode *inode, int type,
 
 int f2fs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 {
-	if (unlikely(f2fs_cp_error(F2FS_I_SB(inode))))
-		return -EIO;
-
 	return __f2fs_set_acl(inode, type, acl, NULL);
 }
 
@@ -281,6 +280,8 @@ static int f2fs_acl_create_masq(struct posix_acl *acl, umode_t *mode_p)
 	struct posix_acl_entry *group_obj = NULL, *mask_obj = NULL;
 	umode_t mode = *mode_p;
 	int not_equiv = 0;
+
+	/* assert(atomic_read(acl->a_refcount) == 1); */
 
 	FOREACH_ACL_ENTRY(pa, acl, pe) {
 		switch(pa->e_tag) {

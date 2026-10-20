@@ -28,8 +28,6 @@
 #include <linux/delay.h>
 
 #include "virt-dma.h"
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_DMA64_TAG
 /*lint -e750 -esym(750,*) */
 #define DRIVER_NAME		"hisi-dma64"
 #define DMA_ALIGN		3
@@ -157,7 +155,7 @@ static void hisi_dma_pause_dma(struct hisi_dma_phy *phy, struct hisi_dma_dev *d,
 		}
 
 		if (timeout == 0)
-			pr_err("channel%u timeout waiting for pause, timeout:%d\n",
+			printk(KERN_ERR ":channel%u timeout waiting for pause, timeout:%d\n",
 			       phy->idx, timeout);
 	}
 }
@@ -322,7 +320,7 @@ static int hisi_dma_start_txd(struct hisi_dma_chan *c)
 
 static void hisi_dma_tasklet(unsigned long arg)
 {
-	struct hisi_dma_dev *d = (struct hisi_dma_dev *)(uintptr_t)arg;
+	struct hisi_dma_dev *d = (struct hisi_dma_dev *)arg;
 	struct hisi_dma_phy *p;
 	struct hisi_dma_chan *c, *cn;
 	unsigned pch, pch_alloc = 0;
@@ -532,7 +530,7 @@ static struct dma_async_tx_descriptor *hisi_dma_prep_memcpy(
 		dev_dbg(chan->device->dev, "vchan %pK: kzalloc fail\n", (void*)&c->vc);
 		return NULL;
 	}
-	ds->desc_hw_lli = __virt_to_phys((uintptr_t)&ds->desc_hw[0]);/*lint !e648*/
+	ds->desc_hw_lli = __virt_to_phys((unsigned long)&ds->desc_hw[0]);/*lint !e648*/
 	ds->size = len;
 	ds->desc_num = (size_t)num;
 	num = 0;
@@ -591,7 +589,7 @@ static struct dma_async_tx_descriptor *hisi_dma_prep_slave_sg(
 		dev_dbg(chan->device->dev, "vchan %pK: kzalloc fail\n", &c->vc);
 		return NULL;
 	}
-	ds->desc_hw_lli = __virt_to_phys((uintptr_t)&ds->desc_hw[0]);/*lint !e648*/
+	ds->desc_hw_lli = __virt_to_phys((unsigned long)&ds->desc_hw[0]);/*lint !e648*/
 	ds->desc_num = num;
 	num = 0;
 
@@ -929,29 +927,29 @@ void show_dma64_reg(struct dma_chan *chan)
     u32 i;
 
 	if (!chan) {
-	    pr_err("show_dma_reg: dma_chan *chan is NULL!\n");
+	    printk("show_dma_reg: dma_chan *chan is NULL!\n");
 	    return;
 	}
 
-    pr_err("%s: chan[0x%pK] id[%d] cookie[%d-%d]!\n", __func__,
+    printk(KERN_ERR "%s: chan[0x%pK] id[%d] cookie[%d-%d]!\n", __func__,
             chan, chan->chan_id, chan->cookie, chan->completed_cookie);
 
 	if (!chan->device) {
-	    pr_err("show_dma_reg: chan->device * is NULL!\n");
+	    printk("show_dma_reg: chan->device * is NULL!\n");
 	    return;
 	}
 
 	d = to_hisi_dma(chan->device);
     if (!d) {
-	    pr_err("hisi_dma_dev *d is NULL!\n");
+	    printk("hisi_dma_dev *d is NULL!\n");
 	    return;
 	}
 	if (!d->base){
-	    pr_err( "d-base is NULL!\n");
+	    printk( "d-base is NULL!\n");
 	    return;
 	}
 	if (!d->slave.dev){
-	    pr_err( "d->slave.dev is NULL!\n");
+	    printk( "d->slave.dev is NULL!\n");
 	    return;
 	}
 
@@ -970,14 +968,14 @@ void show_dma64_reg(struct dma_chan *chan)
 	}
 
     p = c->phy;
-    pr_err("%s: chan[%pK] ccfg[0x%x] dir[%d] dev_addr[0x%llx] status[%d]\n",
+    printk(KERN_ERR "%s: chan[%pK] ccfg[0x%x] dir[%d] dev_addr[0x%llx] status[%d]\n",
             __func__, c, c->ccfg, c->dir, c->dev_addr, c->status);
-    pr_err("%s: phy idx[0x%x] ds_run[%pK] ds_done[%pK]\n",
+    printk(KERN_ERR "%s: phy idx[0x%x] ds_run[%pK] ds_done[%pK]\n",
             __func__, p->idx, p->ds_run, p->ds_done);
 
 	for (i = d->dma_min_chan; i < d->dma_channels; i++) {
 		p = &d->phy[i];
-        pr_err("idx[%2d]:CX_CONFIG:[0x%32x], CX_AXI_CONF:[0x%32x], "
+        printk(KERN_ERR "idx[%2d]:CX_CONFIG:[0x%32x], CX_AXI_CONF:[0x%32x], "
             "SRC_H:[0x%32x], SRC_L:[0x%32x], DST_H:[0x%32x], DST_L:[0x%32x], "
             "CNT0:[0x%32x], CX_CURR_CNT0:[0x%32x]\n",
             i,
@@ -1195,7 +1193,7 @@ static int hisi_dma_probe(struct platform_device *op)
 
 	spin_lock_init(&d->lock);
 	INIT_LIST_HEAD(&d->chan_pending);
-	tasklet_init(&d->task, hisi_dma_tasklet, (uintptr_t)d);
+	tasklet_init(&d->task, hisi_dma_tasklet, (unsigned long)d);
 	platform_set_drvdata(op, d);
 	dev_info(&op->dev, "initialized\n");
 
@@ -1406,7 +1404,7 @@ static int __init dmac_module_init(void)
 
 	retval = platform_driver_register(&hisi_pdma64_driver);
 	if (retval) {
-		pr_err("hisidma platform driver register failed\n");
+		printk(KERN_ERR "hisidma platform driver register failed\n");
 		return retval;
 	}
 

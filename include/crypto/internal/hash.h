@@ -57,6 +57,9 @@ int crypto_hash_walk_first(struct ahash_request *req,
 			   struct crypto_hash_walk *walk);
 int crypto_ahash_walk_first(struct ahash_request *req,
 			   struct crypto_hash_walk *walk);
+int crypto_hash_walk_first_compat(struct hash_desc *hdesc,
+				  struct crypto_hash_walk *walk,
+				  struct scatterlist *sg, unsigned int len);
 
 static inline int crypto_ahash_walk_done(struct crypto_hash_walk *walk,
 					 int err)
@@ -87,8 +90,6 @@ static inline bool crypto_shash_alg_has_setkey(struct shash_alg *alg)
 {
 	return alg->setkey != shash_no_setkey;
 }
-
-bool crypto_hash_alg_has_setkey(struct hash_alg_common *halg);
 
 int crypto_init_ahash_spawn(struct crypto_ahash_spawn *spawn,
 			    struct hash_alg_common *alg,
@@ -132,10 +133,14 @@ int shash_ahash_update(struct ahash_request *req, struct shash_desc *desc);
 int shash_ahash_finup(struct ahash_request *req, struct shash_desc *desc);
 int shash_ahash_digest(struct ahash_request *req, struct shash_desc *desc);
 
-int ahash_mcryptd_update(struct ahash_request *desc);
-int ahash_mcryptd_final(struct ahash_request *desc);
-int ahash_mcryptd_finup(struct ahash_request *desc);
-int ahash_mcryptd_digest(struct ahash_request *desc);
+int shash_ahash_mcryptd_update(struct ahash_request *req,
+			       struct shash_desc *desc);
+int shash_ahash_mcryptd_final(struct ahash_request *req,
+			      struct shash_desc *desc);
+int shash_ahash_mcryptd_finup(struct ahash_request *req,
+			      struct shash_desc *desc);
+int shash_ahash_mcryptd_digest(struct ahash_request *req,
+			       struct shash_desc *desc);
 
 int crypto_init_shash_ops_async(struct crypto_tfm *tfm);
 
@@ -189,7 +194,8 @@ static inline void ahash_request_complete(struct ahash_request *req, int err)
 	req->base.complete(&req->base, err);
 }
 
-static inline u32 ahash_request_flags(struct ahash_request *req)
+static inline u32 ahash_request_flags(struct ahash_request
+				*req)
 {
 	return req->base.flags;
 }

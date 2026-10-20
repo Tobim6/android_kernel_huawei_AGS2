@@ -36,7 +36,7 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/uaccess.h>
-#include <linux/hisi/hisi_pstore.h>
+#include <linux/syslog.h>
 
 #include "internal.h"
 
@@ -121,6 +121,18 @@ static const struct seq_operations pstore_ftrace_seq_ops = {
 	.show	= pstore_ftrace_seq_show,
 };
 
+static int pstore_check_syslog_permissions(struct pstore_private *ps)
+{
+	switch (ps->type) {
+	case PSTORE_TYPE_DMESG:
+	case PSTORE_TYPE_CONSOLE:
+		return check_syslog_permissions(SYSLOG_ACTION_READ_ALL,
+			SYSLOG_FROM_READER);
+	default:
+		return 0;
+	}
+}
+
 static ssize_t pstore_file_read(struct file *file, char __user *userbuf,
 						size_t count, loff_t *ppos)
 {
@@ -138,6 +150,10 @@ static int pstore_file_open(struct inode *inode, struct file *file)
 	struct seq_file *sf;
 	int err;
 	const struct seq_operations *sops = NULL;
+
+	err = pstore_check_syslog_permissions(ps);
+	if (err)
+		return err;
 
 	if (ps->type == PSTORE_TYPE_FTRACE)
 		sops = &pstore_ftrace_seq_ops;
@@ -175,6 +191,11 @@ static const struct file_operations pstore_file_operations = {
 static int pstore_unlink(struct inode *dir, struct dentry *dentry)
 {
 	struct pstore_private *p = d_inode(dentry)->i_private;
+	int err;
+
+	err = pstore_check_syslog_permissions(p);
+	if (err)
+		return err;
 
 	if (p->psi->erase)
 		p->psi->erase(p->type, p->id, p->count,
@@ -209,7 +230,7 @@ static struct inode *pstore_get_inode(struct super_block *sb)
 	struct inode *inode = new_inode(sb);
 	if (inode) {
 		inode->i_ino = get_next_ino();
-		inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 	}
 	return inode;
 }
@@ -355,11 +376,7 @@ int pstore_mkfile(enum pstore_type_id type, char *psname, u64 id, int count,
 		break;
 	}
 
-	inode_lock(d_inode(root));
-
-#ifdef CONFIG_HISI_BB
-	hisi_save_pstore_log(name, data, size);
-#endif
+	mutex_lock(&d_inode(root)->i_mutex);
 
 	dentry = d_alloc_name(root, name);
 	if (!dentry)
@@ -379,12 +396,12 @@ int pstore_mkfile(enum pstore_type_id type, char *psname, u64 id, int count,
 	list_add(&private->list, &allpstore);
 	spin_unlock_irqrestore(&allpstore_lock, flags);
 
-	inode_unlock(d_inode(root));
+	mutex_unlock(&d_inode(root)->i_mutex);
 
 	return 0;
 
 fail_lockedalloc:
-	inode_unlock(d_inode(root));
+	mutex_unlock(&d_inode(root)->i_mutex);
 	kfree(private);
 fail_alloc:
 	iput(inode);
@@ -402,8 +419,8 @@ static int pstore_fill_super(struct super_block *sb, void *data, int silent)
 	pstore_sb = sb;
 
 	sb->s_maxbytes		= MAX_LFS_FILESIZE;
-	sb->s_blocksize		= PAGE_SIZE;
-	sb->s_blocksize_bits	= PAGE_SHIFT;
+	sb->s_blocksize		= PAGE_CACHE_SIZE;
+	sb->s_blocksize_bits	= PAGE_CACHE_SHIFT;
 	sb->s_magic		= PSTOREFS_MAGIC;
 	sb->s_op		= &pstore_ops;
 	sb->s_time_gran		= 1;
@@ -412,7 +429,7 @@ static int pstore_fill_super(struct super_block *sb, void *data, int silent)
 
 	inode = pstore_get_inode(sb);
 	if (inode) {
-		inode->i_mode = S_IFDIR | 0750;
+		inode->i_mode = S_IFDIR | 0755;
 		inode->i_op = &pstore_dir_inode_operations;
 		inode->i_fop = &simple_dir_operations;
 		inc_nlink(inode);

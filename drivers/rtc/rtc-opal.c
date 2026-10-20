@@ -40,7 +40,7 @@ static void opal_to_tm(u32 y_m_d, u64 h_m_s_ms, struct rtc_time *tm)
 	tm->tm_min  = bcd2bin((h_m_s_ms >> 48) & 0xff);
 	tm->tm_sec  = bcd2bin((h_m_s_ms >> 40) & 0xff);
 
-	tm->tm_wday = -1;
+	GregorianDay(tm);
 }
 
 static void tm_to_opal(struct rtc_time *tm, u32 *y_m_d, u64 *h_m_s_ms)
@@ -134,7 +134,7 @@ static int opal_get_tpo_time(struct device *dev, struct rtc_wkalrm *alarm)
 		goto exit;
 	}
 
-	rc = opal_get_async_rc(msg);
+	rc = be64_to_cpu(msg.params[1]);
 	if (rc != OPAL_SUCCESS) {
 		rc = -EIO;
 		goto exit;
@@ -181,7 +181,7 @@ static int opal_set_tpo_time(struct device *dev, struct rtc_wkalrm *alarm)
 		goto exit;
 	}
 
-	rc = opal_get_async_rc(msg);
+	rc = be64_to_cpu(msg.params[1]);
 	if (rc != OPAL_SUCCESS)
 		rc = -EIO;
 

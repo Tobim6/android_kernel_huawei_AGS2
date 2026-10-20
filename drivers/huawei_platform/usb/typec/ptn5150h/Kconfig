@@ -1,6 +1,4 @@
-#
 # Nxp Type C Connector
-#
 
 config HUAWEI_TYPEC_PTN5150H
 	tristate "ptn5150h typec connector"

@@ -3,16 +3,13 @@
 #include <linux/hisi/hisi_rproc.h>
 
 #include "hifi-usb.h"
-#include "../dwc3/hisi/dwc3-hifi-usb.h"
+#include "../dwc3/dwc3-hifi-usb.h"
 
 static irq_rt_t usb_notify_recv_isr(void *usr_para, void *mail_handle, unsigned int mail_len)
 {
 	struct hifi_usb_op_msg mail_buf;
 	unsigned int ret = MAILBOX_OK;
 	unsigned int mail_size = mail_len;
-
-	if ((mail_len == 0) || (mail_len > sizeof(struct hifi_usb_op_msg)))
-		return IRQ_NH_TYPE;
 
 	memset(&mail_buf, 0, sizeof(struct hifi_usb_op_msg));
 

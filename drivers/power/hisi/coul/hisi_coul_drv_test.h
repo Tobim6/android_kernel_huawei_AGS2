@@ -8,7 +8,6 @@
 #ifndef __HISI_COUL_DRV_TEST_H
 #define __HISI_COUL_DRV_TEST_H
 
-#define INVALID_TEMP                    (-99)
 
 struct hisi_coul_test_info{
     int input_batt_exist;
@@ -19,7 +18,7 @@ struct hisi_coul_test_info{
     int input_batt_cur;
     int input_batt_fcc;
     int input_event;
-    unsigned int test_start_flag;
+    int test_start_flag;
 };
 
 extern  struct hisi_coul_test_info *g_hisi_coul_test_info;

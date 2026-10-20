@@ -14,9 +14,6 @@
 #include <linux/spinlock.h>
 #include <linux/atomic.h>
 #include <linux/binfmts.h>
-#ifdef CONFIG_HISI_SWAP_ZDATA
-#include <linux/mm.h>
-#endif
 
 struct ctl_table_header;
 struct mempolicy;
@@ -63,12 +60,11 @@ union proc_op {
 
 struct proc_inode {
 	struct pid *pid;
-	unsigned int fd;
+	int fd;
 	union proc_op op;
 	struct proc_dir_entry *pde;
 	struct ctl_table_header *sysctl;
 	struct ctl_table *sysctl_entry;
-	struct hlist_node sysctl_inodes;
 	const struct proc_ns_operations *ns_ops;
 	struct inode vfs_inode;
 };
@@ -260,21 +256,10 @@ extern void proc_thread_self_init(void);
  */
 #ifdef CONFIG_PROC_SYSCTL
 extern int proc_sys_init(void);
-extern void proc_sys_evict_inode(struct inode *inode,
-				 struct ctl_table_header *head);
+extern void sysctl_head_put(struct ctl_table_header *);
 #else
 static inline void proc_sys_init(void) { }
-static inline void proc_sys_evict_inode(struct  inode *inode,
-					struct ctl_table_header *head) { }
-#endif
-
-/*
- * uid.c
- */
-#ifdef CONFIG_PROC_UID
-extern int proc_uid_init(void);
-#else
-static inline void proc_uid_init(void) { }
+static inline void sysctl_head_put(struct ctl_table_header *head) { }
 #endif
 
 /*
@@ -327,7 +312,6 @@ extern unsigned long task_statm(struct mm_struct *,
 				unsigned long *, unsigned long *);
 extern void task_mem(struct seq_file *, struct mm_struct *);
 #ifdef CONFIG_HISI_SWAP_ZDATA
-extern bool process_reclaim_need_abort(struct mm_walk *walk);
 extern struct reclaim_result *process_reclaim_result_cache_alloc(gfp_t gfp);
 extern void process_reclaim_result_cache_free(struct reclaim_result *result);
 extern int process_reclaim_result_read(struct seq_file *m,

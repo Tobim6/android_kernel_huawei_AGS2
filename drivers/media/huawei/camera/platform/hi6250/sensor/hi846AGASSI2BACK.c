@@ -14,7 +14,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 static char *sensor_dts_name = "hi846AGASSI2BACK_VENDOR";
 static bool power_on_status = false;//false: power off, true:power on
 /*lint -e826 -e31 -e485 -e785 -e731 -e846 -e514 -e866 -e30 -e84 -e838 -e64 -e528 -e753 -e749 -e715 -esym(826, 31, 485, 785, 731, 846, 514, 866, 30, 84, 838, 64, 528, 753, 749, 715*)*/
@@ -287,7 +286,7 @@ int hi846AGASSI2BACK_match_id(hwsensor_intf_t* si, void * data)
     struct pinctrl_state *pinctrl_def  = NULL;
     struct pinctrl_state *pinctrl_idle = NULL;
     struct pinctrl *p    = NULL;
-    static const char * const sensor_name[] = { "hi846AGASSI2BACK_HOLITECH", "hi846AGASSI2BACK_OFILM", "hi846AGASSI2BACK_LITEARRAY"};
+    char *sensor_name [] = { "hi846AGASSI2BACK_HOLITECH" , "hi846AGASSI2BACK_OFILM"};
     int rc = 0;
 
     if (!si || !data){
@@ -389,11 +388,6 @@ int hi846AGASSI2BACK_match_id(hwsensor_intf_t* si, void * data)
             strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[1], strlen(sensor_name[1])+1);
             cdata->data = sensor->board_info->sensor_index;
             rc = 0;
-        } else if ((module_id_0 == GPIO_LOW_STATE) && (module_id_1 == GPIO_HIGH_STATE)) {
-            /* latearray module */
-            strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor_name[2], strlen(sensor_name[2])+1);
-            cdata->data = sensor->board_info->sensor_index;
-            rc = 0;
         }
         else{
             strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor->board_info->name, strlen(sensor->board_info->name)+1);
@@ -471,8 +465,10 @@ int hi846AGASSI2BACK_config(hwsensor_intf_t* si, void  *argp)
         case SEN_CONFIG_READ_REG_SETTINGS:
             break;
         case SEN_CONFIG_ENABLE_CSI:
+            //ret = si->vtbl->csi_enable(si);
             break;
         case SEN_CONFIG_DISABLE_CSI:
+            //ret = si->vtbl->csi_disable(si);
             break;
         case SEN_CONFIG_MATCH_ID:
             ret = si->vtbl->match_id(si,argp);
@@ -518,7 +514,7 @@ static int __init hi846AGASSI2BACK_init_module(void)
 
 static void __exit hi846AGASSI2BACK_exit_module(void)
 {
-    hwsensor_unregister(Sensor2Pdev(s_hi846AGASSI2BACK));
+    hwsensor_unregister(&s_hi846AGASSI2BACK.intf);
     platform_driver_unregister(&s_hi846AGASSI2BACK_driver);
 }
 /*lint -restore*/

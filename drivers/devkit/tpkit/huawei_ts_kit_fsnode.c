@@ -31,12 +31,6 @@
 #define MAX_LOTUS_NUM   6
 #define DEC_BASE_DATA   10
 #define RAWDATA_DEBUG_HEAD_TEXT   "*************touch debug data*************\n"
-#define NUM_OF_ROW 16
-#define FORCEKEY_STR_LEN 50
-#define FORCEKEY_DATA_LEN 10
-#define DISABLE_TRUE 1
-
-
 enum ts_offset_bit
 {
     TS_OFFSET_0BIT = 0,
@@ -383,10 +377,13 @@ static ssize_t ts_glove_mode_show(struct device* dev, struct device_attribute* a
 
     TS_LOG_INFO("ts_glove_mode_show called\n");
 
-	if (g_ts_kit_platform_data.glove_mode_rw_disable == DISABLE_TRUE) {
-		TS_LOG_INFO("do not read glove mode node\n");
-		goto out;
-	}
+    if(1 == g_ts_kit_platform_data.glove_mode_rw_disable)
+    {
+        TS_LOG_INFO("do not read glove mode node\n");
+        error = -EPERM;
+        goto out;
+    }
+
     if (dev == NULL)
     {
         TS_LOG_ERR("dev is null\n");
@@ -442,11 +439,13 @@ static ssize_t ts_glove_mode_store(struct device* dev, struct device_attribute* 
 
     TS_LOG_INFO("ts_glove_mode_store called\n");
 
-	if (g_ts_kit_platform_data.glove_mode_rw_disable == DISABLE_TRUE) {
-		TS_LOG_INFO("do not write glove mode node\n");
-		error = count;
-		goto out;
-	}
+    if(1 == g_ts_kit_platform_data.glove_mode_rw_disable)
+    {
+        TS_LOG_INFO("do not write glove mode node\n");
+        error = -EPERM;
+        goto out;
+    }
+
     if (dev == NULL)
     {
         TS_LOG_ERR("dev is null\n");
@@ -780,19 +779,14 @@ static ssize_t ts_loglevel_show(struct device* dev, struct device_attribute* att
         error = -EINVAL;
         goto out;
     }
-    if(TS_DBG_MODE == g_ts_kit_log_cfg)
+    if(g_ts_kit_log_cfg)
     {
-          g_ts_kit_log_cfg = TS_MT_MODE;
-          error = snprintf(buf, MAX_STR_LEN, "%s\n", "1 -> 2");
-    }
-    else if(TS_MT_MODE == g_ts_kit_log_cfg)
-    {
-          g_ts_kit_log_cfg = TS_INF_MODE;
-          error = snprintf(buf, MAX_STR_LEN, "%s\n", "2 -> 0");
+          g_ts_kit_log_cfg = 0;
+          error = snprintf(buf, MAX_STR_LEN, "%s\n", "1 -> 0");
     }
     else
     {
-          g_ts_kit_log_cfg = TS_DBG_MODE;
+          g_ts_kit_log_cfg = 1;
           error = snprintf(buf, MAX_STR_LEN, "%s\n", "0 -> 1");
     }
     if (dev_data->ops->chip_debug_switch)
@@ -818,6 +812,36 @@ static ssize_t ts_touch_window_show(struct device* dev, struct device_attribute*
 
 static ssize_t ts_loglevel_store(struct device* dev, struct device_attribute* attr, const char* buf, size_t count)
 {
+    int error = 0;
+/*    unsigned int value;
+    struct ts_kit_device_data* dev_data = g_ts_kit_platform_data.chip_data;
+
+    TS_LOG_INFO("ts_loglevel_store called\n");
+
+    if (dev == NULL)
+    {
+        TS_LOG_ERR("dev is null\n");
+        error = -EINVAL;
+        goto out;
+    }
+
+    error = sscanf(buf, "%u", &value);
+    if (!error)
+    {
+        TS_LOG_ERR("sscanf return invaild :%d\n", error);
+        error = -EINVAL;
+        goto out;
+    }
+    TS_LOG_DEBUG("sscanf value is %u\n", value);
+    g_ts_kit_log_cfg = value;
+    error = count;
+
+    if (dev_data->ops->chip_debug_switch)
+    { dev_data->ops->chip_debug_switch(g_ts_kit_log_cfg); }
+
+out:
+    TS_LOG_INFO("ts_loglevel_store done\n");
+*/
     return count;
 }
 
@@ -1106,7 +1130,7 @@ static ssize_t ts_easy_wakeup_gesture_store(struct device* dev,
     ret = kstrtoul(buf, DEC_BASE_DATA, &value);
     if (ret < 0)
     { return ret; }
-    if (value > TS_GESTURE_INVALID_COMMAND)
+    if (value > TS_GESTURE_INVALID_COMMAND || value < 0)
     { return -1; }
     info->easy_wakeup_gesture = (u16)value & TS_GESTURE_COMMAND;
     info->palm_cover_flag = (u16)(value & TS_GESTURE_PALM_BIT) / TS_GET_CALCULATE_NUM;
@@ -1185,9 +1209,8 @@ static ssize_t ts_easy_wakeup_control_store(struct device* dev,
     if (ret < 0)
     { return ret; }
 
-	if (value > TS_GESTURE_INVALID_CONTROL_NO) {
-		return -1;
-	}
+    if (value > TS_GESTURE_INVALID_CONTROL_NO && value < 0)
+    { return -1; }
 
     value = (u8)value & TS_GESTURE_COMMAND;
     if (1 == value)
@@ -1325,7 +1348,6 @@ out:
     return error;
 }
 /*lint -save -e* */
-
 static ssize_t ts_rawdata_debug_test_show(struct device* dev, struct device_attribute* attr, char* buf)
 {
     int index = 0;
@@ -1333,15 +1355,14 @@ static ssize_t ts_rawdata_debug_test_show(struct device* dev, struct device_attr
     int count = 0;
     short row_size = 0;
     int range_size = 0;
-	int size = 0;
-	int len = 0;
     int error = NO_ERR;
     struct ts_cmd_node* cmd = NULL;
     struct ts_diff_data_info* info = NULL;
-    char buffer1[FORCEKEY_DATA_LEN] = {0};
-    char buffer2[FORCEKEY_STR_LEN] = {0};
+    char buffer1[6] = {0};
+    char buffer2[50] = {0};
 
     TS_LOG_INFO("ts_rawdata_debug_test_show called\n");
+
     cmd = (struct ts_cmd_node*)kzalloc(sizeof(struct ts_cmd_node), GFP_KERNEL);
     if (!cmd)
     {
@@ -1376,62 +1397,35 @@ static ssize_t ts_rawdata_debug_test_show(struct device* dev, struct device_attr
         error = -EIO;
         goto out;
     }
-	if(info->debug_type  == READ_FORCE_DATA)
-	{
-		size = info->buff[0];
-		if(size < 0||size > TS_RAWDATA_BUFF_MAX - 1)
-		{
-			TS_LOG_ERR("buff size error :%d\n",size);
-			goto out;
-		}
-		for(index = 1 ;  index < size; index++)
-		{
-			len = snprintf(buf+count,FORCEKEY_DATA_LEN , "%6d",info->buff[index]);
-			count = count + len;
-			if(index % NUM_OF_ROW == 0)
-			{
-				len = snprintf(buf+count,FORCEKEY_DATA_LEN , "\n ");
-				count = count + len;
-			}
-		}
-		len = snprintf(buf+count,FORCEKEY_DATA_LEN , "\n ");
-		count = count + len;
-		error = count;
-	}
-	else
-	{
-		sprintf(buf, RAWDATA_DEBUG_HEAD_TEXT);
-		count = count + strlen(RAWDATA_DEBUG_HEAD_TEXT);
 
-		row_size = info->buff[0];
-		if ((row_size <= 0) || (info->used_size) <= 0){
-			TS_LOG_ERR("%s data error! DO NOT surport this mode!", __func__);
-			goto out;
-		}
-		range_size = info->buff[1];
-		sprintf(buffer2, "rx: %d, tx : %d\n ", row_size, range_size);
-		strncat(buf, buffer2 , strlen(buffer2));
-		count = count + strlen(buffer2);
+    sprintf(buf, RAWDATA_DEBUG_HEAD_TEXT);
+    count = count + strlen(RAWDATA_DEBUG_HEAD_TEXT);
 
-		TS_LOG_INFO("info->used+size = %d\n", info->used_size);
+    row_size = info->buff[0];
+    range_size = info->buff[1];
+    sprintf(buffer2, "rx: %d, tx : %d\n ", row_size, range_size);
+    strncat(buf, buffer2 , strlen(buffer2));
+    count = count + strlen(buffer2);
 
-		for (index = 0; row_size * index + 2 < info->used_size; index++)
-		{
-			for (index1 = 0; index1 < row_size; index1++)
-			{
-				sprintf(buffer1, "%d,", info->buff[2 + row_size * index + index1]);
-				strncat(buf, buffer1 , strlen(buffer1));
-				count = count + strlen(buffer1);
-			}
-			sprintf(buffer1, "\n ");
-			strncat(buf, buffer1 , strlen(buffer1));
-			count = count + strlen(buffer1);
-		}
+    TS_LOG_INFO("info->used+size = %d\n", info->used_size);
 
-		strcat(buf, "noisedata end\n");
-		count = count + sizeof("noisedata end\n");
-		error = count;
-	}
+    for (index = 0; row_size * index + 2 < info->used_size; index++)
+    {
+        for (index1 = 0; index1 < row_size; index1++)
+        {
+            sprintf(buffer1, "%d,", info->buff[2 + row_size * index + index1]);
+            strncat(buf, buffer1 , strlen(buffer1));
+            count = count + strlen(buffer1);
+        }
+        sprintf(buffer1, "\n ");
+        strncat(buf, buffer1 , strlen(buffer1));
+        count = count + strlen(buffer1);
+    }
+
+    strcat(buf, "noisedata end\n");
+    count = count + sizeof("noisedata end\n");
+    error = count;
+
 out:
     if (info)
     { kfree(info); }
@@ -1509,7 +1503,6 @@ static ssize_t touch_special_hardware_test_store(struct device* dev, struct devi
     u8 value = 0;
     unsigned long tmp = 0;
     int error;
-	int ret = 0;
     struct ts_cmd_node* cmd = NULL;
     struct ts_special_hardware_test_info* info = NULL;
 
@@ -1545,10 +1538,7 @@ static ssize_t touch_special_hardware_test_store(struct device* dev, struct devi
     info->switch_value = value;
     cmd->command = TS_HARDWARE_TEST;
     cmd->cmd_param.prv_params = (void*)info;
-	ret = ts_kit_put_one_cmd(cmd, NO_SYNC_TIMEOUT);
-	if (ret) {
-		TS_LOG_ERR("%s: hardware test cmd send fail\n", __func__);
-	}
+    ts_kit_put_one_cmd(cmd, NO_SYNC_TIMEOUT);
 
     error = count;
 out:
@@ -1862,12 +1852,6 @@ static ssize_t ts_roi_enable_store(struct device *dev,
 	int error;
 	struct ts_roi_info *info = &g_ts_kit_platform_data.feature_info.roi_info;
 
-	if ( NULL == g_ts_kit_platform_data.chip_data ){
-		TS_LOG_ERR("%s error \n", __func__ );
-		error = -EINVAL;
-		goto out;
-	}
-
 	error = strict_strtoul(buf, 0, &tmp);
 	if (error) {
 		TS_LOG_ERR("strict_strtoul return invaild :%d\n", error);
@@ -1886,13 +1870,7 @@ static ssize_t ts_roi_enable_store(struct device *dev,
 	}
 
 	info->roi_switch = value;
-	if(TS_SWITCH_ROI_DELAY_ENABLE == g_ts_kit_platform_data.chip_data->roi_delay_flag){
-	     TS_LOG_INFO("ts_send_roi_store_cmd NO_SYNC_TIMEOUT\n");
-	     error = ts_send_roi_cmd(TS_ACTION_WRITE, NO_SYNC_TIMEOUT);
-	} else {
-	     error = ts_send_roi_cmd(TS_ACTION_WRITE, SHORT_SYNC_TIMEOUT);
-	}
-
+	error = ts_send_roi_cmd(TS_ACTION_WRITE, SHORT_SYNC_TIMEOUT);
 	if (error) {
 		TS_LOG_ERR("ts_send_roi_store_cmd failed\n");
 		error = -ENOMEM;
@@ -1985,11 +1963,8 @@ static ssize_t ts_tui_report_store(struct device *dev,
 	int ret = 0;
 	unsigned long value = 0;
 
-	ret = strict_strtoul(buf, 0, &value);
-	if (ret <= 0) {
-		TS_LOG_ERR("%s: stric_strtoul failed, ret = %d", __func__, ret);
-		return -EINVAL;
-	}
+	ret = strict_strtoul(buf, "%d", &value);
+
 	g_ts_kit_platform_data.chip_data->report_tui_enable = (unsigned int)value;
 
 	if (g_ts_kit_platform_data.chip_data->report_tui_enable == true) {
@@ -2146,7 +2121,7 @@ static ssize_t ts_oem_info_store(struct device *dev, struct device_attribute *at
 	}
 
 	if (strlen(buf) > TS_CHIP_TYPE_MAX_SIZE+1) {
-		TS_LOG_ERR("%s: Store TPIC type data size= %lu larger than MAX input size=%d\n",
+		TS_LOG_ERR("%s: Store TPIC type data size= %d larger than MAX input size=%d \n",
 			__func__, strlen(buf), TS_CHIP_TYPE_MAX_SIZE);
 		error = -EINVAL;
 		goto out;
@@ -2301,7 +2276,6 @@ static ssize_t ts_touch_switch_store(struct device *dev,
 	int len = 0;
 	int error = NO_ERR;
 	struct ts_cmd_node cmd;
-	struct ts_kit_device_data *chip_data = g_ts_kit_platform_data.chip_data;
 
 	TS_LOG_INFO("+\n");
 	len = strlen(buf);
@@ -2313,25 +2287,21 @@ static ssize_t ts_touch_switch_store(struct device *dev,
 	}
 
 	if ((TS_SWITCH_TYPE_DOZE !=
-		(chip_data->touch_switch_flag & TS_SWITCH_TYPE_DOZE)) &&
+		g_ts_kit_platform_data.chip_data->touch_switch_flag & TS_SWITCH_TYPE_DOZE)&&
 		(TS_SWITCH_TYPE_GAME!=
-		(chip_data->touch_switch_flag & TS_SWITCH_TYPE_GAME)) &&
-		(TS_SWITCH_TYPE_SCENE!=
-		(chip_data->touch_switch_flag & TS_SWITCH_TYPE_SCENE)) &&
-		(TS_SWITCH_TYPE_FM!=
-		(chip_data->touch_switch_flag & TS_SWITCH_TYPE_FM))) {
-		TS_LOG_INFO("tp doze,game,scene,fm switch not support\n");
+		(g_ts_kit_platform_data.chip_data->touch_switch_flag & TS_SWITCH_TYPE_GAME))){
+		TS_LOG_INFO("tp doze not support\n");
 		goto out;
 	}
 
-	memset(chip_data->touch_switch_info, 0, MAX_STR_LEN);
-	snprintf(chip_data->touch_switch_info, MAX_STR_LEN - 1, "%s", buf);
+	memset(g_ts_kit_platform_data.chip_data->touch_switch_info, 0, MAX_STR_LEN);
+	snprintf(g_ts_kit_platform_data.chip_data->touch_switch_info, MAX_STR_LEN - 1, "%s", buf);
 
 	memset(&cmd, 0, sizeof(struct ts_cmd_node));
 	cmd.command = TS_TOUCH_SWITCH;
 	cmd.cmd_param.prv_params =
-	    (void *)&chip_data->touch_switch_info;
-	if (chip_data->is_direct_proc_cmd)
+	    (void *)&g_ts_kit_platform_data.chip_data->touch_switch_info;
+	if(g_ts_kit_platform_data.chip_data->is_direct_proc_cmd)
 		error = ts_kit_proc_command_directly(&cmd);
 	else
 		error = ts_kit_put_one_cmd(&cmd, SHORT_SYNC_TIMEOUT);
@@ -2344,40 +2314,15 @@ out:
 	TS_LOG_INFO("-\n");
 	return count;
 }
-
-static ssize_t udfp_enable_show(struct device *dev,struct device_attribute *attr, char *buf)
-{
-	int error = -1;
-	TS_LOG_INFO("%s,0x%x\n",__func__,g_ts_kit_platform_data.udfp_enable_flag);
-	error = snprintf(buf, MAX_STR_LEN, "%d\n", g_ts_kit_platform_data.udfp_enable_flag);
-
-	return error;
-}
-
-static ssize_t udfp_enable_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-	unsigned int value = 0;
-	int error = 0;
-	error = sscanf(buf, "%d", &value);
-	TS_LOG_DEBUG("%s,value  = %d   |error = %d\n",__func__,value,error);
-
-	g_ts_kit_platform_data.udfp_enable_flag = value ;
-	TS_LOG_INFO("[%s] -> %d\n",__func__,g_ts_kit_platform_data.udfp_enable_flag);
-
-	error = count;
-
-	return error;
-}
-
 /*lint -restore*/
 static DEVICE_ATTR(touch_chip_info, (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH), ts_chip_info_show, ts_chip_info_store);
-static DEVICE_ATTR(calibrate, (S_IRUSR|S_IRGRP), ts_calibrate_show, NULL);
+static DEVICE_ATTR(calibrate, S_IRUSR, ts_calibrate_show, NULL);
 static DEVICE_ATTR(calibrate_wakeup_gesture, S_IRUSR, ts_calibrate_wakeup_gesture_show, NULL);
 static DEVICE_ATTR(touch_glove, (S_IRUSR | S_IWUSR), ts_glove_mode_show, ts_glove_mode_store);
 static DEVICE_ATTR(touch_sensitivity, (S_IRUSR | S_IWUSR), ts_sensitivity_show, ts_sensitivity_store);
 static DEVICE_ATTR(hand_detect, S_IRUSR, ts_hand_detect_show, NULL);
 static DEVICE_ATTR(loglevel, (S_IRUSR | S_IWUSR), ts_loglevel_show, ts_loglevel_store);
-static DEVICE_ATTR(supported_func_indicater, (S_IRUSR|S_IRGRP), ts_supported_func_indicater_show, NULL);
+static DEVICE_ATTR(supported_func_indicater, (S_IRUSR), ts_supported_func_indicater_show, NULL);
 static DEVICE_ATTR(touch_window, (S_IRUSR | S_IWUSR), ts_touch_window_show, ts_touch_window_store);
 static DEVICE_ATTR(fw_update_sd, S_IWUSR, NULL, ts_fw_update_sd_store);
 static DEVICE_ATTR(reset, S_IWUSR, NULL, ts_reset_store);
@@ -2403,8 +2348,6 @@ static DEVICE_ATTR(calibration_info, (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH),ts_
 static DEVICE_ATTR(tp_capacitance_test_config, (S_IRUSR), ts_capacitance_test_config_show, NULL);
 static DEVICE_ATTR(touch_switch, (S_IRUSR | S_IRGRP | S_IWUSR | S_IWGRP),
 		   ts_touch_switch_show, ts_touch_switch_store);
-static DEVICE_ATTR(udfp_enable, (S_IRUSR | S_IRGRP | S_IWUSR | S_IWGRP),
-		   udfp_enable_show, udfp_enable_store);
 
 static struct attribute* ts_attributes[] =
 {
@@ -2440,7 +2383,6 @@ static struct attribute* ts_attributes[] =
 	&dev_attr_touch_tui_enable.attr,
 #endif
     &dev_attr_touch_switch.attr,
-    &dev_attr_udfp_enable.attr,
     NULL
 };
 

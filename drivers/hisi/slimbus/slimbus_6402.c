@@ -26,6 +26,7 @@
 #include "csmi.h"
 #include "slimbus_drv.h"
 #include "slimbus.h"
+#include <linux/hisi/hilog.h>
 #include <dsm/dsm_pub.h>
 
 /*lint -e750 -e715 -e785 -e574*/
@@ -37,6 +38,7 @@ extern slimbus_channel_property_t sound_trigger[SLIMBUS_SOUND_TRIGGER_CHANNELS];
 extern bool hi6402_soundtrigger_if1_used;
 
 #define UNUSED_PARAMETER(x) (void)(x)
+
 
 /* slimbus soc side port definition */
 typedef enum
@@ -198,7 +200,7 @@ void slimbus_hi6402_param_init(slimbus_device_info_t *dev)
 	slimbus_channel_property_t	*pchprop = NULL;
 	slimbus_transport_protocol_t	tp = SLIMBUS_TP_ISOCHRONOUS;
 	slimbus_rf_type_t	rf = dev->rf;
-	uint32_t track_type = 0;
+	int 	track_type = 0;
 	uint8_t source_la	= SOC_LA_GENERIC_DEVICE;
 	uint8_t sink_la		= HI64XX_LA_GENERIC_DEVICE;
 	uint32_t ch		= 0;
@@ -255,10 +257,12 @@ void slimbus_hi6402_param_init(slimbus_device_info_t *dev)
 
 	return;
 }
+EXPORT_SYMBOL(slimbus_hi6402_param_init);
+
 
 int slimbus_hi6402_param_set(
 				slimbus_device_info_t *dev,
-				uint32_t track_type,
+				slimbus_track_type_t   track_type,
 				slimbus_track_param_t *params)
 {
 	slimbus_channel_property_t	*pchprop = NULL;
@@ -339,6 +343,7 @@ int slimbus_hi6402_param_set(
 
 	return 0;
 }
+EXPORT_SYMBOL(slimbus_hi6402_param_set);
 
 
 /*
@@ -347,21 +352,15 @@ int slimbus_hi6402_param_set(
  *
  * return 0, if success
  */
-int create_hi6402_slimbus_device(slimbus_device_info_t **device)
+int create_hi6402_slimbus_device(slimbus_device_info_t **device, slimbus_hi6403_type_t hi6403_type)
 {
 	struct slimbus_device_info *dev_info = NULL;
 
+	UNUSED_PARAMETER(hi6403_type);
+
 	dev_info = kzalloc(sizeof(struct slimbus_device_info), GFP_KERNEL);
 	if (!dev_info) {
-		pr_err("[%s:%d] malloc slimbus failed!\n", __FUNCTION__, __LINE__);
-		return -ENOMEM;
-	}
-
-	dev_info->slimbus_64xx_para = kzalloc(sizeof(struct slimbus_device_info), GFP_KERNEL);
-	if (!dev_info->slimbus_64xx_para) {
-		pr_err("[%s:%d] malloc slimbus failed!\n", __FUNCTION__, __LINE__);
-		kfree(dev_info);
-		dev_info = NULL;
+		pr_info("[%s:%d] malloc slimbus failed!\n", __FUNCTION__, __LINE__);
 		return -ENOMEM;
 	}
 
@@ -369,9 +368,6 @@ int create_hi6402_slimbus_device(slimbus_device_info_t **device)
 	dev_info->voice_up_chnum	= SLIMBUS_VOICE_UP_2CH;;
 	dev_info->audio_up_chnum	= SLIMBUS_AUDIO_CAPTURE_MULTI_MIC_CHANNELS;//default is 4mic
 	dev_info->page_sel_addr		= 1;
-
-	dev_info->slimbus_64xx_para->slimbus_track_max = SLIMBUS_TRACK_MAX;
-	dev_info->slimbus_64xx_para->track_config_table = track_config_table;
 
 	mutex_init(&dev_info->rw_mutex);
 
@@ -381,21 +377,20 @@ int create_hi6402_slimbus_device(slimbus_device_info_t **device)
 
 	return 0;
 }
+EXPORT_SYMBOL(create_hi6402_slimbus_device);
 
-void release_hi6402_slimbus_device(slimbus_device_info_t *device)
+int release_hi6402_slimbus_device(slimbus_device_info_t *device)
 {
 	if (device != NULL) {
-		if (device->slimbus_64xx_para != NULL) {
-			kfree(device->slimbus_64xx_para);
-			device->slimbus_64xx_para= NULL;
-		}
-
 		mutex_destroy(&(device->rw_mutex));
 		mutex_destroy(&(device->track_mutex));
 		kfree(device);
 		device = NULL;
 	}
+	return 0;
 }
+EXPORT_SYMBOL(release_hi6402_slimbus_device);
+
 
 void slimbus_hi6402_get_st_params(slimbus_sound_trigger_params_t *params)
 {

@@ -659,7 +659,6 @@ raid5_get_active_stripe(struct r5conf *conf, sector_t sector,
 {
 	struct stripe_head *sh;
 	int hash = stripe_hash_locks_hash(sector);
-	int inc_empty_inactive_list_flag;
 
 	pr_debug("get_stripe, sector %llu\n", (unsigned long long)sector);
 
@@ -704,12 +703,7 @@ raid5_get_active_stripe(struct r5conf *conf, sector_t sector,
 					atomic_inc(&conf->active_stripes);
 				BUG_ON(list_empty(&sh->lru) &&
 				       !test_bit(STRIPE_EXPANDING, &sh->state));
-				inc_empty_inactive_list_flag = 0;
-				if (!list_empty(conf->inactive_list + hash))
-					inc_empty_inactive_list_flag = 1;
 				list_del_init(&sh->lru);
-				if (list_empty(conf->inactive_list + hash) && inc_empty_inactive_list_flag)
-					atomic_inc(&conf->empty_inactive_list_nr);
 				if (sh->group) {
 					sh->group->stripes_cnt--;
 					sh->group = NULL;
@@ -768,8 +762,9 @@ static void stripe_add_to_batch_list(struct r5conf *conf, struct stripe_head *sh
 	sector_t head_sector, tmp_sec;
 	int hash;
 	int dd_idx;
-	int inc_empty_inactive_list_flag;
 
+	if (!stripe_can_batch(sh))
+		return;
 	/* Don't cross chunks, so stripe pd_idx/qd_idx is the same */
 	tmp_sec = sh->sector;
 	if (!sector_div(tmp_sec, conf->chunk_sectors))
@@ -786,12 +781,7 @@ static void stripe_add_to_batch_list(struct r5conf *conf, struct stripe_head *sh
 				atomic_inc(&conf->active_stripes);
 			BUG_ON(list_empty(&head->lru) &&
 			       !test_bit(STRIPE_EXPANDING, &head->state));
-			inc_empty_inactive_list_flag = 0;
-			if (!list_empty(conf->inactive_list + hash))
-				inc_empty_inactive_list_flag = 1;
 			list_del_init(&head->lru);
-			if (list_empty(conf->inactive_list + hash) && inc_empty_inactive_list_flag)
-				atomic_inc(&conf->empty_inactive_list_nr);
 			if (head->group) {
 				head->group->stripes_cnt--;
 				head->group = NULL;
@@ -818,8 +808,7 @@ static void stripe_add_to_batch_list(struct r5conf *conf, struct stripe_head *sh
 	dd_idx = 0;
 	while (dd_idx == sh->pd_idx || dd_idx == sh->qd_idx)
 		dd_idx++;
-	if (head->dev[dd_idx].towrite->bi_opf != sh->dev[dd_idx].towrite->bi_opf ||
-	    bio_op(head->dev[dd_idx].towrite) != bio_op(sh->dev[dd_idx].towrite))
+	if (head->dev[dd_idx].towrite->bi_rw != sh->dev[dd_idx].towrite->bi_rw)
 		goto unlock_out;
 
 	if (head->batch_head) {
@@ -829,14 +818,6 @@ static void stripe_add_to_batch_list(struct r5conf *conf, struct stripe_head *sh
 			spin_unlock(&head->batch_head->batch_lock);
 			goto unlock_out;
 		}
-		/*
-		 * We must assign batch_head of this stripe within the
-		 * batch_lock, otherwise clear_batch_ready of batch head
-		 * stripe could clear BATCH_READY bit of this stripe and
-		 * this stripe->batch_head doesn't get assigned, which
-		 * could confuse clear_batch_ready for this stripe
-		 */
-		sh->batch_head = head->batch_head;
 
 		/*
 		 * at this point, head's BATCH_READY could be cleared, but we
@@ -844,6 +825,8 @@ static void stripe_add_to_batch_list(struct r5conf *conf, struct stripe_head *sh
 		 */
 		list_add(&sh->batch_list, &head->batch_list);
 		spin_unlock(&head->batch_head->batch_lock);
+
+		sh->batch_head = head->batch_head;
 	} else {
 		head->batch_head = head;
 		sh->batch_head = head->batch_head;
@@ -910,28 +893,29 @@ static void ops_run_io(struct stripe_head *sh, struct stripe_head_state *s)
 	if (r5l_write_stripe(conf->log, sh) == 0)
 		return;
 	for (i = disks; i--; ) {
-		int op, op_flags = 0;
+		int rw;
 		int replace_only = 0;
 		struct bio *bi, *rbi;
 		struct md_rdev *rdev, *rrdev = NULL;
 
 		sh = head_sh;
 		if (test_and_clear_bit(R5_Wantwrite, &sh->dev[i].flags)) {
-			op = REQ_OP_WRITE;
 			if (test_and_clear_bit(R5_WantFUA, &sh->dev[i].flags))
-				op_flags = WRITE_FUA;
+				rw = WRITE_FUA;
+			else
+				rw = WRITE;
 			if (test_bit(R5_Discard, &sh->dev[i].flags))
-				op = REQ_OP_DISCARD;
+				rw |= REQ_DISCARD;
 		} else if (test_and_clear_bit(R5_Wantread, &sh->dev[i].flags))
-			op = REQ_OP_READ;
+			rw = READ;
 		else if (test_and_clear_bit(R5_WantReplace,
 					    &sh->dev[i].flags)) {
-			op = REQ_OP_WRITE;
+			rw = WRITE;
 			replace_only = 1;
 		} else
 			continue;
 		if (test_and_clear_bit(R5_SyncIO, &sh->dev[i].flags))
-			op_flags |= REQ_SYNC;
+			rw |= REQ_SYNC;
 
 again:
 		bi = &sh->dev[i].req;
@@ -945,7 +929,7 @@ again:
 			rdev = rrdev;
 			rrdev = NULL;
 		}
-		if (op_is_write(op)) {
+		if (rw & WRITE) {
 			if (replace_only)
 				rdev = NULL;
 			if (rdev == rrdev)
@@ -971,7 +955,7 @@ again:
 		 * need to check for writes.  We never accept write errors
 		 * on the replacement, so we don't to check rrdev.
 		 */
-		while (op_is_write(op) && rdev &&
+		while ((rw & WRITE) && rdev &&
 		       test_bit(WriteErrorSeen, &rdev->flags)) {
 			sector_t first_bad;
 			int bad_sectors;
@@ -1011,16 +995,17 @@ again:
 
 			set_bit(STRIPE_IO_STARTED, &sh->state);
 
+			bio_reset(bi);
 			bi->bi_bdev = rdev->bdev;
-			bio_set_op_attrs(bi, op, op_flags);
-			bi->bi_end_io = op_is_write(op)
+			bi->bi_rw = rw;
+			bi->bi_end_io = (rw & WRITE)
 				? raid5_end_write_request
 				: raid5_end_read_request;
 			bi->bi_private = sh;
 
-			pr_debug("%s: for %llu schedule op %d on disc %d\n",
+			pr_debug("%s: for %llu schedule op %ld on disc %d\n",
 				__func__, (unsigned long long)sh->sector,
-				bi->bi_opf, i);
+				bi->bi_rw, i);
 			atomic_inc(&sh->count);
 			if (sh != head_sh)
 				atomic_inc(&head_sh->count);
@@ -1031,7 +1016,7 @@ again:
 				bi->bi_iter.bi_sector = (sh->sector
 						 + rdev->data_offset);
 			if (test_bit(R5_ReadNoMerge, &head_sh->dev[i].flags))
-				bi->bi_opf |= REQ_NOMERGE;
+				bi->bi_rw |= REQ_NOMERGE;
 
 			if (test_bit(R5_SkipCopy, &sh->dev[i].flags))
 				WARN_ON(test_bit(R5_UPTODATE, &sh->dev[i].flags));
@@ -1044,7 +1029,7 @@ again:
 			 * If this is discard request, set bi_vcnt 0. We don't
 			 * want to confuse SCSI because SCSI will replace payload
 			 */
-			if (op == REQ_OP_DISCARD)
+			if (rw & REQ_DISCARD)
 				bi->bi_vcnt = 0;
 			if (rrdev)
 				set_bit(R5_DOUBLE_LOCKED, &sh->dev[i].flags);
@@ -1062,16 +1047,17 @@ again:
 
 			set_bit(STRIPE_IO_STARTED, &sh->state);
 
+			bio_reset(rbi);
 			rbi->bi_bdev = rrdev->bdev;
-			bio_set_op_attrs(rbi, op, op_flags);
-			BUG_ON(!op_is_write(op));
+			rbi->bi_rw = rw;
+			BUG_ON(!(rw & WRITE));
 			rbi->bi_end_io = raid5_end_write_request;
 			rbi->bi_private = sh;
 
-			pr_debug("%s: for %llu schedule op %d on "
+			pr_debug("%s: for %llu schedule op %ld on "
 				 "replacement disc %d\n",
 				__func__, (unsigned long long)sh->sector,
-				rbi->bi_opf, i);
+				rbi->bi_rw, i);
 			atomic_inc(&sh->count);
 			if (sh != head_sh)
 				atomic_inc(&head_sh->count);
@@ -1092,7 +1078,7 @@ again:
 			 * If this is discard request, set bi_vcnt 0. We don't
 			 * want to confuse SCSI because SCSI will replace payload
 			 */
-			if (op == REQ_OP_DISCARD)
+			if (rw & REQ_DISCARD)
 				rbi->bi_vcnt = 0;
 			if (conf->mddev->gendisk)
 				trace_block_bio_remap(bdev_get_queue(rbi->bi_bdev),
@@ -1101,10 +1087,10 @@ again:
 			generic_make_request(rbi);
 		}
 		if (!rdev && !rrdev) {
-			if (op_is_write(op))
+			if (rw & WRITE)
 				set_bit(STRIPE_DEGRADED, &sh->state);
-			pr_debug("skip op %d on disc %d for sector %llu\n",
-				bi->bi_opf, i, (unsigned long long)sh->sector);
+			pr_debug("skip op %ld on disc %d for sector %llu\n",
+				bi->bi_rw, i, (unsigned long long)sh->sector);
 			clear_bit(R5_LOCKED, &sh->dev[i].flags);
 			set_bit(STRIPE_HANDLE, &sh->state);
 		}
@@ -1635,11 +1621,11 @@ again:
 
 			while (wbi && wbi->bi_iter.bi_sector <
 				dev->sector + STRIPE_SECTORS) {
-				if (wbi->bi_opf & REQ_FUA)
+				if (wbi->bi_rw & REQ_FUA)
 					set_bit(R5_WantFUA, &dev->flags);
-				if (wbi->bi_opf & REQ_SYNC)
+				if (wbi->bi_rw & REQ_SYNC)
 					set_bit(R5_SyncIO, &dev->flags);
-				if (bio_op(wbi) == REQ_OP_DISCARD)
+				if (wbi->bi_rw & REQ_DISCARD)
 					set_bit(R5_Discard, &dev->flags);
 				else {
 					tx = async_copy_data(1, wbi, &dev->page,
@@ -1689,11 +1675,8 @@ static void ops_complete_reconstruct(void *stripe_head_ref)
 		struct r5dev *dev = &sh->dev[i];
 
 		if (dev->written || i == pd_idx || i == qd_idx) {
-			if (!discard && !test_bit(R5_SkipCopy, &dev->flags)) {
+			if (!discard && !test_bit(R5_SkipCopy, &dev->flags))
 				set_bit(R5_UPTODATE, &dev->flags);
-				if (test_bit(STRIPE_EXPAND_READY, &sh->state))
-					set_bit(R5_Expanded, &dev->flags);
-			}
 			if (fua)
 				set_bit(R5_WantFUA, &dev->flags);
 			if (sync)
@@ -1997,11 +1980,9 @@ static void raid_run_ops(struct stripe_head *sh, unsigned long ops_request)
 	put_cpu();
 }
 
-static struct stripe_head *alloc_stripe(struct kmem_cache *sc, gfp_t gfp,
-	int disks)
+static struct stripe_head *alloc_stripe(struct kmem_cache *sc, gfp_t gfp)
 {
 	struct stripe_head *sh;
-	int i;
 
 	sh = kmem_cache_zalloc(sc, gfp);
 	if (sh) {
@@ -2010,17 +1991,6 @@ static struct stripe_head *alloc_stripe(struct kmem_cache *sc, gfp_t gfp,
 		INIT_LIST_HEAD(&sh->batch_list);
 		INIT_LIST_HEAD(&sh->lru);
 		atomic_set(&sh->count, 1);
-		for (i = 0; i < disks; i++) {
-			struct r5dev *dev = &sh->dev[i];
-
-			bio_init(&dev->req);
-			dev->req.bi_io_vec = &dev->vec;
-			dev->req.bi_max_vecs = 1;
-
-			bio_init(&dev->rreq);
-			dev->rreq.bi_io_vec = &dev->rvec;
-			dev->rreq.bi_max_vecs = 1;
-		}
 	}
 	return sh;
 }
@@ -2028,7 +1998,7 @@ static int grow_one_stripe(struct r5conf *conf, gfp_t gfp)
 {
 	struct stripe_head *sh;
 
-	sh = alloc_stripe(conf->slab_cache, gfp, conf->pool_size);
+	sh = alloc_stripe(conf->slab_cache, gfp);
 	if (!sh)
 		return 0;
 
@@ -2199,7 +2169,7 @@ static int resize_stripes(struct r5conf *conf, int newsize)
 	mutex_lock(&conf->cache_size_mutex);
 
 	for (i = conf->max_nr_stripes; i; i--) {
-		nsh = alloc_stripe(sc, GFP_KERNEL, newsize);
+		nsh = alloc_stripe(sc, GFP_KERNEL);
 		if (!nsh)
 			break;
 
@@ -2333,7 +2303,6 @@ static void raid5_end_read_request(struct bio * bi)
 		(unsigned long long)sh->sector, i, atomic_read(&sh->count),
 		bi->bi_error);
 	if (i == disks) {
-		bio_reset(bi);
 		BUG();
 		return;
 	}
@@ -2434,7 +2403,6 @@ static void raid5_end_read_request(struct bio * bi)
 		}
 	}
 	rdev_dec_pending(rdev, conf->mddev);
-	bio_reset(bi);
 	clear_bit(R5_LOCKED, &sh->dev[i].flags);
 	set_bit(STRIPE_HANDLE, &sh->state);
 	raid5_release_stripe(sh);
@@ -2472,7 +2440,6 @@ static void raid5_end_write_request(struct bio *bi)
 		(unsigned long long)sh->sector, i, atomic_read(&sh->count),
 		bi->bi_error);
 	if (i == disks) {
-		bio_reset(bi);
 		BUG();
 		return;
 	}
@@ -2509,7 +2476,6 @@ static void raid5_end_write_request(struct bio *bi)
 	if (sh->batch_head && bi->bi_error && !replacement)
 		set_bit(STRIPE_BATCH_ERR, &sh->batch_head->state);
 
-	bio_reset(bi);
 	if (!test_and_clear_bit(R5_DOUBLE_LOCKED, &sh->dev[i].flags))
 		clear_bit(R5_LOCKED, &sh->dev[i].flags);
 	set_bit(STRIPE_HANDLE, &sh->state);
@@ -2523,11 +2489,21 @@ static void raid5_build_block(struct stripe_head *sh, int i, int previous)
 {
 	struct r5dev *dev = &sh->dev[i];
 
+	bio_init(&dev->req);
+	dev->req.bi_io_vec = &dev->vec;
+	dev->req.bi_max_vecs = 1;
+	dev->req.bi_private = sh;
+
+	bio_init(&dev->rreq);
+	dev->rreq.bi_io_vec = &dev->rvec;
+	dev->rreq.bi_max_vecs = 1;
+	dev->rreq.bi_private = sh;
+
 	dev->flags = 0;
 	dev->sector = raid5_compute_blocknr(sh, i, previous);
 }
 
-static void raid5_error(struct mddev *mddev, struct md_rdev *rdev)
+static void error(struct mddev *mddev, struct md_rdev *rdev)
 {
 	char b[BDEVNAME_SIZE];
 	struct r5conf *conf = mddev->private;
@@ -2542,8 +2518,8 @@ static void raid5_error(struct mddev *mddev, struct md_rdev *rdev)
 
 	set_bit(Blocked, &rdev->flags);
 	set_bit(Faulty, &rdev->flags);
-	set_mask_bits(&mddev->flags, 0,
-		      BIT(MD_CHANGE_DEVS) | BIT(MD_CHANGE_PENDING));
+	set_bit(MD_CHANGE_DEVS, &mddev->flags);
+	set_bit(MD_CHANGE_PENDING, &mddev->flags);
 	printk(KERN_ALERT
 	       "md/raid:%s: Disk failure on %s, disabling device.\n"
 	       "md/raid:%s: Operation continuing on %d devices.\n",
@@ -2989,7 +2965,7 @@ static int add_stripe_bio(struct stripe_head *sh, struct bio *bi, int dd_idx,
 	 * If several bio share a stripe. The bio bi_phys_segments acts as a
 	 * reference count to avoid race. The reference count should already be
 	 * increased before this function is called (for example, in
-	 * raid5_make_request()), so other bio sharing this stripe will not free the
+	 * make_request()), so other bio sharing this stripe will not free the
 	 * stripe. If a stripe is owned by one stripe, the stripe lock will
 	 * protect it.
 	 */
@@ -3108,8 +3084,7 @@ handle_failed_stripe(struct r5conf *conf, struct stripe_head *sh,
 			struct md_rdev *rdev;
 			rcu_read_lock();
 			rdev = rcu_dereference(conf->disks[i].rdev);
-			if (rdev && test_bit(In_sync, &rdev->flags) &&
-			    !test_bit(Faulty, &rdev->flags))
+			if (rdev && test_bit(In_sync, &rdev->flags))
 				atomic_inc(&rdev->nr_pending);
 			else
 				rdev = NULL;
@@ -3239,16 +3214,15 @@ handle_failed_sync(struct r5conf *conf, struct stripe_head *sh,
 		/* During recovery devices cannot be removed, so
 		 * locking and refcounting of rdevs is not needed
 		 */
-		rcu_read_lock();
 		for (i = 0; i < conf->raid_disks; i++) {
-			struct md_rdev *rdev = rcu_dereference(conf->disks[i].rdev);
+			struct md_rdev *rdev = conf->disks[i].rdev;
 			if (rdev
 			    && !test_bit(Faulty, &rdev->flags)
 			    && !test_bit(In_sync, &rdev->flags)
 			    && !rdev_set_badblocks(rdev, sh->sector,
 						   STRIPE_SECTORS, 0))
 				abort = 1;
-			rdev = rcu_dereference(conf->disks[i].replacement);
+			rdev = conf->disks[i].replacement;
 			if (rdev
 			    && !test_bit(Faulty, &rdev->flags)
 			    && !test_bit(In_sync, &rdev->flags)
@@ -3256,7 +3230,6 @@ handle_failed_sync(struct r5conf *conf, struct stripe_head *sh,
 						   STRIPE_SECTORS, 0))
 				abort = 1;
 		}
-		rcu_read_unlock();
 		if (abort)
 			conf->recovery_disabled =
 				conf->mddev->recovery_disabled;
@@ -3268,16 +3241,15 @@ static int want_replace(struct stripe_head *sh, int disk_idx)
 {
 	struct md_rdev *rdev;
 	int rv = 0;
-
-	rcu_read_lock();
-	rdev = rcu_dereference(sh->raid_conf->disks[disk_idx].replacement);
+	/* Doing recovery so rcu locking not required */
+	rdev = sh->raid_conf->disks[disk_idx].replacement;
 	if (rdev
 	    && !test_bit(Faulty, &rdev->flags)
 	    && !test_bit(In_sync, &rdev->flags)
 	    && (rdev->recovery_offset <= sh->sector
 		|| rdev->mddev->recovery_cp <= sh->sector))
 		rv = 1;
-	rcu_read_unlock();
+
 	return rv;
 }
 
@@ -3534,6 +3506,8 @@ returnbi:
 				dev = &sh->dev[i];
 			} else if (test_bit(R5_Discard, &dev->flags))
 				discard_pending = 1;
+			WARN_ON(test_bit(R5_SkipCopy, &dev->flags));
+			WARN_ON(dev->page != dev->orig_page);
 		}
 
 	r5l_stripe_write_finished(sh);
@@ -3632,7 +3606,7 @@ static void handle_stripe_dirtying(struct r5conf *conf,
 	pr_debug("for sector %llu, rmw=%d rcw=%d\n",
 		(unsigned long long)sh->sector, rmw, rcw);
 	set_bit(STRIPE_HANDLE, &sh->state);
-	if ((rmw < rcw || (rmw == rcw && conf->rmw_level == PARITY_PREFER_RMW)) && rmw > 0) {
+	if ((rmw < rcw || (rmw == rcw && conf->rmw_level == PARITY_ENABLE_RMW)) && rmw > 0) {
 		/* prefer read-modify-write, but need to get some data */
 		if (conf->mddev->queue)
 			blk_add_trace_msg(conf->mddev->queue,
@@ -3659,7 +3633,7 @@ static void handle_stripe_dirtying(struct r5conf *conf,
 			}
 		}
 	}
-	if ((rcw < rmw || (rcw == rmw && conf->rmw_level != PARITY_PREFER_RMW)) && rcw > 0) {
+	if ((rcw < rmw || (rcw == rmw && conf->rmw_level != PARITY_ENABLE_RMW)) && rcw > 0) {
 		/* want reconstruct write, but need to get some data */
 		int qread =0;
 		rcw = 0;
@@ -4266,7 +4240,7 @@ static void break_stripe_batch_list(struct stripe_head *head_sh,
 
 		list_del_init(&sh->batch_list);
 
-		WARN_ONCE(sh->state & ((1 << STRIPE_ACTIVE) |
+		WARN_ON_ONCE(sh->state & ((1 << STRIPE_ACTIVE) |
 					  (1 << STRIPE_SYNCING) |
 					  (1 << STRIPE_REPLACED) |
 					  (1 << STRIPE_DELAYED) |
@@ -4278,16 +4252,13 @@ static void break_stripe_batch_list(struct stripe_head *head_sh,
 					  (1 << STRIPE_DISCARD) |
 					  (1 << STRIPE_BATCH_READY) |
 					  (1 << STRIPE_BATCH_ERR) |
-					  (1 << STRIPE_BITMAP_PENDING)),
-			"stripe state: %lx\n", sh->state);
-		WARN_ONCE(head_sh->state & ((1 << STRIPE_DISCARD) |
-					      (1 << STRIPE_REPLACED)),
-			"head stripe state: %lx\n", head_sh->state);
+					  (1 << STRIPE_BITMAP_PENDING)));
+		WARN_ON_ONCE(head_sh->state & ((1 << STRIPE_DISCARD) |
+					      (1 << STRIPE_REPLACED)));
 
 		set_mask_bits(&sh->state, ~(STRIPE_EXPAND_SYNC_FLAGS |
 					    (1 << STRIPE_PREREAD_ACTIVE) |
-					    (1 << STRIPE_DEGRADED) |
-					    (1 << STRIPE_ON_UNPLUG_LIST)),
+					    (1 << STRIPE_DEGRADED)),
 			      head_sh->state & (1 << STRIPE_INSYNC));
 
 		sh->check_state = head_sh->check_state;
@@ -4657,9 +4628,7 @@ finish:
 	}
 
 	if (!bio_list_empty(&s.return_bi)) {
-		if (test_bit(MD_CHANGE_PENDING, &conf->mddev->flags) &&
-				(s.failed <= conf->max_degraded ||
-					conf->mddev->external == 0)) {
+		if (test_bit(MD_CHANGE_PENDING, &conf->mddev->flags)) {
 			spin_lock_irq(&conf->device_lock);
 			bio_list_merge(&conf->return_bi, &s.return_bi);
 			spin_unlock_irq(&conf->device_lock);
@@ -5173,7 +5142,7 @@ static void make_discard_request(struct mddev *mddev, struct bio *bi)
 	}
 }
 
-static void raid5_make_request(struct mddev *mddev, struct bio * bi)
+static void make_request(struct mddev *mddev, struct bio * bi)
 {
 	struct r5conf *conf = mddev->private;
 	int dd_idx;
@@ -5185,7 +5154,7 @@ static void raid5_make_request(struct mddev *mddev, struct bio * bi)
 	DEFINE_WAIT(w);
 	bool do_prepare;
 
-	if (unlikely(bi->bi_opf & REQ_PREFLUSH)) {
+	if (unlikely(bi->bi_rw & REQ_FLUSH)) {
 		int ret = r5l_handle_flush_request(conf->log, bi);
 
 		if (ret == 0)
@@ -5211,7 +5180,7 @@ static void raid5_make_request(struct mddev *mddev, struct bio * bi)
 			return;
 	}
 
-	if (unlikely(bio_op(bi) == REQ_OP_DISCARD)) {
+	if (unlikely(bi->bi_rw & REQ_DISCARD)) {
 		make_discard_request(mddev, bi);
 		return;
 	}
@@ -5263,12 +5232,12 @@ static void raid5_make_request(struct mddev *mddev, struct bio * bi)
 		new_sector = raid5_compute_sector(conf, logical_sector,
 						  previous,
 						  &dd_idx, NULL);
-		pr_debug("raid456: raid5_make_request, sector %llu logical %llu\n",
+		pr_debug("raid456: make_request, sector %llu logical %llu\n",
 			(unsigned long long)new_sector,
 			(unsigned long long)logical_sector);
 
 		sh = raid5_get_active_stripe(conf, new_sector, previous,
-				       (bi->bi_opf & REQ_RAHEAD), 0);
+				       (bi->bi_rw&RWA_MASK), 0);
 		if (sh) {
 			if (unlikely(previous)) {
 				/* expansion might have moved on while waiting for a
@@ -5310,15 +5279,12 @@ static void raid5_make_request(struct mddev *mddev, struct bio * bi)
 				 * userspace, we want an interruptible
 				 * wait.
 				 */
+				flush_signals(current);
 				prepare_to_wait(&conf->wait_for_overlap,
 						&w, TASK_INTERRUPTIBLE);
 				if (logical_sector >= mddev->suspend_lo &&
 				    logical_sector < mddev->suspend_hi) {
-					sigset_t full, old;
-					sigfillset(&full);
-					sigprocmask(SIG_BLOCK, &full, &old);
 					schedule();
-					sigprocmask(SIG_SETMASK, &old, NULL);
 					do_prepare = true;
 				}
 				goto retry;
@@ -5339,7 +5305,7 @@ static void raid5_make_request(struct mddev *mddev, struct bio * bi)
 			set_bit(STRIPE_HANDLE, &sh->state);
 			clear_bit(STRIPE_DELAYED, &sh->state);
 			if ((!sh->batch_head || sh == sh->batch_head) &&
-			    (bi->bi_opf & REQ_SYNC) &&
+			    (bi->bi_rw & REQ_SYNC) &&
 			    !test_and_set_bit(STRIPE_PREREAD_ACTIVE, &sh->state))
 				atomic_inc(&conf->preread_active_stripes);
 			release_stripe_plug(mddev, sh);
@@ -5616,8 +5582,7 @@ ret:
 	return retn;
 }
 
-static inline sector_t raid5_sync_request(struct mddev *mddev, sector_t sector_nr,
-					  int *skipped)
+static inline sector_t sync_request(struct mddev *mddev, sector_t sector_nr, int *skipped)
 {
 	struct r5conf *conf = mddev->private;
 	struct stripe_head *sh;
@@ -5853,10 +5818,6 @@ static void raid5_do_work(struct work_struct *work)
 	pr_debug("%d stripes handled\n", handled);
 
 	spin_unlock_irq(&conf->device_lock);
-
-	r5l_flush_stripe_to_raid(conf->log);
-
-	async_tx_issue_pending_all();
 	blk_finish_plug(&plug);
 
 	pr_debug("--- raid5worker inactive\n");
@@ -6368,20 +6329,22 @@ static int alloc_scratch_buffer(struct r5conf *conf, struct raid5_percpu *percpu
 	return 0;
 }
 
-static int raid456_cpu_dead(unsigned int cpu, struct hlist_node *node)
-{
-	struct r5conf *conf = hlist_entry_safe(node, struct r5conf, node);
-
-	free_scratch_buffer(conf, per_cpu_ptr(conf->percpu, cpu));
-	return 0;
-}
-
 static void raid5_free_percpu(struct r5conf *conf)
 {
+	unsigned long cpu;
+
 	if (!conf->percpu)
 		return;
 
-	cpuhp_state_remove_instance(CPUHP_MD_RAID5_PREPARE, &conf->node);
+#ifdef CONFIG_HOTPLUG_CPU
+	unregister_cpu_notifier(&conf->cpu_notify);
+#endif
+
+	get_online_cpus();
+	for_each_possible_cpu(cpu)
+		free_scratch_buffer(conf, per_cpu_ptr(conf->percpu, cpu));
+	put_online_cpus();
+
 	free_percpu(conf->percpu);
 }
 
@@ -6389,7 +6352,7 @@ static void free_conf(struct r5conf *conf)
 {
 	if (conf->log)
 		r5l_exit_log(conf->log);
-	if (conf->shrinker.nr_deferred)
+	if (conf->shrinker.seeks)
 		unregister_shrinker(&conf->shrinker);
 
 	free_thread_groups(conf);
@@ -6400,28 +6363,62 @@ static void free_conf(struct r5conf *conf)
 	kfree(conf);
 }
 
-static int raid456_cpu_up_prepare(unsigned int cpu, struct hlist_node *node)
+#ifdef CONFIG_HOTPLUG_CPU
+static int raid456_cpu_notify(struct notifier_block *nfb, unsigned long action,
+			      void *hcpu)
 {
-	struct r5conf *conf = hlist_entry_safe(node, struct r5conf, node);
+	struct r5conf *conf = container_of(nfb, struct r5conf, cpu_notify);
+	long cpu = (long)hcpu;
 	struct raid5_percpu *percpu = per_cpu_ptr(conf->percpu, cpu);
 
-	if (alloc_scratch_buffer(conf, percpu)) {
-		pr_err("%s: failed memory allocation for cpu%u\n",
-		       __func__, cpu);
-		return -ENOMEM;
+	switch (action) {
+	case CPU_UP_PREPARE:
+	case CPU_UP_PREPARE_FROZEN:
+		if (alloc_scratch_buffer(conf, percpu)) {
+			pr_err("%s: failed memory allocation for cpu%ld\n",
+			       __func__, cpu);
+			return notifier_from_errno(-ENOMEM);
+		}
+		break;
+	case CPU_DEAD:
+	case CPU_DEAD_FROZEN:
+		free_scratch_buffer(conf, per_cpu_ptr(conf->percpu, cpu));
+		break;
+	default:
+		break;
 	}
-	return 0;
+	return NOTIFY_OK;
 }
+#endif
 
 static int raid5_alloc_percpu(struct r5conf *conf)
 {
+	unsigned long cpu;
 	int err = 0;
 
 	conf->percpu = alloc_percpu(struct raid5_percpu);
 	if (!conf->percpu)
 		return -ENOMEM;
 
-	err = cpuhp_state_add_instance(CPUHP_MD_RAID5_PREPARE, &conf->node);
+#ifdef CONFIG_HOTPLUG_CPU
+	conf->cpu_notify.notifier_call = raid456_cpu_notify;
+	conf->cpu_notify.priority = 0;
+	err = register_cpu_notifier(&conf->cpu_notify);
+	if (err)
+		return err;
+#endif
+
+	get_online_cpus();
+	for_each_present_cpu(cpu) {
+		err = alloc_scratch_buffer(conf, per_cpu_ptr(conf->percpu, cpu));
+		if (err) {
+			pr_err("%s: failed memory allocation for cpu%ld\n",
+			       __func__, cpu);
+			break;
+		}
+	}
+	put_online_cpus();
+
 	if (!err) {
 		conf->scribble_disks = max(conf->raid_disks,
 			conf->previous_raid_disks);
@@ -6620,16 +6617,6 @@ static struct r5conf *setup_conf(struct mddev *mddev)
 	}
 
 	conf->min_nr_stripes = NR_STRIPES;
-	if (mddev->reshape_position != MaxSector) {
-		int stripes = max_t(int,
-			((mddev->chunk_sectors << 9) / STRIPE_SIZE) * 4,
-			((mddev->new_chunk_sectors << 9) / STRIPE_SIZE) * 4);
-		conf->min_nr_stripes = max(NR_STRIPES, stripes);
-		if (conf->min_nr_stripes != NR_STRIPES)
-			printk(KERN_INFO
-				"md/raid:%s: force stripe size %d for reshape\n",
-				mdname(mddev), conf->min_nr_stripes);
-	}
 	memory = conf->min_nr_stripes * (sizeof(struct stripe_head) +
 		 max_disks * ((sizeof(struct bio) + PAGE_SIZE))) / 1024;
 	atomic_set(&conf->empty_inactive_list_nr, NR_STRIPE_HASH_LOCKS);
@@ -6651,12 +6638,7 @@ static struct r5conf *setup_conf(struct mddev *mddev)
 	conf->shrinker.count_objects = raid5_cache_count;
 	conf->shrinker.batch = 128;
 	conf->shrinker.flags = 0;
-	if (register_shrinker(&conf->shrinker)) {
-		printk(KERN_ERR
-		       "md/raid:%s: couldn't register shrinker.\n",
-		       mdname(mddev));
-		goto abort;
-	}
+	register_shrinker(&conf->shrinker);
 
 	sprintf(pers_name, "raid%d", mddev->new_level);
 	conf->thread = md_register_thread(raid5d, mddev, pers_name);
@@ -6703,7 +6685,7 @@ static int only_parity(int raid_disk, int algo, int raid_disks, int max_degraded
 	return 0;
 }
 
-static int raid5_run(struct mddev *mddev)
+static int run(struct mddev *mddev)
 {
 	struct r5conf *conf;
 	int working_disks = 0;
@@ -6841,14 +6823,11 @@ static int raid5_run(struct mddev *mddev)
 	if (IS_ERR(conf))
 		return PTR_ERR(conf);
 
-	if (test_bit(MD_HAS_JOURNAL, &mddev->flags)) {
-		if (!journal_dev) {
-			pr_err("md/raid:%s: journal disk is missing, force array readonly\n",
-			       mdname(mddev));
-			mddev->ro = 1;
-			set_disk_ro(mddev->gendisk, 1);
-		} else if (mddev->recovery_cp == MaxSector)
-			set_bit(MD_JOURNAL_CLEAN, &mddev->flags);
+	if (test_bit(MD_HAS_JOURNAL, &mddev->flags) && !journal_dev) {
+		printk(KERN_ERR "md/raid:%s: journal disk is missing, force array readonly\n",
+		       mdname(mddev));
+		mddev->ro = 1;
+		set_disk_ro(mddev->gendisk, 1);
 	}
 
 	conf->min_offset_diff = min_offset_diff;
@@ -7061,8 +7040,6 @@ static int raid5_run(struct mddev *mddev)
 		else
 			queue_flag_clear_unlocked(QUEUE_FLAG_DISCARD,
 						mddev->queue);
-
-		blk_queue_max_hw_sectors(mddev->queue, UINT_MAX);
 	}
 
 	if (journal_dev) {
@@ -7091,7 +7068,7 @@ static void raid5_free(struct mddev *mddev, void *priv)
 	mddev->to_remove = &raid5_attrs_group;
 }
 
-static void raid5_status(struct seq_file *seq, struct mddev *mddev)
+static void status(struct seq_file *seq, struct mddev *mddev)
 {
 	struct r5conf *conf = mddev->private;
 	int i;
@@ -7099,12 +7076,10 @@ static void raid5_status(struct seq_file *seq, struct mddev *mddev)
 	seq_printf(seq, " level %d, %dk chunk, algorithm %d", mddev->level,
 		conf->chunk_sectors / 2, mddev->layout);
 	seq_printf (seq, " [%d/%d] [", conf->raid_disks, conf->raid_disks - mddev->degraded);
-	rcu_read_lock();
-	for (i = 0; i < conf->raid_disks; i++) {
-		struct md_rdev *rdev = rcu_dereference(conf->disks[i].rdev);
-		seq_printf (seq, "%s", rdev && test_bit(In_sync, &rdev->flags) ? "U" : "_");
-	}
-	rcu_read_unlock();
+	for (i = 0; i < conf->raid_disks; i++)
+		seq_printf (seq, "%s",
+			       conf->disks[i].rdev &&
+			       test_bit(In_sync, &conf->disks[i].rdev->flags) ? "U" : "_");
 	seq_printf (seq, "]");
 }
 
@@ -7184,19 +7159,14 @@ static int raid5_remove_disk(struct mddev *mddev, struct md_rdev *rdev)
 	struct disk_info *p = conf->disks + number;
 
 	print_raid5_conf(conf);
-	if (test_bit(Journal, &rdev->flags) && conf->log) {
-		struct r5l_log *log;
+	if (test_bit(Journal, &rdev->flags)) {
 		/*
-		 * we can't wait pending write here, as this is called in
-		 * raid5d, wait will deadlock.
+		 * journal disk is not removable, but we need give a chance to
+		 * update superblock of other disks. Otherwise journal disk
+		 * will be considered as 'fresh'
 		 */
-		if (atomic_read(&mddev->writes_pending))
-			return -EBUSY;
-		log = conf->log;
-		conf->log = NULL;
-		synchronize_rcu();
-		r5l_exit_log(log);
-		return 0;
+		set_bit(MD_CHANGE_DEVS, &mddev->flags);
+		return -EINVAL;
 	}
 	if (rdev == p->rdev)
 		rdevp = &p->rdev;
@@ -7226,15 +7196,12 @@ static int raid5_remove_disk(struct mddev *mddev, struct md_rdev *rdev)
 		goto abort;
 	}
 	*rdevp = NULL;
-	if (!test_bit(RemoveSynchronized, &rdev->flags)) {
-		synchronize_rcu();
-		if (atomic_read(&rdev->nr_pending)) {
-			/* lost the race, try later */
-			err = -EBUSY;
-			*rdevp = rdev;
-		}
-	}
-	if (p->replacement) {
+	synchronize_rcu();
+	if (atomic_read(&rdev->nr_pending)) {
+		/* lost the race, try later */
+		err = -EBUSY;
+		*rdevp = rdev;
+	} else if (p->replacement) {
 		/* We must have just cleared 'rdev' */
 		p->rdev = p->replacement;
 		clear_bit(Replacement, &p->replacement->flags);
@@ -7263,21 +7230,8 @@ static int raid5_add_disk(struct mddev *mddev, struct md_rdev *rdev)
 	int first = 0;
 	int last = conf->raid_disks - 1;
 
-	if (test_bit(Journal, &rdev->flags)) {
-		char b[BDEVNAME_SIZE];
-		if (conf->log)
-			return -EBUSY;
-
-		rdev->raid_disk = 0;
-		/*
-		 * The array is in readonly mode if journal is missing, so no
-		 * write requests running. We should be safe
-		 */
-		r5l_init_log(conf, rdev);
-		printk(KERN_INFO"md/raid:%s: using device %s as journal\n",
-		       mdname(mddev), bdevname(rdev->bdev, b));
-		return 0;
-	}
+	if (test_bit(Journal, &rdev->flags))
+		return -EINVAL;
 	if (mddev->recovery_disabled == conf->recovery_disabled)
 		return -EBUSY;
 
@@ -7574,10 +7528,12 @@ static void end_reshape(struct r5conf *conf)
 {
 
 	if (!test_bit(MD_RECOVERY_INTR, &conf->mddev->recovery)) {
+		struct md_rdev *rdev;
 
 		spin_lock_irq(&conf->device_lock);
 		conf->previous_raid_disks = conf->raid_disks;
-		md_finish_reshape(conf->mddev);
+		rdev_for_each(rdev, conf->mddev)
+			rdev->data_offset = rdev->new_data_offset;
 		smp_wmb();
 		conf->reshape_progress = MaxSector;
 		conf->mddev->reshape_position = MaxSector;
@@ -7608,10 +7564,8 @@ static void raid5_finish_reshape(struct mddev *mddev)
 
 		if (mddev->delta_disks > 0) {
 			md_set_array_sectors(mddev, raid5_size(mddev, 0, 0));
-			if (mddev->queue) {
-				set_capacity(mddev->gendisk, mddev->array_sectors);
-				revalidate_disk(mddev->gendisk);
-			}
+			set_capacity(mddev->gendisk, mddev->array_sectors);
+			revalidate_disk(mddev->gendisk);
 		} else {
 			int d;
 			spin_lock_irq(&conf->device_lock);
@@ -7912,15 +7866,15 @@ static struct md_personality raid6_personality =
 	.name		= "raid6",
 	.level		= 6,
 	.owner		= THIS_MODULE,
-	.make_request	= raid5_make_request,
-	.run		= raid5_run,
+	.make_request	= make_request,
+	.run		= run,
 	.free		= raid5_free,
-	.status		= raid5_status,
-	.error_handler	= raid5_error,
+	.status		= status,
+	.error_handler	= error,
 	.hot_add_disk	= raid5_add_disk,
 	.hot_remove_disk= raid5_remove_disk,
 	.spare_active	= raid5_spare_active,
-	.sync_request	= raid5_sync_request,
+	.sync_request	= sync_request,
 	.resize		= raid5_resize,
 	.size		= raid5_size,
 	.check_reshape	= raid6_check_reshape,
@@ -7935,15 +7889,15 @@ static struct md_personality raid5_personality =
 	.name		= "raid5",
 	.level		= 5,
 	.owner		= THIS_MODULE,
-	.make_request	= raid5_make_request,
-	.run		= raid5_run,
+	.make_request	= make_request,
+	.run		= run,
 	.free		= raid5_free,
-	.status		= raid5_status,
-	.error_handler	= raid5_error,
+	.status		= status,
+	.error_handler	= error,
 	.hot_add_disk	= raid5_add_disk,
 	.hot_remove_disk= raid5_remove_disk,
 	.spare_active	= raid5_spare_active,
-	.sync_request	= raid5_sync_request,
+	.sync_request	= sync_request,
 	.resize		= raid5_resize,
 	.size		= raid5_size,
 	.check_reshape	= raid5_check_reshape,
@@ -7959,15 +7913,15 @@ static struct md_personality raid4_personality =
 	.name		= "raid4",
 	.level		= 4,
 	.owner		= THIS_MODULE,
-	.make_request	= raid5_make_request,
-	.run		= raid5_run,
+	.make_request	= make_request,
+	.run		= run,
 	.free		= raid5_free,
-	.status		= raid5_status,
-	.error_handler	= raid5_error,
+	.status		= status,
+	.error_handler	= error,
 	.hot_add_disk	= raid5_add_disk,
 	.hot_remove_disk= raid5_remove_disk,
 	.spare_active	= raid5_spare_active,
-	.sync_request	= raid5_sync_request,
+	.sync_request	= sync_request,
 	.resize		= raid5_resize,
 	.size		= raid5_size,
 	.check_reshape	= raid5_check_reshape,
@@ -7980,21 +7934,10 @@ static struct md_personality raid4_personality =
 
 static int __init raid5_init(void)
 {
-	int ret;
-
 	raid5_wq = alloc_workqueue("raid5wq",
 		WQ_UNBOUND|WQ_MEM_RECLAIM|WQ_CPU_INTENSIVE|WQ_SYSFS, 0);
 	if (!raid5_wq)
 		return -ENOMEM;
-
-	ret = cpuhp_setup_state_multi(CPUHP_MD_RAID5_PREPARE,
-				      "md/raid5:prepare",
-				      raid456_cpu_up_prepare,
-				      raid456_cpu_dead);
-	if (ret) {
-		destroy_workqueue(raid5_wq);
-		return ret;
-	}
 	register_md_personality(&raid6_personality);
 	register_md_personality(&raid5_personality);
 	register_md_personality(&raid4_personality);
@@ -8006,7 +7949,6 @@ static void raid5_exit(void)
 	unregister_md_personality(&raid6_personality);
 	unregister_md_personality(&raid5_personality);
 	unregister_md_personality(&raid4_personality);
-	cpuhp_remove_multi_state(CPUHP_MD_RAID5_PREPARE);
 	destroy_workqueue(raid5_wq);
 }
 

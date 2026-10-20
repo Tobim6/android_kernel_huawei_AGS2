@@ -98,6 +98,7 @@
 
 #define CRG_PRINT 0x1
 
+/* mmc1 sys ctrl */
 #define MMC1_SYSCTRL_PEREN0		(0x300)
 #define MMC1_SYSCTRL_PERDIS0		(0x304)
 #define MMC1_SYSCTRL_PERCLKEN0		(0x308)
@@ -107,30 +108,9 @@
 #define MMC1_SYSCTRL_PERRSTEN0		(0x310)
 #define MMC1_SYSCTRL_PERRSTDIS0		(0x314)
 #define MMC1_SYSCTRL_PERRSTSTAT0	(0x318)
-#define  BIT_HRST_SDIO_CANCER	(0x1)
-#define  BIT_RST_SDIO_CANCER	(0x1 << 1)
-#define  BIT_HRST_SDIO_CAPRICORN	(0x1)
-#define  BIT_RST_SDIO_CAPRICORN	(0x1 << 1)
-#define MMC0_CRG_SD_HRST 0x20
-#define MMC0_CRG_SD_HURST 0x24
-#define BIT_RST_SD_TAURUS (0x1 << 0)
-#define BIT_URST_SD_TAURUS (0x1 << 0)
+#define  BIT_HRST_SDIO_HIGH	(0x1)
+#define  BIT_RST_SDIO_HIGH	(0x1 << 1)
 /* mmc1 sys ctrl end*/
-
-/* hsdt crg */
-#define HSDT_CRG_PEREN0			(0x0)
-#define HSDT_CRG_PERDIS0		(0x4)
-#define GT_CLK_SDIO	(0x1)
-#define GT_HCLK_SDIO	(0x1 << 1)
-
-#define HSDT_CRG_PERRSTEN0		(0x60)
-#define HSDT_CRG_PERRSTDIS0		(0x64)
-#define IP_RST_SDIO	(0x1)
-#define IP_HRST_SDIO	(0x1 << 1)
-
-#define HSDT_CRG_CLKDIV0		(0xA8)
-#define SEL_SDIO_PLL	(0x1 << 13)
-#define DIV_SDIO_PLL_MASK	(0xF << 16)
 
 #define HI3660_FPGA 1
 #define PERI_CRG_PERSTAT4 (0x04c)
@@ -138,17 +118,8 @@
 #define GTCLK_SD_EN (0x20000)
 
 #define BIT_VOLT_OFFSET         (0x314)
-#define BIT_VOLT_OFFSET_CANCER         (0x31c)
-#define BIT_VOLT_OFFSET_CAPRICORN         (0x31c)
 #define BIT_VOLT_OFFSET_AUSTIN  (0x214)
-#define BIT_VOLT_OFFSET_TAURUS         (0x31c)
 #define BIT_VOLT_VALUE_18       (0x4)
-#define BIT_VOLT_VALUE_18_CANCER       (0x400040)
-#define BIT_VOLT_VALUE_18_CAPRICORN       (0x400040)
-#define BIT_VOLT_VALUE_18_TAURUS       (0x400040)
-#define BIT_VOLT_VALUE_18_MASK_CANCER       (0x400000)
-#define BIT_VOLT_VALUE_18_MASK_CAPRICORN       (0x400000)
-#define BIT_VOLT_VALUE_18_MASK_TAURUS       (0x400000)
 
 #define BIT_RST_EMMC            (1<<20)
 #define BIT_RST_SD              (1<<18)
@@ -156,8 +127,7 @@
 
 #define BIT_RST_SDIO_CHICAGO    (1<<20)
 #define BIT_RST_SDIO_BOSTON    (1<<20)
-#define BIT_RST_SDIO_LIBRA    (1<<20)
-#define BIT_RST_SDIO_TAURUS    (1UL << 1)
+#define BIT_RST_SDIO_MIDDLE    (1<<20)
 
 #define BIT_RST_SD_M      (1<<24)
 #define GPIO_CLK_DIV(x) (((x) & 0xf) << 8)
@@ -175,11 +145,6 @@
 /*Reduce Max tuning loop,200 loops may case the watch dog timeout*/
 #define MAX_TUNING_LOOP 32
 
-#ifdef CONFIG_MMC_DW_MUX_SDSIM
-#define MUX_SDSIM_VCC_STATUS_2_9_5_V   0
-#define MUX_SDSIM_VCC_STATUS_1_8_0_V   1
-#endif
-
 struct dw_mci_hs_priv_data {
 	int				id;
 	int				old_timing;
@@ -191,10 +156,6 @@ struct dw_mci_hs_priv_data {
 	unsigned int		priv_bus_hz;
 	unsigned int		cd_vol;
        unsigned int sd_slot_ldo10_status;
-#ifdef CONFIG_MMC_DW_MUX_SDSIM
-	int				mux_sdsim;	/*if enabled as 1,sd and sim module with be used alternately by switching mux io config*/
-	int				mux_sdsim_vcc_status;
-#endif
 	int				dw_mmc_bus_clk;
 	int				dw_voltage_switch_gpio;
 	int				hi3660_sd_ioset_sd_sel;

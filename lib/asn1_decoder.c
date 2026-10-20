@@ -12,7 +12,6 @@
 #include <linux/export.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
-#include <linux/module.h>
 #include <linux/asn1_decoder.h>
 #include <linux/asn1_ber_bytecode.h>
 
@@ -228,7 +227,7 @@ next_op:
 		hdr = 2;
 
 		/* Extract a tag from the data */
-		if (unlikely(datalen - dp < 2))
+		if (unlikely(dp >= datalen - 1))
 			goto data_overrun_error;
 		tag = data[dp++];
 		if (unlikely((tag & 0x1f) == ASN1_LONG_TAG))
@@ -274,7 +273,7 @@ next_op:
 				int n = len - 0x80;
 				if (unlikely(n > 2))
 					goto length_too_long;
-				if (unlikely(n > datalen - dp))
+				if (unlikely(dp >= datalen - n))
 					goto data_overrun_error;
 				hdr += n;
 				for (len = 0; n > 0; n--) {
@@ -439,8 +438,6 @@ next_op:
 			else
 				act = machine[pc + 1];
 			ret = actions[act](context, hdr, 0, data + tdp, len);
-			if (ret < 0)
-				return ret;
 		}
 		pc += asn1_op_lengths[op];
 		goto next_op;
@@ -517,5 +514,3 @@ error:
 	return -EBADMSG;
 }
 EXPORT_SYMBOL_GPL(asn1_ber_decoder);
-
-MODULE_LICENSE("GPL");

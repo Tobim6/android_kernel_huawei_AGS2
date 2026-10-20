@@ -114,9 +114,6 @@ enum FW_uptate_state
 #define SYNAPTICS_RMI4_BUILD_ID_SIZE 3
 #define SYNAPTICS_RMI4_IC_NAME_SIZE 2
 #define SYNAPTICS_RMI4_CAP_DATA_SIZE 1024
-#define SYNAPTICS_FORCE_LEVEL_MAX 255
-
-#define STATISTICS_DATA_LEN 32
 
 #define MAX_NUMBER_OF_FINGERS 10
 #define MAX_NUMBER_OF_BUTTONS 4
@@ -147,7 +144,7 @@ enum FW_uptate_state
 
 #define F35_WRITE_LENGTH_MAX 65535
 #define SYNAPTICS_RMI4_F12_QUERY_8_MAX  6
-#define I2C_WRITE_DATA_LIMIT 6000  //limit length of synaptics_rmi4_i2c_write
+
 struct synaptics_grip_data {
     u8 ewx; // Width of upper and lower edges
     u8 ewy; // Height of left and right edges
@@ -242,10 +239,6 @@ struct synaptics_rmi4_f12_extra_data {
 	unsigned char data15_size;
 	unsigned char data15_data[(F12_FINGERS_TO_SUPPORT + 7) / 8];
 	unsigned char data36_offset;
-	unsigned char data29_offset;
-	unsigned char data29_size;
-	unsigned char data29_data[F12_FINGERS_TO_SUPPORT];
-
 };
 
 /*
@@ -637,7 +630,7 @@ enum synaptics_ic_type {
 	SYNAPTICS_S3718,
 	SYNAPTICS_TD4322,
 	SYNAPTICS_TD4310,
-	SYNAPTICS_S3706, 
+	SYNAPTICS_S3706,
 };
 struct touch_settings {
 	unsigned char build_id[SYNAPTICS_RMI4_BUILD_ID_SIZE];

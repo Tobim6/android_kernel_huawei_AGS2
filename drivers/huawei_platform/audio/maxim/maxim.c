@@ -112,6 +112,7 @@ void maxim_list_del(struct maxim_priv *maxim)
 
 	list_del(&maxim->list);
 	kfree(maxim);
+	maxim = NULL;
 }
 
 void maxim_list_del_all(void)
@@ -211,7 +212,7 @@ static int maxim_do_ioctl(struct file *file, unsigned int cmd, void __user *p, i
 {
 	int ret = 0;
 	unsigned int value = 0;
-	//struct maxim_reg_ops reg_val;
+	struct maxim_reg_ops reg_val;
 	unsigned int __user *pUser = (unsigned int __user *) p;
 	struct list_head *maxim = NULL;
 	hwlog_info("%s: enter, cmd:%x, maxim_num:%d\n", __func__, cmd, get_maxim_num());

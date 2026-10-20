@@ -3,7 +3,6 @@
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
 #include <linux/of_address.h>
-#include <linux/version.h>
 
 #ifdef CONFIG_HISI_TUI_PL061
 #include "../hisi/tzdriver/tui.h"
@@ -22,23 +21,6 @@ struct pl061_context_save_regs {
 	u8 gpio_ie;
 };
 #endif
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0))
-struct pl061 {
-	raw_spinlock_t	lock;
-	int		sec_status;
-	void __iomem	*base;
-	struct gpio_chip	gc;
-	int                     parent_irq;
-	bool		uses_pinctrl;
-#ifdef CONFIG_PM
-	struct pl061_context_save_regs csave_regs;
-#endif
-	struct amba_device *adev;
-};
-
-int pl061_check_security_status(struct pl061 *chip);
-#else
 struct pl061_gpio {
 	spinlock_t	lock;
 	int		sec_status;
@@ -48,11 +30,9 @@ struct pl061_gpio {
 #ifdef CONFIG_PM
 	struct pl061_context_save_regs csave_regs;
 #endif
-	struct amba_device *adev;
 };
 
 int pl061_check_security_status(struct pl061_gpio *chip);
-#endif
 int pl061_parse_gpio_base(struct device *dev);
 #ifdef CONFIG_HISI_TUI_PL061
 int pl061_tui_request(struct device *dev);

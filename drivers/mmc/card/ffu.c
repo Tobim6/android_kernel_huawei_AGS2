@@ -28,8 +28,6 @@
 #include <linux/swap.h>
 #include <linux/mmc/ffu.h>
 
-#include "mmc_hisi_card.h"
-
 /**
  * struct mmc_ffu_pages - pages allocated by 'alloc_pages()'.
  *  <at> page: first page in the allocation
@@ -189,14 +187,14 @@ static int mmc_ffu_simple_transfer(struct mmc_card *card,
 static int mmc_ffu_map_sg(struct mmc_ffu_mem *mem, unsigned long size,
 	struct scatterlist *sglist, unsigned int max_segs,
 	unsigned int max_seg_sz, unsigned int *sg_len,
-	int min_sg_len)
+	unsigned int min_sg_len)
 {
 	struct scatterlist *sg = NULL;
 	unsigned int i;
 	unsigned long sz = size;
 
 	sg_init_table(sglist, max_segs);
-	if (min_sg_len > max_segs) {/*lint !e574 */
+	if (min_sg_len > max_segs) {
 		min_sg_len = max_segs;
     }
 
@@ -205,7 +203,7 @@ static int mmc_ffu_map_sg(struct mmc_ffu_mem *mem, unsigned long size,
 		for (i = 0; i < mem->cnt; i++) {
 			unsigned long len = PAGE_SIZE << mem->arr[i].order;
 
-			if (min_sg_len && (size / min_sg_len < len)) {/*lint !e573 */
+			if (min_sg_len && (size / min_sg_len < len)) {
 				len = ALIGN(size / min_sg_len, CARD_BLOCK_SIZE);
             }
 
@@ -256,6 +254,7 @@ static void mmc_ffu_free_mem(struct mmc_ffu_mem *mem)
 	if (mem->arr) {
 		kfree(mem->arr);
 	}
+	kfree(mem);
 }
 
 /*
@@ -263,7 +262,8 @@ static void mmc_ffu_free_mem(struct mmc_ffu_mem *mem)
  */
 static int mmc_ffu_area_cleanup(struct mmc_ffu_area *area)
 {
-	kfree(area->sg);
+	if (area->sg)
+		kfree(area->sg);
 	mmc_ffu_free_mem(area->mem);
 
 	return 0;
@@ -367,8 +367,8 @@ out_free:
 static int mmc_ffu_area_init(struct mmc_ffu_area *area, struct mmc_card *card,
 	u8 *data, unsigned int size)
 {
-	int ret, i, length;
-	unsigned int copy_length;
+	int ret,  length;
+	unsigned int i, copy_length;
 
 	area->max_segs = card->host->max_segs;
 	area->max_seg_sz = card->host->max_seg_size & ~(CARD_BLOCK_SIZE - 1);
@@ -401,7 +401,7 @@ static int mmc_ffu_area_init(struct mmc_ffu_area *area, struct mmc_card *card,
 
 	/* copy data to page */
 	length = 0;
-	for (i = 0; i < area->mem->cnt; i++) {/*lint !e574 */
+	for (i = 0; i < area->mem->cnt; i++) {
 		copy_length = min(size - length, (unsigned int)(PAGE_SIZE << area->mem->arr[i].order));
 		memcpy(page_address(area->mem->arr[i].page), data + length, copy_length);
 		length += copy_length;
@@ -418,8 +418,7 @@ static int mmc_ffu_area_init(struct mmc_ffu_area *area, struct mmc_card *card,
 			area->max_segs, area->max_seg_sz, &area->sg_len, 1);
 
 	if (ret != 0) {
-        pr_err("FFU: %s: ret = %d\n", __func__, ret);
-
+		pr_err("FFU: %s: ret = %d\n", __func__, ret);
 		goto out_free;
     }
 
@@ -452,8 +451,8 @@ static int mmc_ffu_write(struct mmc_card *card, u8 *src, u32 arg,
 	rc = mmc_ffu_simple_transfer(card, mem.sg, mem.sg_len, arg,
 		size / CARD_BLOCK_SIZE, CARD_BLOCK_SIZE, 1);
 
-exit:
 	mmc_ffu_area_cleanup(&mem);
+exit:
 	return rc;
 }
 /* Flush all scheduled work from the MMC work queue.
@@ -461,8 +460,6 @@ exit:
 static int mmc_ffu_restart(struct mmc_card *card)
 {
 	struct mmc_host *host = card->host;
-	struct mmc_blk_data *main_md = NULL;
-	u8 part_config;
 	int err = 0;
 #ifdef CONFIG_HISI_MMC
 	(void)mmc_cache_ctrl(host,0);
@@ -477,12 +474,7 @@ static int mmc_ffu_restart(struct mmc_card *card)
 	}
 
 	err = mmc_power_restore_host(host);
-	main_md = dev_get_drvdata(&card->dev);
-	part_config = card->ext_csd.part_config;
-	part_config &= EXT_CSD_PART_CONFIG_ACC_MASK;
-	pr_info("ffu restart part_config = %d, part_curr = %d, part_type = %d\n",
-		part_config, main_md->part_curr, main_md->part_type);
-	main_md->part_curr = part_config;
+
 exit:
 
 	return err;

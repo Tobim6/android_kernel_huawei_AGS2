@@ -18,14 +18,11 @@
 
 #include <chipset_common/bfmr/bfr/chipsets/bfr_chipsets.h>
 #include <chipset_common/bfmr/common/bfmr_common.h>
-#include <linux/mm.h>
 
 
 /*----local macroes------------------------------------------------------------------*/
 
 #define BFR_RRECORD_BACKUP_PART_NAME "reserved2"
-#define BFR_KB (1024)
-#define BFR_MIN_MEM_SIZE_FOR_BOPD (3 * BFR_KB * BFR_KB)
 
 
 /*----local prototypes----------------------------------------------------------------*/
@@ -35,7 +32,7 @@
 
 
 /*----global variables-----------------------------------------------------------------*/
-static bool g_bopd_enabled;
+
 
 /*----global function prototypes--------------------------------------------------------*/
 
@@ -47,25 +44,9 @@ static bool g_bopd_enabled;
 
 bool bfr_safe_mode_has_been_enabled(void)
 {
-	return !g_bopd_enabled;
+    return true;
 }
 
-bool bfr_bopd_has_been_enabled(void)
-{
-	return g_bopd_enabled;
-}
-
-static int __init bfr_bopd_is_enable(char *p)
-{
-	if (p) {
-		BFMR_PRINT_KEY_INFO("early_param bopd_mem_sp is %s\n", p);
-		if (!strncmp(p, "on", strlen("on")))
-			g_bopd_enabled = true;
-	}
-	return 0;
-}
-
-early_param("bopd_mem_sp", bfr_bopd_is_enable);
 
 int bfr_get_full_path_of_rrecord_part(char **path_buf)
 {
@@ -78,7 +59,7 @@ int bfr_get_full_path_of_rrecord_part(char **path_buf)
 
     if (unlikely(NULL == path_buf))
     {
-        BFMR_PRINT_INVALID_PARAMS("path_buf.\n");
+        BFMR_PRINT_INVALID_PARAMS("path_buf: %p\n", path_buf);
         return -1;
     }
 

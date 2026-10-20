@@ -6,13 +6,11 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/rpmsg.h>
-#include <securec.h>
 
 #include "hwsensor.h"
 #include "sensor_commom.h"
 #include "hw_csi.h"
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 #define POWER_DELAY_0        0//delay 0 ms
 #define POWER_DELAY_1        1//delay 1 ms
 #define POWER_DELAY_5        5//delay 5 ms
@@ -24,7 +22,7 @@ static bool power_on_status = false;//false: power off, true:power on
 
 int gc2375RNEFRONT_config(hwsensor_intf_t* si, void  *argp);
 
-static struct platform_device *s_pdev = NULL;
+static hwsensor_intf_t *s_intf = NULL;
 static sensor_t *s_sensor = NULL;
 
 struct sensor_power_setting gc2375RNEFRONT_power_up_setting[] = {
@@ -468,7 +466,6 @@ int gc2375RNEFRONT_csi_disable(hwsensor_intf_t* si)
 static int gc2375RNEFRONT_match_id(
         hwsensor_intf_t* si, void * data)
 {
-    int error = 0;
     sensor_t* sensor = NULL;
     struct sensor_cfg_data *cdata = NULL;
     if(NULL == si || NULL == data)
@@ -484,11 +481,8 @@ static int gc2375RNEFRONT_match_id(
     }
     cdata = (struct sensor_cfg_data *)data;
 
-    error = memset_s(cdata->cfg.name, DEVICE_NAME_SIZE, 0, DEVICE_NAME_SIZE);
-    if (error != EOK) {
-        cam_err("%s. failed to memset_s write_data.", __func__);
-    }
-    strncpy_s(cdata->cfg.name, DEVICE_NAME_SIZE, sensor->board_info->name, DEVICE_NAME_SIZE - 1);
+    memset(cdata->cfg.name, 0, DEVICE_NAME_SIZE);
+    strncpy(cdata->cfg.name, sensor->board_info->name, DEVICE_NAME_SIZE - 1);
     cdata->data = sensor->board_info->sensor_index;
 
     return 0;
@@ -565,8 +559,10 @@ int gc2375RNEFRONT_config(hwsensor_intf_t* si, void  *argp)
         case SEN_CONFIG_READ_REG_SETTINGS:
             break;
         case SEN_CONFIG_ENABLE_CSI:
+            //ret = si->vtbl->csi_enable(si);
             break;
         case SEN_CONFIG_DISABLE_CSI:
+            //ret = si->vtbl->csi_disable(si);
             break;
         case SEN_CONFIG_MATCH_ID:
             if(NULL == si->vtbl->match_id){
@@ -641,11 +637,11 @@ static int32_t gc2375RNEFRONT_platform_probe(struct platform_device* pdev)
         cam_err("%s hwsensor_register fail.\n", __func__);
         goto gc2375RNEFRONT_sensor_probe_fail;
     }
-    s_pdev = pdev;
+    s_intf = intf;
     rc = rpmsg_sensor_register(pdev, (void*)sensor);
     if (0 != rc){
         cam_err("%s rpmsg_sensor_register fail.\n", __func__);
-        hwsensor_unregister(s_pdev);
+        hwsensor_unregister(intf);
         goto gc2375RNEFRONT_sensor_probe_fail;
     }
     s_sensor = sensor;
@@ -668,9 +664,9 @@ static void __exit gc2375RNEFRONT_exit_module(void)
         rpmsg_sensor_unregister((void*)s_sensor);
         s_sensor = NULL;
     }
-    if (NULL != s_pdev) {
-        hwsensor_unregister(s_pdev);
-        s_pdev = NULL;
+    if (NULL != s_intf) {
+        hwsensor_unregister(s_intf);
+        s_intf = NULL;
     }
     platform_driver_unregister(&s_gc2375RNEFRONT_driver);
 }

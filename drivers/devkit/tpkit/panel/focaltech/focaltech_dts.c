@@ -82,6 +82,7 @@ static int focal_parse_power_config_dts(
 	struct device_node *np,
 	struct ts_kit_device_data *dev_data)
 {
+	int ret = 0;
 	return 0;
 }
 
@@ -135,25 +136,6 @@ static int focal_parse_report_config_dts(
 	return 0;
 }
 
-static void focal_of_property_read_u8_default(
-	struct device_node *np,
-	char *prop_name,
-	u8 *out_value,
-	u8 default_value)
-{
-	int ret = 0;
-	u32 value = 0;
-
-	ret = of_property_read_u32(np, prop_name, &value);
-	if (ret) {
-		TS_LOG_INFO("%s:%s not set in dts, use default\n",
-			__func__, prop_name);
-		*out_value = default_value;
-	} else {
-		*out_value = (u8)value;
-	}
-}
-
 static void focal_of_property_read_u32_default(
 	struct device_node *np,
 	char *prop_name,
@@ -169,6 +151,23 @@ static void focal_of_property_read_u32_default(
 		*out_value = default_value;
 	}
 }
+
+static void focal_of_property_read_u16_default(
+	struct device_node *np,
+	char *prop_name,
+	u16 *out_value,
+	u16 default_value)
+{
+	int ret = 0;
+
+	ret = of_property_read_u16(np, prop_name, out_value);
+	if (ret) {
+		TS_LOG_INFO("%s:%s not set in dts, use default\n",
+			__func__, prop_name);
+		*out_value = default_value;
+	}
+}
+
 
 static void focal_prase_delay_config_dts(
 	struct device_node *np,
@@ -234,9 +233,6 @@ int focal_prase_ic_config_dts(
 	focal_of_property_read_u32_default(np, FTS_POWER_SELF_CTRL,
 		&g_focal_pdata->self_ctrl_power, 0);
 
-	focal_of_property_read_u32_default(np, FTS_RESET_SELF_CTRL,
-		&g_focal_pdata->self_ctrl_reset, 0);
-
 	if (FTS_SELF_CTRL_POWER == g_focal_pdata->self_ctrl_power) {
 		focal_of_property_read_u32_default(np, FTS_VCI_REGULATOR_TYPE,
 			&dev_data->vci_regulator_type, 0);
@@ -274,7 +270,7 @@ int focal_prase_ic_config_dts(
 	}
 	TS_LOG_INFO("%s: ic_type = %d\n", __func__, dev_data->ic_type);
 
-	TS_LOG_INFO("%s:%s=%d, %s=%d, %s=%d, %s=%d, %s=%d, %s=%d, %s=%d, %s=%d, %s=%d\n", __func__,
+	TS_LOG_INFO("%s:%s=%d, %s=%d, %s=%d, %s=%d, %s=%d, %s=%d, %s=%d, %s=%d\n", __func__,
 		"reset_delay", dev_data->reset_delay,
 		"slave_addr", dev_data->slave_addr,
 		"vci_regulator_type", dev_data->vci_regulator_type,
@@ -282,7 +278,6 @@ int focal_prase_ic_config_dts(
 		"vci_value", dev_data->regulator_ctr.vci_value,
 		"vddio_value", dev_data->regulator_ctr.vddio_value,
 		"power_self_ctrl", g_focal_pdata->self_ctrl_power,
-		"reset_self_ctrl", g_focal_pdata->self_ctrl_reset,
 		"power_down_ctrl", g_focal_pdata->power_down_ctrl);
 
 	return 0;
@@ -307,43 +302,16 @@ static int focal_get_lcd_panel_info(void)
 	}
 
 	strncpy(focal_pdata->lcd_panel_info, lcd_type, LCD_PANEL_INFO_MAX_LEN-1);
+	TS_LOG_INFO("lcd_panel_info = %s.\n", focal_pdata->lcd_panel_info);
 
 	return 0;
 }
-
-static void focal_parse_get_debug_info_config_from_dts(
-	struct device_node *np,
-	struct focal_platform_data *focal_pdata)
-{
-	u32 value = 0;
-	focal_of_property_read_u32_default(np, FTS_SUPPORT_GET_DEBUG_INFO_FROM_IC,
-									&focal_pdata->support_get_debug_info_from_ic, 0);
-	TS_LOG_INFO("%s, support_get_debug_info_from_ic:%d\n", __func__, focal_pdata->support_get_debug_info_from_ic);
-
-	if (focal_pdata->support_get_debug_info_from_ic) {
-		focal_of_property_read_u32_default(np, FTS_GET_DEBUG_INFO_REG_ADDR,
-									&value, 0);
-		if (value == 0 || value > 0xFF) {
-			focal_pdata->get_debug_info_reg_addr = 0;
-			TS_LOG_ERR("%s, get_debug_info_reg_addr use default value or value invalid, please check dts config\n",
-					__func__);
-		} else {
-			focal_pdata->get_debug_info_reg_addr = (u8)value;
-		}
-		TS_LOG_INFO("%s, get_debug_info_reg_addr:0x%02x\n", __func__, focal_pdata->get_debug_info_reg_addr);
-	}
-
-	return;
-}
-
 
 int focal_parse_dts(
 	struct device_node *np,
 	struct focal_platform_data *focal_pdata)
 {
 	int ret = 0;
-	int read_val = 0;
-	unsigned int value = 0;
 	int project_atm = 0;
 	const char *str_value = NULL;
 	struct ts_glove_info *glove_info = NULL;
@@ -354,6 +322,7 @@ int focal_parse_dts(
 	struct ts_holster_info *holster_info = NULL;
 	struct ts_roi_info *roi_info = NULL;
 	struct ts_wakeup_gesture_enable_info *gesture_info = NULL;
+
 	struct ts_kit_device_data *dev_data = NULL;
 
 	dev_data = focal_pdata->focal_device_data;
@@ -390,16 +359,10 @@ int focal_parse_dts(
 		focal_pdata->pram_projectid_addr = FTS_BOOT_PROJ_CODE_ADDR2;
 	}
 	/* get tp color flag */
-	ret = of_property_read_u32(np, "support_get_tp_color", &value);
+	ret = of_property_read_u32(np,  "support_get_tp_color", &focal_pdata->support_get_tp_color);
 	if (ret) {
 		TS_LOG_INFO("%s, get device support get tp color failed, will use default value: 0 \n ", __func__);
-		//default 0: no need know tp color
-		focal_pdata->support_get_tp_color = false;
-	} else {
-		if (value)
-			focal_pdata->support_get_tp_color = true;
-		else
-			focal_pdata->support_get_tp_color = false;
+		focal_pdata->support_get_tp_color = 0; //default 0: no need know tp color
 	}
 	TS_LOG_INFO("%s, support get tp color = %d \n", __func__, focal_pdata->support_get_tp_color);
 
@@ -409,17 +372,12 @@ int focal_parse_dts(
 			__func__, ret);
 		str_value = FTS_TEST_TYPE_DEFAULT;
 	}
-	strncpy(dev_data->tp_test_type, str_value, TS_CAP_TEST_TYPE_LEN - 1);
+	strncpy(dev_data->tp_test_type, str_value, TS_CAP_TEST_TYPE_LEN);
 
-	ret = of_property_read_u32(np, FTS_IS_IN_CELL, &value);
+	ret = of_property_read_u32(np, FTS_IS_IN_CELL, &focal_pdata->focal_device_data->is_in_cell);
 	if (ret) {
 		focal_pdata->focal_device_data->is_in_cell = true;
 		TS_LOG_INFO("%s:get is_in_cell from dts failed ,use default \n", __func__);
-	} else {
-		if (value)
-			focal_pdata->focal_device_data->is_in_cell = true;
-		else
-			focal_pdata->focal_device_data->is_in_cell = false;
 	}
 	if(project_atm == PROJECT_ATM){
 		if(g_tskit_ic_type == ONCELL){
@@ -434,15 +392,10 @@ int focal_parse_dts(
 	}
 	TS_LOG_INFO("%s:get is_in_cell from dts:%d \n", __func__, focal_pdata->focal_device_data->is_in_cell );
 
-	ret = of_property_read_u32(np, FTS_WD_CHECK, &value);
+	ret = of_property_read_u32(np, FTS_WD_CHECK, &dev_data->need_wd_check_status);
 	if (ret) {
-		dev_data->need_wd_check_status = false;
+		dev_data->need_wd_check_status = 0;
 		TS_LOG_INFO("%s:get need_wd_check_status from dts failed ,use default FT8716 value\n", __func__);
-	} else {
-		if (value)
-			dev_data->need_wd_check_status = true;
-		else
-			dev_data->need_wd_check_status = false;
 	}
 
 	ret = of_property_read_u32(np, FTS_CHECK_STATUS_WATCHDOG_TIMEOUT, &dev_data->check_status_watchdog_timeout);
@@ -451,12 +404,6 @@ int focal_parse_dts(
 		TS_LOG_INFO("%s:get check_status_watchdog_timeout from dts failed ,use default FT8716 value\n", __func__);
 	}
 
-	ret = of_property_read_u32(np, "rawdata_get_timeout", &dev_data->rawdata_get_timeout);
-	if (ret) {
-		dev_data->rawdata_get_timeout = 0;
-		TS_LOG_INFO("%s:get rawdata_get_timeout from dts failed ,use default value\n", __func__);
-	}
-	TS_LOG_INFO("%s, rawdata_get_timeout :%d\n", __func__, dev_data->rawdata_get_timeout);
 
 	ret = of_property_read_u32(np, FTS_OPEN_ONCE_THRESHOLD, &focal_pdata->only_open_once_captest_threshold);
 	if (ret) {
@@ -470,17 +417,6 @@ int focal_parse_dts(
 	if (ret) {
 		dev_data->use_lcdkit_power_notify = 0;
 		TS_LOG_INFO("%s:get use_lcdkit_power_notify from dts failed ,use default \n", __func__);
-	}
-
-	ret = of_property_read_u32(np, "rawdata_newformatflag", &read_val);
-	if (!ret) {
-		dev_data->rawdata_newformatflag = read_val;
-		TS_LOG_INFO("use dts rawdata_newformatflag = %d\n",
-			    dev_data->rawdata_newformatflag);
-	}else{
-		dev_data->rawdata_newformatflag = 0;
-		TS_LOG_INFO("use default rawdata_newformatflag = %d\n",
-			    dev_data->rawdata_newformatflag);
 	}
 
 	ret = of_property_read_u32(np, FTS_ENABLE_EDGE_TOUCH, &focal_pdata->enable_edge_touch);
@@ -509,12 +445,6 @@ int focal_parse_dts(
 		TS_LOG_INFO("%s: get need_distinguish_lcd from dts failed, use default(0)\n", __func__);
 	}
 
-	ret = of_property_read_u32(np, FTS_PALM_IRON_SUPPORT, &focal_pdata->palm_iron_support);
-	if(ret){
-		focal_pdata->palm_iron_support = 0;
-		TS_LOG_INFO("%s: get palm_iron_support from dts failed, use default(0)\n", __func__);
-	}
-
 	ret = of_property_read_u32(np, FTS_FW_ONLY_DEPEND_ON_LCD, &focal_pdata->fw_only_depend_on_lcd);
 	if (ret) {
 		focal_pdata->fw_only_depend_on_lcd = 0;
@@ -523,14 +453,6 @@ int focal_parse_dts(
 
 	if (focal_pdata->need_distinguish_lcd) {
 		focal_get_lcd_panel_info();
-		ret = of_property_read_u32(np, FTS_HIDE_PLAIN_LCD_LOG, &focal_pdata->hide_plain_lcd_log);
-		if (ret) {
-			focal_pdata->hide_plain_lcd_log = 0;
-			TS_LOG_INFO("%s: get hide_plain_lcd_log from dts failed, use default(0)\n", __func__);
-		}
-		TS_LOG_INFO("%s: get hide_plain_lcd_log from is %d \n", __func__, focal_pdata->hide_plain_lcd_log);
-	
-
 	}
 
 	ret = of_property_read_u32(np, FTS_TOUCH_SWITCH_FLAG, &focal_pdata->focal_device_data->touch_switch_flag);
@@ -539,78 +461,14 @@ int focal_parse_dts(
 		focal_pdata->focal_device_data->touch_switch_flag = 0;
 	} else {
 		if (TS_SWITCH_TYPE_GAME == (focal_pdata->focal_device_data->touch_switch_flag & TS_SWITCH_TYPE_GAME)) {
-			ret = of_property_read_u32(np, FTS_TOUCH_SWITCH_GAME_REG, &value);
+			ret = of_property_read_u32(np, FTS_TOUCH_SWITCH_GAME_REG, &focal_pdata->touch_switch_game_reg);
 			if (ret) {
 				TS_LOG_INFO("%s get touch_switch_game_reg from dts failed, use default(0).\n", __func__);
 				focal_pdata->touch_switch_game_reg = 0;
-			} else {
-				focal_pdata->touch_switch_game_reg = (u8)(value & 0xFF);
-				TS_LOG_INFO("%s get touch_switch_game_reg from dts succ, use value(0x%x).\n", __func__, focal_pdata->touch_switch_game_reg);
-			}
-		}
-
-		if (TS_SWITCH_TYPE_SCENE == (focal_pdata->focal_device_data->touch_switch_flag & TS_SWITCH_TYPE_SCENE)) {
-			value = 0;
-			ret = of_property_read_u32(np, FTS_TOUCH_SWITCH_SCENE_REG, &value);
-			if (ret) {
-				TS_LOG_INFO("%s get touch_switch_scene_reg from dts failed, use default(0).\n", __func__);
-				focal_pdata->touch_switch_scene_reg = 0;
-			} else {
-				focal_pdata->touch_switch_scene_reg = (u8)(value & 0xFF);
-				TS_LOG_INFO("%s get touch_switch_scene_reg from dts succ, use value(0x%x).\n", __func__, focal_pdata->touch_switch_scene_reg);
-			}
-		}
-
-		if (TS_SWITCH_TYPE_FM == (focal_pdata->focal_device_data->touch_switch_flag & TS_SWITCH_TYPE_FM)) {
-			value = 0;
-			ret = of_property_read_u32(np, FTS_TOUCH_SWITCH_FM_REG, &value);
-			if (ret) {
-				TS_LOG_INFO("%s get touch_switch_scene_reg from dts failed, use default(0).\n", __func__);
-				focal_pdata->touch_switch_fm_reg = 0;
-			} else {
-				focal_pdata->touch_switch_fm_reg = (u8)(value & 0xFF);
-				TS_LOG_INFO("%s get touch_switch_scene_reg from dts succ, use value(0x%x).\n", __func__, focal_pdata->touch_switch_fm_reg);
 			}
 		}
 	}
 
-	ret = of_property_read_u32(np, FTS_USE_PINCTRL, &focal_pdata->fts_use_pinctrl);
-	if (ret) {
-		TS_LOG_INFO("%s get fts_use_pinctrl from dts failed, use default(0).\n", __func__);
-		focal_pdata->fts_use_pinctrl = 0;
-	}
-	ret = of_property_read_u32(np, "use_dma_download_firmware", &focal_pdata->use_dma_download_firmware);
-	if (ret) {
-		TS_LOG_INFO("%s use_dma_download_firmware not use, use default(0).\n", __func__);
-		focal_pdata->use_dma_download_firmware = 0;
-	}
-	ret = of_property_read_u32(np, FTS_FW_UPDATE_DURATION_CHECK, &focal_pdata->fw_update_duration_check);
-	if (ret) {
-		TS_LOG_INFO("%s get fw_update_duration_check from dts unsucceed, use default(0).\n", __func__);
-		focal_pdata->fw_update_duration_check = 0;
-	} else {
-		TS_LOG_INFO("%s get fw_update_duration_check from dts succeed, use cfg(%d ms).\n",
-				__func__, focal_pdata->fw_update_duration_check);
-	}
-
-	value = 0;
-	ret = of_property_read_u32(np, FTS_READ_DEBUG_REG_AND_DIFFER, &value);
-	if (ret) {
-		TS_LOG_INFO("%s get read_debug_reg_and_differ from dts unsucceed.\n", __func__);
-		focal_pdata->read_debug_reg_and_differ = 0;
-	} else {
-		focal_pdata->read_debug_reg_and_differ = (u8)(value & 0xFF);
-		TS_LOG_INFO("%s get read_debug_reg_and_differ = %d\n",
-			__func__, focal_pdata->read_debug_reg_and_differ);
-	}
-
-	ret = of_property_read_u32(np, "aft_wxy_enable", &focal_pdata->aft_wxy_enable);
-	if (ret) {
-		TS_LOG_INFO("%s get aft_wxy_enable from dts failed, use default(0).\n", __func__);
-		focal_pdata->aft_wxy_enable = 0;
-	} else {
-		TS_LOG_INFO("%s get aft_wxy_enable  = %d.\n", __func__, focal_pdata->aft_wxy_enable);
-	}
 
 #if defined(HUAWEI_CHARGER_FB)
 	charger_info = &(dev_data->ts_platform_data->feature_info.charger_info);
@@ -622,7 +480,6 @@ int focal_parse_dts(
 		charger_info->charger_switch_addr = (u16)tmpval;
 	}
 #endif
-	focal_parse_get_debug_info_config_from_dts(np, focal_pdata);
 	/*
 	 * 0 is cover without glass,
 	 * 1 is cover with glass that need glove mode
@@ -631,20 +488,17 @@ int focal_parse_dts(
 	focal_of_property_read_u32_default(np, FTS_COVER_FORCE_GLOVE,
 		&dev_data->cover_force_glove, 0);
 	glove_info = &(dev_data->ts_platform_data->feature_info.glove_info);
-	focal_of_property_read_u8_default(np, FTS_GLOVE_SUPPORTED,
-		&glove_info->glove_supported, 1);
+	focal_of_property_read_u32_default(np, FTS_GLOVE_SUPPORTED,&glove_info->glove_supported, 1);
 	if(glove_info->glove_supported){
 		focal_of_property_read_u32_default(np, FTS_GLOVE_SWITCH_ADDR,&glove_info->glove_switch_addr, 0);
 	}
 	holster_info = &dev_data->ts_platform_data->feature_info.holster_info;
-	focal_of_property_read_u8_default(np, FTS_HOLSTER_SUPPORTED,
-		&holster_info->holster_supported, 0);
+	focal_of_property_read_u32_default(np, FTS_HOLSTER_SUPPORTED,&holster_info->holster_supported, 0);
 	if(holster_info->holster_supported){
 		focal_of_property_read_u32_default(np, FTS_HOSTLER_SWITCH_ADDR,&holster_info->holster_switch_addr, 0);
 	}
 	roi_info = &dev_data->ts_platform_data->feature_info.roi_info;
-	focal_of_property_read_u8_default(np, FTS_ROI_SUPPORTED,
-		&roi_info->roi_supported, 0);
+	focal_of_property_read_u32_default(np, FTS_ROI_SUPPORTED,&roi_info->roi_supported, 0);
 	if(roi_info->roi_supported){
 		focal_of_property_read_u32_default(np, FTS_ROI_SWITCH_ADDR,&roi_info->roi_control_addr, 0);
 		focal_of_property_read_u32_default(np, FTS_ROI_PKG_NUM_ADDR,&focal_pdata->roi_pkg_num_addr, 0);
@@ -658,8 +512,7 @@ int focal_parse_dts(
 	TS_LOG_INFO("%s:projectid_len_control =%d\n", __func__, focal_pdata->projectid_length_control_flag);
 
 	gesture_info = &(dev_data->ts_platform_data->feature_info.wakeup_gesture_enable_info);
-	focal_of_property_read_u8_default(np, FTS_GESTURE_SUPPORTED,
-		&gesture_info->switch_value, 0);
+	focal_of_property_read_u32_default(np, FTS_GESTURE_SUPPORTED,&gesture_info->switch_value, 0);
 
 	TS_LOG_ERR("%s:gesture_supported =%d\n",__func__,
 		gesture_info->switch_value);
@@ -694,29 +547,10 @@ static void focal_prase_test_item(struct device_node *np,
 	focal_of_property_read_u32_default(np, FTS_LCD_NOISE_DATA_TEST,
 		&params->lcd_noise_data, 0);
 
-	focal_of_property_read_u32_default(np, FTS_OPENTEST_CHARGE_TIME,
-		&params->opentest_charge_time, 0);
-
-	focal_of_property_read_u32_default(np, FTS_OPENTEST_RESET_TIME,
-		&params->opentest_reset_time, 0);
-
-	focal_of_property_read_u32_default(np, FTS_CB_TEST_POINT_BY_POINT,
-		&params->cb_test_point_by_point, 0);
-
-	focal_of_property_read_u32_default(np, FTS_OPEN_TEST_POINT_BY_POINT,
-		&params->open_test_cb_point_by_point, 0);
-	focal_of_property_read_u32_default(np, FTS_SHORT_TEST_POINT_BY_POINT,
-		&params->short_test_point_by_point, 0);
-
-
-
-	TS_LOG_INFO("%s:%s=%d, %s=%d, %s=%d, %s=%d, %s=%d, %s=%d,\n", __func__,
+	TS_LOG_INFO("%s:%s=%d, %s=%d, %s=%d\n", __func__,
 		"row_column_delta_test", params->row_column_delta,
-		"opentest_charge_time", params->opentest_charge_time,
-		"opentest_reset_time", params->opentest_reset_time,
-		"cb_test_point_by_point", params->cb_test_point_by_point,
-		"open_test_cb_point_by_point", params->open_test_cb_point_by_point,
-		"short_test_point_by_point", params->short_test_point_by_point);
+		"row_column_delta_test_point_by_point", params->row_column_delta_test_point_by_point,
+		"lcd_noise_data_test", params->lcd_noise_data);
 }
 
 static void focal_prase_test_threshold(
@@ -750,7 +584,7 @@ static void focal_prase_test_threshold(
 	focal_of_property_read_u32_default(np, DTS_LCD_NOISE_MAX,
 		&threshold->lcd_noise_max, 0);
 
-	TS_LOG_INFO("%s:%s:%s=%d, %s=%d, %s=%d, %s=%d, %s=%d, %s=%d, %s=%d\n",
+	TS_LOG_INFO("%s:%s:%s=%d, %s=%d, %s=%d, %s=%d, %s=%d, %s=%d\n",
 		__func__, "cb test thresholds",
 		"raw_data_min", threshold->raw_data_min,
 		"raw_data_max", threshold->raw_data_max,

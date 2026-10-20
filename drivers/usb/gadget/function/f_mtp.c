@@ -40,7 +40,7 @@
 
 #include "configfs.h"
 
-#ifdef CONFIG_DEC_USB
+#ifdef CONFIG_HI6250_USB
 #define MTP_BULK_BUFFER_SIZE       32768
 #else
 #define MTP_BULK_BUFFER_SIZE       1048576
@@ -48,7 +48,6 @@
 #define MTP_BULK_DEFAULT_BUFFER_SIZE       16384
 #define INTR_BUFFER_SIZE           28
 #define MAX_INST_NAME_LEN          40
-#define MTP_MAX_FILE_SIZE          0xFFFFFFFFL
 
 /* String IDs */
 #define INTERFACE_STRING_INDEX	0
@@ -119,7 +118,7 @@ struct mtp_dev {
 	uint16_t xfer_command;
 	uint32_t xfer_transaction_id;
 	int xfer_result;
-	u32 bulk_buffer_size;
+	uint32_t bulk_buffer_size;
 };
 
 static struct usb_interface_descriptor mtp_interface_desc = {
@@ -512,7 +511,7 @@ static int mtp_create_bulk_endpoints(struct mtp_dev *dev,
 	for (i = 0; i < TX_REQ_MAX; i++) {
 		req = mtp_request_new(dev->ep_in, dev->bulk_buffer_size);
 		if (!req) {
-			pr_err("there is no %d buf,so we need alloc 16K\n",
+			printk("there is no %d buf,so we need alloc 16K\n",
 					dev->bulk_buffer_size);
 			dev->bulk_buffer_size = MTP_BULK_DEFAULT_BUFFER_SIZE;
 			req = mtp_request_new(dev->ep_in, dev->bulk_buffer_size);
@@ -525,7 +524,7 @@ static int mtp_create_bulk_endpoints(struct mtp_dev *dev,
 	for (i = 0; i < RX_REQ_MAX; i++) {
 		req = mtp_request_new(dev->ep_out, dev->bulk_buffer_size);
 		if (!req) {
-			pr_err("there is no %d buf,so we need alloc 16K\n",
+			printk("there is no %d buf,so we need alloc 16K\n",
 					dev->bulk_buffer_size);
 			dev->bulk_buffer_size = MTP_BULK_DEFAULT_BUFFER_SIZE;
 			req = mtp_request_new(dev->ep_out, dev->bulk_buffer_size);
@@ -577,7 +576,7 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 	spin_lock_irq(&dev->lock);
 	if (dev->ep_out->desc) {
 		len = usb_ep_align_maybe(cdev->gadget, dev->ep_out, count);
-		if (len > dev->bulk_buffer_size) {
+		if (len > MTP_BULK_BUFFER_SIZE) {
 			spin_unlock_irq(&dev->lock);
 			return -EINVAL;
 		}
@@ -595,7 +594,7 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 requeue_req:
 	/* queue a request */
 	req = dev->rx_req[0];
-	req->length = len;
+	req->length = count;
 	dev->rx_done = 0;
 	ret = usb_ep_queue(dev->ep_out, req, GFP_KERNEL);
 	if (ret < 0) {
@@ -751,7 +750,7 @@ static void send_file_work(struct work_struct *data)
 	loff_t offset;
 	int64_t count;
 	int ret;
-	u32 xfer, hdr_size;
+	unsigned xfer, hdr_size;
 	int r = 0;
 	int sendZLP = 0;
 
@@ -808,12 +807,7 @@ static void send_file_work(struct work_struct *data)
 		if (hdr_size) {
 			/* prepend MTP data header */
 			header = (struct mtp_data_header *)req->buf;
-			/*
-                         * set file size with header according to
-                         * MTP Specification v1.0
-                         */
-			header->length = (count > MTP_MAX_FILE_SIZE) ?
-				MTP_MAX_FILE_SIZE : __cpu_to_le32(count);
+			header->length = __cpu_to_le32(count);
 			header->type = __cpu_to_le16(2); /* data packet */
 			header->command = __cpu_to_le16(dev->xfer_command);
 			header->transaction_id =
@@ -862,7 +856,7 @@ static void receive_file_work(struct work_struct *data)
 	struct usb_request *read_req = NULL, *write_req = NULL;
 	struct file *filp;
 	loff_t offset;
-	int64_t count, len;
+	int64_t count;
 	int ret, cur_buf = 0;
 	int r = 0;
 
@@ -881,23 +875,12 @@ static void receive_file_work(struct work_struct *data)
 
 	while (count > 0 || write_req) {
 		if (count > 0) {
-			/* use from [1] to [MAX] req because mtp_read use [0] */
-			if (cur_buf == 0)
-				cur_buf = 1;
 			/* queue a request */
 			read_req = dev->rx_req[cur_buf];
 			cur_buf = (cur_buf + 1) % RX_REQ_MAX;
 
-			spin_lock_irq(&dev->lock);
-			if (dev->state == STATE_OFFLINE) {
-				spin_unlock_irq(&dev->lock);
-				break;
-			}
-			len = usb_ep_align_maybe(cdev->gadget, dev->ep_out, count);
-			spin_unlock_irq(&dev->lock);
-			if (len > dev->bulk_buffer_size)
-				len = dev->bulk_buffer_size;
-			read_req->length = len;
+			read_req->length = (count > dev->bulk_buffer_size
+					? dev->bulk_buffer_size : count);
 			dev->rx_done = 0;
 			ret = usb_ep_queue(dev->ep_out, read_req, GFP_KERNEL);
 			if (ret < 0) {
@@ -1294,7 +1277,7 @@ mtp_function_bind(struct usb_configuration *c, struct usb_function *f)
 		gadget_is_superspeed_plus(c->cdev->gadget) ? "super-plus" :
 		gadget_is_superspeed(c->cdev->gadget) ? "super" :
 		(gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full"),
-		f->name, dev->ep_in->name, dev->ep_out->name, dev->bulk_buffer_size);
+		f->name, dev->ep_in->name, dev->ep_out->name,dev->bulk_buffer_size);
 	return 0;
 }
 
@@ -1305,7 +1288,6 @@ mtp_function_unbind(struct usb_configuration *c, struct usb_function *f)
 	struct usb_request *req;
 	int i;
 
-	/* flush wq before unbind */
 	flush_workqueue(dev->wq);
 
 	mtp_string_defs[INTERFACE_STRING_INDEX].id = 0;
@@ -1368,12 +1350,9 @@ static void mtp_function_disable(struct usb_function *f)
 {
 	struct mtp_dev	*dev = func_to_mtp(f);
 	struct usb_composite_dev	*cdev = dev->cdev;
-	unsigned long flags;
 
 	DBG(cdev, "mtp_function_disable\n");
-	spin_lock_irqsave(&dev->lock, flags);
 	dev->state = STATE_OFFLINE;
-	spin_unlock_irqrestore(&dev->lock, flags);
 	usb_ep_disable(dev->ep_in);
 	usb_ep_disable(dev->ep_out);
 	usb_ep_disable(dev->ep_intr);
@@ -1505,6 +1484,7 @@ static void mtp_free_inst(struct usb_function_instance *fi)
 	fi_mtp = to_fi_mtp(fi);
 	kfree(fi_mtp->name);
 	mtp_cleanup();
+	kfree(fi_mtp->mtp_os_desc.group.default_groups);
 	kfree(fi_mtp);
 }
 
@@ -1525,6 +1505,8 @@ struct usb_function_instance *alloc_inst_mtp_ptp(bool mtp_config)
 	INIT_LIST_HEAD(&fi_mtp->mtp_os_desc.ext_prop);
 	descs[0] = &fi_mtp->mtp_os_desc;
 	names[0] = "MTP";
+	usb_os_desc_prepare_interf_dir(&fi_mtp->func_inst.group, 1,
+					descs, names, THIS_MODULE);
 
 	if (mtp_config) {
 		ret = mtp_setup_configfs(fi_mtp);
@@ -1538,8 +1520,6 @@ struct usb_function_instance *alloc_inst_mtp_ptp(bool mtp_config)
 
 	config_group_init_type_name(&fi_mtp->func_inst.group,
 					"", &mtp_func_type);
-	usb_os_desc_prepare_interf_dir(&fi_mtp->func_inst.group, 1,
-					descs, names, THIS_MODULE);
 
 	return  &fi_mtp->func_inst;
 }

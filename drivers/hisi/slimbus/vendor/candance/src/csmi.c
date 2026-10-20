@@ -287,11 +287,6 @@
 #define CSMI_RX_FIFO_FLAG_RX_MSG_MASK						   0x3F
 #define CSMI_RX_FIFO_FLAG_OFFSET							   15
 
-#define CSMI_FIFO_DELAY_TIMEOUT								   5000
-#define CSMI_FIFO_WAIT_TIMEOUT								   5500
-
-#define CSMI_FIFO_CLEAR_MASK								   0x40404040
-
 
 /* Get/Set Message fields Macros */
 
@@ -908,60 +903,6 @@ static uint32_t CSMI_EncodeMessage(CSMI_Instance *instance, uint8_t *memoryToFil
 
 }
 
-static uint32_t CSMI_fifo_wait_reception(CSMI_Instance *instance, _Bool wait)
-{
-	uint32_t timeout = 0;
-	uint32_t reg;
-
-	/* If wait == 1 then function waits for confirmation of message reception */
-	if (wait) {
-		for (;;) {
-			/* If message was transmitted in an interrupt (e.g. from callback),
-			sending* variables won't be set by another interrupt. In that case polling is used. */
-			reg = CSMI_ReadReg(INTERRUPTS.INT);
-			if (INTERRUPTS__INT__TX_ERR__READ(reg)) {
-				if (slimbus_int_need_clear_get()) {
-					reg = 0;
-					INTERRUPTS__INT__TX_ERR__SET(reg);
-					CSMI_WriteReg(INTERRUPTS.INT, reg);
-				}
-				SLIMBUS_CORE_LIMIT_ERR("SLIMbus send message TX_ERR happened!\n");
-				return EIO;
-			}
-
-			if (INTERRUPTS__INT__TX_INT__READ(reg)) {
-				if (slimbus_int_need_clear_get()) {
-					reg = 0;
-					INTERRUPTS__INT__TX_INT__SET(reg);
-					CSMI_WriteReg(INTERRUPTS.INT, reg);
-				}
-				return 0;
-			}
-
-			/* CSMI_Irq will read and clear interrupt flag before it will be accessed here by polling.
-			These variables are set by interrupt handling function. */
-			if (instance->sendingFailed) {
-				SLIMBUS_CORE_LIMIT_ERR("SLIMbus send message failed!\n");
-				return EIO;
-			}
-
-			if (instance->sendingFinished)
-				return 0;
-
-			timeout++;
-			if (timeout > CSMI_FIFO_DELAY_TIMEOUT) {
-				udelay(200);
-				if (timeout == CSMI_FIFO_WAIT_TIMEOUT) {
-					SLIMBUS_CORE_LIMIT_ERR("SLIMbus send message timeout!\n");
-					return EIO;
-				}
-			}
-		}
-	}
-
-	return 0;
-}
-
 /**
  * Transmit data to TX_FIFO
  * @param[in] instance driver instance
@@ -981,13 +922,9 @@ static uint32_t CSMI_FifoTransmit(CSMI_Instance *instance, uint8_t *txFifoData, 
 
 	do { //If TX_FIFO is full, wait until it's not
 		reg = CSMI_ReadReg(COMMAND_STATUS.STATE);
-		timeout++;
-		if (timeout > CSMI_FIFO_DELAY_TIMEOUT) {
-			udelay(200);
-			if (timeout == CSMI_FIFO_WAIT_TIMEOUT) {
-				SLIMBUS_CORE_LIMIT_ERR("SLIMbus send message wait TX_FULL timeout!\n");
-				return EIO;
-			}
+		if (++timeout == 0) {
+			SLIMBUS_CORE_LIMIT_ERR("SLIMbus send message wait TX_FULL timeout!\n");
+			return EIO;
 		}
 	} while ((COMMAND_STATUS__STATE__TX_FULL__READ(reg)) == 1);
 
@@ -1005,22 +942,59 @@ static uint32_t CSMI_FifoTransmit(CSMI_Instance *instance, uint8_t *txFifoData, 
 		CSMI_WriteReg(MESSAGE_FIFOS.MC_FIFO[i], *txFifoData32b);
 	}
 
-	CSMI_WriteReg(COMMAND_STATUS.COMMAND, BIT(COMMAND_STATUS__COMMAND__TX_PUSH__SHIFT));
+	reg = CSMI_ReadReg(COMMAND_STATUS.COMMAND);
+	COMMAND_STATUS__COMMAND__TX_PUSH__SET(reg);
+	CSMI_WriteReg(COMMAND_STATUS.COMMAND, reg);
 
 	do { //If TX_PUSH command is still in progress, wait until it's finished
 		reg = CSMI_ReadReg(COMMAND_STATUS.STATE);
-		timeout++;
-		if (timeout > CSMI_FIFO_DELAY_TIMEOUT) {
-			udelay(200);
-			if (timeout == CSMI_FIFO_WAIT_TIMEOUT) {
-				SLIMBUS_CORE_LIMIT_ERR("SLIMbus send message wait TX_PUSH timeout!\n");
+		if (++timeout == 0) {
+			SLIMBUS_CORE_LIMIT_ERR("SLIMbus send message wait TX_PUSH timeout!\n");
+			ret = EIO;
+			goto exit;
+		}
+	} while (COMMAND_STATUS__STATE__TX_PUSH__READ(reg));
+
+	if (wait) { //If wait == 1 then function waits for confirmation of message reception
+		timeout = 0;
+		for (;;) {
+			reg = CSMI_ReadReg(INTERRUPTS.INT);    //If message was transmitted in an interrupt (e.g. from callback), sending* variables won't be set by another interrupt. In that case polling is used.
+			if (INTERRUPTS__INT__TX_ERR__READ(reg)) {
+				if (slimbus_int_need_clear_get()) {
+					reg = 0;
+					INTERRUPTS__INT__TX_ERR__SET(reg);
+					CSMI_WriteReg(INTERRUPTS.INT, reg);
+				}
+				SLIMBUS_CORE_LIMIT_ERR("SLIMbus send message TX_ERR happened!\n");
+				ret = EIO;
+				goto exit;
+			}
+
+			if (INTERRUPTS__INT__TX_INT__READ(reg)) {
+				if (slimbus_int_need_clear_get()) {
+					reg = 0;
+					INTERRUPTS__INT__TX_INT__SET(reg);
+					CSMI_WriteReg(INTERRUPTS.INT, reg);
+				}
+				goto exit;
+			}
+
+			if (instance->sendingFailed) {	  //CSMI_Irq will read and clear interrupt flag before it will be accessed here by polling. These variables are set by interrupt handling function.
+				SLIMBUS_CORE_LIMIT_ERR("SLIMbus send message failed!\n");
+				ret = EIO;
+				goto exit;
+			}
+
+			if (instance->sendingFinished)
+				goto exit;
+
+			if (++timeout == 0) {
+				SLIMBUS_CORE_LIMIT_ERR("SLIMbus send message timeout!\n");
 				ret = EIO;
 				goto exit;
 			}
 		}
-	} while (COMMAND_STATUS__STATE__TX_PUSH__READ(reg));
-
-	ret = CSMI_fifo_wait_reception(instance, wait);
+	}
 
 exit:
 	if (slimbus_int_need_clear_get()) {
@@ -1045,6 +1019,7 @@ static uint32_t CSMI_FifoReceive(CSMI_Instance *instance, uint8_t *rxFifoData, u
 	uint8_t regsToRead = 0;
 	uint8_t result = 0;
 	uint32_t *rxFifoData32b = (uint32_t *) rxFifoData;
+	uint32_t reg;
 	rxFifoFlag = CSMI_ReadReg(MESSAGE_FIFOS.MC_FIFO[CSMI_RX_FIFO_FLAG_OFFSET]);
 
 	if (rxFifoFlag & (1 << CSMI_RX_FIFO_FLAG_RX_OVERFLOW)) { //Message Overflow
@@ -1066,7 +1041,9 @@ static uint32_t CSMI_FifoReceive(CSMI_Instance *instance, uint8_t *rxFifoData, u
 	result = rxFifoMsgSize;
 
 rxFifoEnd:
-	CSMI_WriteReg(COMMAND_STATUS.COMMAND, BIT(COMMAND_STATUS__COMMAND__RX_PULL__SHIFT));
+	reg = CSMI_ReadReg(COMMAND_STATUS.COMMAND);
+	COMMAND_STATUS__COMMAND__RX_PULL__SET(reg);
+	CSMI_WriteReg(COMMAND_STATUS.COMMAND, reg);
 	return result;
 }
 
@@ -1462,7 +1439,9 @@ static void CSMI_CfgStrobeSet(CSMI_Instance *instance, bool force) {
 			return;
 	}
 
-	CSMI_WriteReg(COMMAND_STATUS.COMMAND, BIT(COMMAND_STATUS__COMMAND__CFG_STROBE__SHIFT));
+	reg = CSMI_ReadReg(COMMAND_STATUS.COMMAND);
+	COMMAND_STATUS__COMMAND__CFG_STROBE__SET(reg);
+	CSMI_WriteReg(COMMAND_STATUS.COMMAND, reg);
 }
 
 /*
@@ -1625,7 +1604,7 @@ static uint32_t CSMI_Isr(void* pD) {
 	if (dataPortInterrupt != 0) {
 
 		for (i = 0; i < 16; i++) {
-			reg = CSMI_ReadReg(PORT_INTERRUPTS.P_INT[i]) & (~CSMI_FIFO_CLEAR_MASK);
+			reg = CSMI_ReadReg(PORT_INTERRUPTS.P_INT[i]);
 
 			if (reg == 0) //If all bits in the register are low, then there is no interrupt
 				continue;
@@ -1928,7 +1907,7 @@ static uint32_t CSMI_ClearDataPortFifo(void* pD, uint8_t portNumber) {
 	portAddress = portNumber / 4;
 	//There are 4 Port registers per 1 32 bit P_INT_EN register
 
-	reg = CSMI_ReadReg(PORT_INTERRUPTS.P_INT_EN[portAddress]) & (~CSMI_FIFO_CLEAR_MASK);
+	reg = CSMI_ReadReg(PORT_INTERRUPTS.P_INT_EN[portAddress]);
 
 	switch (portNumber % 4) {
 	case 0:
@@ -1968,7 +1947,7 @@ static uint32_t CSMI_SetPresenceRateGeneration(void* pD, uint8_t portNumber, boo
 	portAddress = portNumber / 4;
 	//There are 4 Port registers per 1 32 bit P_INT_EN register
 
-	reg = CSMI_ReadReg(PORT_INTERRUPTS.P_INT_EN[portAddress]) & (~CSMI_FIFO_CLEAR_MASK);
+	reg = CSMI_ReadReg(PORT_INTERRUPTS.P_INT_EN[portAddress]);
 
 	switch (portNumber % 4) {
 	case 0:
@@ -2579,6 +2558,7 @@ static uint32_t CSMI_GetDataPortStatus(void* pD, uint8_t portNumber, CSMI_DataPo
 
 static uint32_t CSMI_Unfreeze(void* pD) {
 	CSMI_Instance* instance;
+	uint32_t reg;
 
 	uint32_t result = CSMI_UnfreezeSanity(pD);
 	if (result) {
@@ -2587,7 +2567,9 @@ static uint32_t CSMI_Unfreeze(void* pD) {
 	}
 
 	instance = (CSMI_Instance*) pD;
-	CSMI_WriteReg(COMMAND_STATUS.COMMAND, BIT(COMMAND_STATUS__COMMAND__UNFREEZE__SHIFT));
+	reg = CSMI_ReadReg(COMMAND_STATUS.COMMAND);
+	COMMAND_STATUS__COMMAND__UNFREEZE__SET(reg);
+	CSMI_WriteReg(COMMAND_STATUS.COMMAND, reg);
 
 	return 0;
 }
@@ -2595,6 +2577,7 @@ static uint32_t CSMI_Unfreeze(void* pD) {
 
 static uint32_t CSMI_CancelConfiguration(void* pD) {
 	CSMI_Instance* instance;
+	uint32_t reg = 0;
 
 	uint32_t result = CSMI_CancelConfigurationSanity(pD);
 	if (result) {
@@ -2603,7 +2586,10 @@ static uint32_t CSMI_CancelConfiguration(void* pD) {
 	}
 
 	instance = (CSMI_Instance*) pD;
-	CSMI_WriteReg(COMMAND_STATUS.COMMAND, BIT(COMMAND_STATUS__COMMAND__CFG_STROBE_CLR__SHIFT));
+	reg = CSMI_ReadReg(COMMAND_STATUS.COMMAND);
+	COMMAND_STATUS__COMMAND__CFG_STROBE__CLR(reg);
+	COMMAND_STATUS__COMMAND__CFG_STROBE_CLR__SET(reg);
+	CSMI_WriteReg(COMMAND_STATUS.COMMAND, reg);
 
 	return 0;
 }

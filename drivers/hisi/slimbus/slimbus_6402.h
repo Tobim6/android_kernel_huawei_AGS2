@@ -22,9 +22,10 @@
 
 #include "slimbus_types.h"
 
-extern int create_hi6402_slimbus_device(slimbus_device_info_t **device);
 
-extern void release_hi6402_slimbus_device(slimbus_device_info_t *device);
+extern int create_hi6402_slimbus_device(slimbus_device_info_t **device, slimbus_hi6403_type_t hi6403_type);
+
+extern int release_hi6402_slimbus_device(slimbus_device_info_t *device);
 
 extern void slimbus_hi6402_param_init(slimbus_device_info_t *dev);
 

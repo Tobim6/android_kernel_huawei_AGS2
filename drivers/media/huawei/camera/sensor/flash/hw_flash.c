@@ -19,11 +19,6 @@
 #include "hwcam_intf.h"
 #include "../../clt/hisi_clt_flag.h"
 
-extern int memcpy_s(void *dest, size_t destMax, const void *src, size_t count);
-extern int memset_s(void *dest, size_t destMax, int c, size_t count);
-extern int strncpy_s(char *strDest, size_t destMax, const char *strSrc, size_t count);
-extern int snprintf_s(char* strDest, size_t destMax, size_t count, const char* format, ...);
-
 /*lint -save -e64*/
 struct dsm_client_ops ops3={
     .poll_state = NULL,
@@ -202,13 +197,13 @@ static int hw_flash_register_attribute(struct hw_flash_ctrl_t *flash_ctrl, struc
     rc = device_create_file(dev, &hw_flash_lowpower_protect);
     if (rc < 0) {
         cam_err("%s failed to creat flash lowpower protect attribute.", __func__);
-        goto err_out;
+        return rc;
     }
 
     rc = device_create_file(flash_ctrl->cdev_torch.dev, &hw_flash_thermal_protect);
     if (rc < 0) {
         cam_err("%s failed to creat flash lowpower protect attribute.", __func__);
-        goto err_create_flash_thermal_protect_file;
+        return rc;
     }
 
     /* check flash led open or short */
@@ -216,16 +211,10 @@ static int hw_flash_register_attribute(struct hw_flash_ctrl_t *flash_ctrl, struc
     rc = device_create_file(flash_ctrl->cdev_torch.dev, &hw_flash_led_fault);
     if(rc < 0) {
         cam_err("%s failed to create flash led fault attribute.", __func__);
-        goto err_create_flash_led_fault_file;
+        return rc;
     }
 
     return 0;
-err_create_flash_led_fault_file:
-    device_remove_file(dev, &hw_flash_thermal_protect);
-err_create_flash_thermal_protect_file:
-    device_remove_file(dev, &hw_flash_lowpower_protect);
-err_out:
-    return rc;
 }
 
 static int hw_flash_mix_register_attribute(struct hw_flash_ctrl_t *flash_ctrl, struct device *dev)
@@ -240,7 +229,7 @@ static int hw_flash_mix_register_attribute(struct hw_flash_ctrl_t *flash_ctrl, s
     rc = device_create_file(flash_ctrl->cdev_torch1.dev, &hw_flash_thermal_protect);
     if (rc < 0) {
         cam_err("%s failed to creat flash mix lowpower protect attribute.", __func__);
-        goto err_out;
+        return rc;
     }
 
     /* check flash led open or short */
@@ -248,15 +237,10 @@ static int hw_flash_mix_register_attribute(struct hw_flash_ctrl_t *flash_ctrl, s
     rc = device_create_file(flash_ctrl->cdev_torch1.dev, &hw_flash_led_fault);
     if(rc < 0) {
         cam_err("%s failed to create flash mix led fault attribute.", __func__);
-        goto err_create_flash_led_fault_file;
+        return rc;
     }
 
     return 0;
-
-err_create_flash_led_fault_file:
-    device_remove_file(dev, &hw_flash_thermal_protect);
-err_out:
-    return rc;
 }
 
 int hw_flash_get_dt_data(struct hw_flash_ctrl_t *flash_ctrl)
@@ -334,6 +318,8 @@ int hw_flash_config(struct hw_flash_ctrl_t *flash_ctrl, void *arg)
 
     cam_debug("%s enter cfgtype=%d.\n", __func__, cdata->cfgtype);
 
+    //mutex_lock(flash_ctrl->hisi_flash_mutex);
+
     switch (cdata->cfgtype) {
     case CFG_FLASH_TURN_ON:
         state = hw_flash_get_state();
@@ -349,13 +335,9 @@ int hw_flash_config(struct hw_flash_ctrl_t *flash_ctrl, void *arg)
         break;
     case CFG_FLASH_GET_FLASH_NAME:
         mutex_lock(flash_ctrl->hw_flash_mutex);
-        memset_s(cdata->cfg.name, sizeof(cdata->cfg.name), 0, sizeof(cdata->cfg.name));
-        rc = strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name) - 1, flash_ctrl->flash_info.name,
+        memset(cdata->cfg.name, 0, sizeof(cdata->cfg.name));
+        strncpy(cdata->cfg.name, flash_ctrl->flash_info.name,
             sizeof(cdata->cfg.name) - 1);
-        if (rc != 0) {
-            cam_err("%s flash name copy error.\n", __func__);
-            rc = -EFAULT;
-        }
         mutex_unlock(flash_ctrl->hw_flash_mutex);
         break;
     case CFG_FLASH_GET_FLASH_STATE:
@@ -375,6 +357,8 @@ int hw_flash_config(struct hw_flash_ctrl_t *flash_ctrl, void *arg)
         rc = -EFAULT;
         break;
     }
+
+    //mutex_unlock(flash_ctrl->hisi_flash_mutex);
 
     return rc;
 }
@@ -532,13 +516,9 @@ int32_t hw_flash_platform_probe(struct platform_device *pdev,
     v4l2_subdev_init(&flash_ctrl->hw_sd.sd,
             flash_ctrl->flash_v4l2_subdev_ops);
 
-    rc = snprintf_s(flash_ctrl->hw_sd.sd.name,
-        sizeof(flash_ctrl->hw_sd.sd.name),sizeof(flash_ctrl->hw_sd.sd.name) - 1 ,"%s",
+    snprintf(flash_ctrl->hw_sd.sd.name,
+        sizeof(flash_ctrl->hw_sd.sd.name), "%s",
         flash_ctrl->flash_info.name);
-    if (rc < 0) {
-        cam_err("%s  flash name in overflow.\n", __func__);
-        return -EFAULT;
-    }
 
     v4l2_set_subdevdata(&flash_ctrl->hw_sd.sd, pdev);
 
@@ -551,8 +531,11 @@ int32_t hw_flash_platform_probe(struct platform_device *pdev,
 	}
 
     flash_ctrl->hw_sd.sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-    init_subdev_media_entity(&flash_ctrl->hw_sd.sd,group_id);
-    hwcam_cfgdev_register_subdev(&flash_ctrl->hw_sd.sd,group_id);
+    media_entity_init(&flash_ctrl->hw_sd.sd.entity, 0, NULL, 0);
+    flash_ctrl->hw_sd.sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
+    flash_ctrl->hw_sd.sd.entity.group_id = group_id;
+    flash_ctrl->hw_sd.sd.entity.name = flash_ctrl->hw_sd.sd.name;
+    hwcam_cfgdev_register_subdev(&flash_ctrl->hw_sd.sd);
 
     rc = flash_ctrl->func_tbl->flash_register_attribute(flash_ctrl,
             &flash_ctrl->hw_sd.sd.devnode->dev);
@@ -635,13 +618,9 @@ int32_t hw_flash_i2c_probe(struct i2c_client *client,
     v4l2_subdev_init(&flash_ctrl->hw_sd.sd,
             flash_ctrl->flash_v4l2_subdev_ops);
 
-    rc = snprintf_s(flash_ctrl->hw_sd.sd.name,
-        sizeof(flash_ctrl->hw_sd.sd.name),sizeof(flash_ctrl->hw_sd.sd.name)-1, "%s",
+    snprintf(flash_ctrl->hw_sd.sd.name,
+        sizeof(flash_ctrl->hw_sd.sd.name), "%s",
         flash_ctrl->flash_info.name);
-    if (rc < 0) {
-        cam_err("%s  flash name in overflow.\n", __func__);
-        return -EFAULT;
-    }
 
     v4l2_set_subdevdata(&flash_ctrl->hw_sd.sd, client);
 
@@ -654,8 +633,11 @@ int32_t hw_flash_i2c_probe(struct i2c_client *client,
 	}
 
     flash_ctrl->hw_sd.sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-    init_subdev_media_entity(&flash_ctrl->hw_sd.sd,group_id);
-    hwcam_cfgdev_register_subdev(&flash_ctrl->hw_sd.sd,group_id);
+    media_entity_init(&flash_ctrl->hw_sd.sd.entity, 0, NULL, 0);
+    flash_ctrl->hw_sd.sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
+    flash_ctrl->hw_sd.sd.entity.group_id = group_id;
+    flash_ctrl->hw_sd.sd.entity.name = flash_ctrl->hw_sd.sd.name;
+    hwcam_cfgdev_register_subdev(&flash_ctrl->hw_sd.sd);
     rc = flash_ctrl->func_tbl->flash_register_attribute(flash_ctrl,
             &flash_ctrl->hw_sd.sd.devnode->dev);
     if (rc < 0) {

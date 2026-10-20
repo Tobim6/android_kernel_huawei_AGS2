@@ -104,14 +104,11 @@ static void tx_tick(struct mbox_chan *chan, int r)
 	/* Submit next message */
 	msg_submit(chan);
 
-	if (!mssg)
-		return;
-
 	/* Notify the client */
-	if (chan->cl->tx_done)
+	if (mssg && chan->cl->tx_done)
 		chan->cl->tx_done(chan->cl, mssg, r);
 
-	if (r != -ETIME && chan->cl->tx_block)
+	if (chan->cl->tx_block)
 		complete(&chan->tx_complete);
 }
 
@@ -264,7 +261,7 @@ int mbox_send_message(struct mbox_chan *chan, void *mssg)
 
 	msg_submit(chan);
 
-	if (chan->cl->tx_block) {
+	if (chan->cl->tx_block && chan->active_req) {
 		unsigned long wait;
 		int ret;
 
@@ -275,8 +272,8 @@ int mbox_send_message(struct mbox_chan *chan, void *mssg)
 
 		ret = wait_for_completion_timeout(&chan->tx_complete, wait);
 		if (ret == 0) {
-			t = -ETIME;
-			tx_tick(chan, t);
+			t = -EIO;
+			tx_tick(chan, -EIO);
 		}
 	}
 
@@ -378,13 +375,13 @@ struct mbox_chan *mbox_request_channel_byname(struct mbox_client *cl,
 
 	if (!np) {
 		dev_err(cl->dev, "%s() currently only supports DT\n", __func__);
-		return ERR_PTR(-EINVAL);
+		return ERR_PTR(-ENOSYS);
 	}
 
 	if (!of_get_property(np, "mbox-names", NULL)) {
 		dev_err(cl->dev,
 			"%s() requires an \"mbox-names\" property\n", __func__);
-		return ERR_PTR(-EINVAL);
+		return ERR_PTR(-ENOSYS);
 	}
 
 	of_property_for_each_string(np, "mbox-names", prop, mbox_name) {

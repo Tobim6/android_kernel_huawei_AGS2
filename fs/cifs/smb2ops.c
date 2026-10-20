@@ -28,7 +28,6 @@
 #include "cifs_unicode.h"
 #include "smb2status.h"
 #include "smb2glob.h"
-#include "cifs_ioctl.h"
 
 static int
 change_conf(struct TCP_Server_Info *server)
@@ -71,10 +70,6 @@ smb2_add_credits(struct TCP_Server_Info *server, const unsigned int add,
 	spin_lock(&server->req_lock);
 	val = server->ops->get_credits_field(server, optype);
 	*val += add;
-	if (*val > 65000) {
-		*val = 65000; /* Don't get near 64K credits, avoid srv bugs */
-		printk_once(KERN_WARNING "server overflowed SMB3 credits\n");
-	}
 	server->in_flight--;
 	if (server->in_flight == 0 && (optype & CIFS_OP_MASK) != CIFS_NEG_OP)
 		rc = change_conf(server);
@@ -186,11 +181,6 @@ smb2_find_mid(struct TCP_Server_Info *server, char *buf)
 	struct mid_q_entry *mid;
 	struct smb2_hdr *hdr = (struct smb2_hdr *)buf;
 	__u64 wire_mid = le64_to_cpu(hdr->MessageId);
-
-	if (hdr->ProtocolId == SMB2_TRANSFORM_PROTO_NUM) {
-		cifs_dbg(VFS, "encrypted frame parsing not supported yet");
-		return NULL;
-	}
 
 	spin_lock(&GlobalMid_Lock);
 	list_for_each_entry(mid, &server->pending_mid_q, qhead) {
@@ -894,71 +884,6 @@ smb3_set_integrity(const unsigned int xid, struct cifs_tcon *tcon,
 
 }
 
-/* GMT Token is @GMT-YYYY.MM.DD-HH.MM.SS Unicode which is 48 bytes + null */
-#define GMT_TOKEN_SIZE 50
-
-/*
- * Input buffer contains (empty) struct smb_snapshot array with size filled in
- * For output see struct SRV_SNAPSHOT_ARRAY in MS-SMB2 section 2.2.32.2
- */
-static int
-smb3_enum_snapshots(const unsigned int xid, struct cifs_tcon *tcon,
-		   struct cifsFileInfo *cfile, void __user *ioc_buf)
-{
-	char *retbuf = NULL;
-	unsigned int ret_data_len = 0;
-	int rc;
-	struct smb_snapshot_array snapshot_in;
-
-	rc = SMB2_ioctl(xid, tcon, cfile->fid.persistent_fid,
-			cfile->fid.volatile_fid,
-			FSCTL_SRV_ENUMERATE_SNAPSHOTS,
-			true /* is_fsctl */, NULL, 0 /* no input data */,
-			(char **)&retbuf,
-			&ret_data_len);
-	cifs_dbg(FYI, "enum snaphots ioctl returned %d and ret buflen is %d\n",
-			rc, ret_data_len);
-	if (rc)
-		return rc;
-
-	if (ret_data_len && (ioc_buf != NULL) && (retbuf != NULL)) {
-		/* Fixup buffer */
-		if (copy_from_user(&snapshot_in, ioc_buf,
-		    sizeof(struct smb_snapshot_array))) {
-			rc = -EFAULT;
-			kfree(retbuf);
-			return rc;
-		}
-
-		/*
-		 * Check for min size, ie not large enough to fit even one GMT
-		 * token (snapshot).  On the first ioctl some users may pass in
-		 * smaller size (or zero) to simply get the size of the array
-		 * so the user space caller can allocate sufficient memory
-		 * and retry the ioctl again with larger array size sufficient
-		 * to hold all of the snapshot GMT tokens on the second try.
-		 */
-		if (snapshot_in.snapshot_array_size < GMT_TOKEN_SIZE)
-			ret_data_len = sizeof(struct smb_snapshot_array);
-
-		/*
-		 * We return struct SRV_SNAPSHOT_ARRAY, followed by
-		 * the snapshot array (of 50 byte GMT tokens) each
-		 * representing an available previous version of the data
-		 */
-		if (ret_data_len > (snapshot_in.snapshot_array_size +
-					sizeof(struct smb_snapshot_array)))
-			ret_data_len = snapshot_in.snapshot_array_size +
-					sizeof(struct smb_snapshot_array);
-
-		if (copy_to_user(ioc_buf, retbuf, ret_data_len))
-			rc = -EFAULT;
-	}
-
-	kfree(retbuf);
-	return rc;
-}
-
 static int
 smb2_query_dir_first(const unsigned int xid, struct cifs_tcon *tcon,
 		     const char *path, struct cifs_sb_info *cifs_sb,
@@ -989,7 +914,7 @@ smb2_query_dir_first(const unsigned int xid, struct cifs_tcon *tcon,
 	}
 
 	srch_inf->entries_in_buffer = 0;
-	srch_inf->index_of_last_entry = 2;
+	srch_inf->index_of_last_entry = 0;
 
 	rc = SMB2_query_directory(xid, tcon, fid->persistent_fid,
 				  fid->volatile_fid, 0, srch_inf);
@@ -1035,18 +960,6 @@ smb2_is_status_pending(char *buf, struct TCP_Server_Info *server, int length)
 		wake_up(&server->request_q);
 	}
 
-	return true;
-}
-
-static bool
-smb2_is_session_expired(char *buf)
-{
-	struct smb2_hdr *hdr = (struct smb2_hdr *)buf;
-
-	if (hdr->Status != STATUS_NETWORK_SESSION_EXPIRED)
-		return false;
-
-	cifs_dbg(FYI, "Session expired\n");
 	return true;
 }
 
@@ -1626,8 +1539,6 @@ struct smb_version_operations smb20_operations = {
 	.rename = smb2_rename_path,
 	.create_hardlink = smb2_create_hardlink,
 	.query_symlink = smb2_query_symlink,
-	.query_mf_symlink = smb3_query_mf_symlink,
-	.create_mf_symlink = smb3_create_mf_symlink,
 	.open = smb2_open_file,
 	.set_fid = smb2_set_fid,
 	.close = smb2_close_file,
@@ -1641,7 +1552,6 @@ struct smb_version_operations smb20_operations = {
 	.close_dir = smb2_close_dir,
 	.calc_smb_size = smb2_calc_size,
 	.is_status_pending = smb2_is_status_pending,
-	.is_session_expired = smb2_is_session_expired,
 	.oplock_response = smb2_oplock_response,
 	.queryfs = smb2_queryfs,
 	.mand_lock = smb2_mand_lock,
@@ -1723,7 +1633,6 @@ struct smb_version_operations smb21_operations = {
 	.close_dir = smb2_close_dir,
 	.calc_smb_size = smb2_calc_size,
 	.is_status_pending = smb2_is_status_pending,
-	.is_session_expired = smb2_is_session_expired,
 	.oplock_response = smb2_oplock_response,
 	.queryfs = smb2_queryfs,
 	.mand_lock = smb2_mand_lock,
@@ -1740,7 +1649,6 @@ struct smb_version_operations smb21_operations = {
 	.clone_range = smb2_clone_range,
 	.wp_retry_size = smb2_wp_retry_size,
 	.dir_needs_close = smb2_dir_needs_close,
-	.enum_snapshots = smb3_enum_snapshots,
 };
 
 struct smb_version_operations smb30_operations = {
@@ -1807,7 +1715,6 @@ struct smb_version_operations smb30_operations = {
 	.close_dir = smb2_close_dir,
 	.calc_smb_size = smb2_calc_size,
 	.is_status_pending = smb2_is_status_pending,
-	.is_session_expired = smb2_is_session_expired,
 	.oplock_response = smb2_oplock_response,
 	.queryfs = smb2_queryfs,
 	.mand_lock = smb2_mand_lock,
@@ -1816,7 +1723,7 @@ struct smb_version_operations smb30_operations = {
 	.get_lease_key = smb2_get_lease_key,
 	.set_lease_key = smb2_set_lease_key,
 	.new_lease_key = smb2_new_lease_key,
-	.generate_signingkey = generate_smb30signingkey,
+	.generate_signingkey = generate_smb3signingkey,
 	.calc_signature = smb3_calc_signature,
 	.set_integrity  = smb3_set_integrity,
 	.is_read_op = smb21_is_read_op,
@@ -1829,7 +1736,6 @@ struct smb_version_operations smb30_operations = {
 	.wp_retry_size = smb2_wp_retry_size,
 	.dir_needs_close = smb2_dir_needs_close,
 	.fallocate = smb3_fallocate,
-	.enum_snapshots = smb3_enum_snapshots,
 };
 
 #ifdef CONFIG_CIFS_SMB311
@@ -1897,7 +1803,6 @@ struct smb_version_operations smb311_operations = {
 	.close_dir = smb2_close_dir,
 	.calc_smb_size = smb2_calc_size,
 	.is_status_pending = smb2_is_status_pending,
-	.is_session_expired = smb2_is_session_expired,
 	.oplock_response = smb2_oplock_response,
 	.queryfs = smb2_queryfs,
 	.mand_lock = smb2_mand_lock,
@@ -1906,7 +1811,7 @@ struct smb_version_operations smb311_operations = {
 	.get_lease_key = smb2_get_lease_key,
 	.set_lease_key = smb2_set_lease_key,
 	.new_lease_key = smb2_new_lease_key,
-	.generate_signingkey = generate_smb311signingkey,
+	.generate_signingkey = generate_smb3signingkey,
 	.calc_signature = smb3_calc_signature,
 	.set_integrity  = smb3_set_integrity,
 	.is_read_op = smb21_is_read_op,
@@ -1919,7 +1824,6 @@ struct smb_version_operations smb311_operations = {
 	.wp_retry_size = smb2_wp_retry_size,
 	.dir_needs_close = smb2_dir_needs_close,
 	.fallocate = smb3_fallocate,
-	.enum_snapshots = smb3_enum_snapshots,
 };
 #endif /* CIFS_SMB311 */
 
@@ -1966,7 +1870,7 @@ struct smb_version_values smb21_values = {
 struct smb_version_values smb30_values = {
 	.version_string = SMB30_VERSION_STRING,
 	.protocol_id = SMB30_PROT_ID,
-	.req_capabilities = SMB2_GLOBAL_CAP_DFS | SMB2_GLOBAL_CAP_LEASING | SMB2_GLOBAL_CAP_LARGE_MTU | SMB2_GLOBAL_CAP_PERSISTENT_HANDLES | SMB2_GLOBAL_CAP_ENCRYPTION,
+	.req_capabilities = SMB2_GLOBAL_CAP_DFS | SMB2_GLOBAL_CAP_LEASING | SMB2_GLOBAL_CAP_LARGE_MTU | SMB2_GLOBAL_CAP_PERSISTENT_HANDLES,
 	.large_lock_type = 0,
 	.exclusive_lock_type = SMB2_LOCKFLAG_EXCLUSIVE_LOCK,
 	.shared_lock_type = SMB2_LOCKFLAG_SHARED_LOCK,
@@ -1986,7 +1890,7 @@ struct smb_version_values smb30_values = {
 struct smb_version_values smb302_values = {
 	.version_string = SMB302_VERSION_STRING,
 	.protocol_id = SMB302_PROT_ID,
-	.req_capabilities = SMB2_GLOBAL_CAP_DFS | SMB2_GLOBAL_CAP_LEASING | SMB2_GLOBAL_CAP_LARGE_MTU | SMB2_GLOBAL_CAP_PERSISTENT_HANDLES | SMB2_GLOBAL_CAP_ENCRYPTION,
+	.req_capabilities = SMB2_GLOBAL_CAP_DFS | SMB2_GLOBAL_CAP_LEASING | SMB2_GLOBAL_CAP_LARGE_MTU | SMB2_GLOBAL_CAP_PERSISTENT_HANDLES,
 	.large_lock_type = 0,
 	.exclusive_lock_type = SMB2_LOCKFLAG_EXCLUSIVE_LOCK,
 	.shared_lock_type = SMB2_LOCKFLAG_SHARED_LOCK,

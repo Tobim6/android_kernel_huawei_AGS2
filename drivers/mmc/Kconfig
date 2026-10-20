@@ -26,13 +26,6 @@ config SD_SDIO_CRC_RETUNING
 	help
 	   config HISI sd driver
 
-config SD_TIMEOUT_RESET
-	bool "SD STIMEOUT RESET"
-	depends on MMC
-	default n
-	help
-	   config HISI sd driver
-
 config MMC_DEBUG
 	bool "MMC debugging"
 	depends on MMC != n
@@ -47,9 +40,15 @@ config HISI_MMC_SECURE_RPMB
          Enable this config will change the default behavior of RPMB
          HMAC calucation will be done in secure wolrd.
 
-config HISI_RPMB_TIME_DEBUG
-	bool "HISI STORAGE RPMB TIME DEBUG"
+config HISI_MMC_RPMB_AUTO_RESIZE
+	bool "MMC RPMB AUTO RESIZE"
+	depends on HISI_MMC
 	help
+	  Some Platform Needs to resize emmc rpmb size to a fixed value.
+
+config HISI_RPMB_TIME_DEBUG
+		bool "HISI STORAGE RPMB TIME DEBUG"
+		help
          Enable HISI STORAGE RPMB TIME DEGUG.
 
 config HISI_MMC_FLUSH_REDUCE
@@ -67,11 +66,11 @@ config HISI_MMC_FLUSH_REDUCE_WHITE_LIST
 	   Enable this config will enfore white list check on eMMC devices for flush reduce
 
 config HISI_MMC_MANUAL_BKOPS
-	bool "MMC manual BKOPS support"
-	depends on HISI_BK_OPS
-	default n
-	help
-	 MMC manual BKOPS support
+    bool "MMC manual BKOPS support"
+    depends on HISI_MANUAL_BKOPS
+    default n
+    help
+     MMC manual BKOPS support
 
  config HUAWEI_SDCARD_DSM
 	bool "Listen sdcard kernel err"

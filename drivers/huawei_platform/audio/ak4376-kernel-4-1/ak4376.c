@@ -259,11 +259,11 @@ static int ak4376_pdn_control(struct snd_soc_codec *codec, int pdn)
 
 	logi("%s(%d) pdn = %d ak4376->pdn = %d\n",__FUNCTION__, __LINE__, pdn, ak4376->pdn);
 
-	if ((OFF == ak4376->pdn) && (ON == pdn)) {
+	if ((ak4376->pdn == OFF) && (pdn == ON)) {
 		gpio_direction_output(ak4376->priv_pdn_en, ON);
 		logi("%s(%d) Turn on priv_pdn_en\n", __FUNCTION__,__LINE__);
 		ak4376->pdn = ON;
-		if (OFF == ak4376->hifi_mclk_en) {
+		if (ak4376->hifi_mclk_en == OFF) {
 			udelay(1000);
 			logi("%s(%d) Turn on mclk\n", __FUNCTION__,__LINE__);
 			ak4376_mclk_enable(ak4376, true);
@@ -288,15 +288,15 @@ static int ak4376_pdn_control(struct snd_soc_codec *codec, int pdn)
 
 	return 0;
 }
-#ifdef AK4376_KERNEL_4_1_DEBUG
+
 static ssize_t ak4376_reg_data_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
 	int ret = 0, i, fpt;
 	int rx[AK4376_MAX_REG_NUM + 1] = {0};
 
-	if ((NULL == ak4376_codec) || (NULL == buf)) {
-		loge("%s: ak4376_codec or buf is NULL.\n", __FUNCTION__);
+	if(NULL == ak4376_codec){
+		loge("%s: ak4376_codec is NULL.\n", __FUNCTION__);
 		return -ENOMEM;
 	}
 
@@ -318,7 +318,7 @@ static ssize_t ak4376_reg_data_show(struct device *dev,
 
 	mutex_unlock(&io_lock);
 
-	if (AK4376_16_DUMMY == i) {
+	if (i == AK4376_16_DUMMY) {
 		ret = fpt = 0;
 		for (i = 0; i < AK4376_16_DUMMY; i++, fpt += 6) {
 			ret += snprintf(buf + fpt, 32, "%02x,%02x\n", i, rx[i]);
@@ -381,8 +381,8 @@ static ssize_t ak4376_flag_show(struct device *dev,
 {
 	char buffer[AK4376_FLAG_MAX] = {0};
 
-	if ((NULL == ak4376_codec) || (NULL == buf)) {
-		loge("%s: ak4376_codec or buf is NULL.\n", __FUNCTION__);
+	if (NULL == ak4376_codec) {
+		loge("%s: ak4376_codec is NULL.\n", __FUNCTION__);
 		return -EIO;
 	}
 	struct ak4376_priv *ak4376 = snd_soc_codec_get_drvdata(ak4376_codec);
@@ -428,7 +428,6 @@ static struct attribute *ak4376_attributes[] = {
 static const struct attribute_group ak4376_attr_group = {
 	.attrs = ak4376_attributes,
 };
-#endif
 
 /* ak4376 register cache & default register settings */
 static const u8 ak4376_reg[AK4376_MAX_REGISTERS] = {
@@ -586,19 +585,19 @@ static int ak4376_mclk_enable(struct ak4376_priv *ak4376, bool enable)
 
 	if (!ak4376->mclk) {
 		/* No mclk, it's not an error,  */
-		loge("%s(%d): ak4376 is NULL!\n", __FUNCTION__,__LINE__);
+		loge("%s(%d) ak4376 is NULL!\n", __FUNCTION__,__LINE__);
 		return 0;
 	}
 
 	if (enable){
 		ret = clk_prepare_enable(ak4376->mclk);
 		if (ret) {
-			loge("%s(%d): ak4376 mclk prepare enable failed %d !\n", __FUNCTION__,__LINE__,ret);
+			loge("%s(%d) ak4376 mclk prepare enable failed %d !\n", __FUNCTION__,__LINE__,ret);
 			return ret;
 		} else {
 			mdelay(1);
 		}
-	} else {
+	} else{
 		clk_disable_unprepare(ak4376->mclk);
 	}
 
@@ -622,7 +621,7 @@ static int ak4376_set_mcki(struct snd_soc_codec *codec, int fs, int rclk)
 		if (rclk > 28800000)
 			return -EINVAL;
 
-		if (PLL_OFF == ak4376->nPllMode) {	//PLL_OFF
+		if (ak4376->nPllMode == PLL_OFF) {	//PLL_OFF
 			mcki_rate = rclk/fs;
 		} else {		//XTAL_MODE
 			if ( ak4376->xtalfreq == 0 ) {		//12.288MHz
@@ -637,57 +636,58 @@ static int ak4376_set_mcki(struct snd_soc_codec *codec, int fs, int rclk)
 
 		if (ak4376->lpmode == 0) {				//High Performance Mode
 			switch (mcki_rate) {
-				case 32:
-					mode |= AK4376_CM_0;
-					break;
-				case 64:
-					mode |= AK4376_CM_1;
-					break;
-				case 128:
-					mode |= AK4376_CM_3;
-					break;
-				case 256:
-					mode |= AK4376_CM_0;
-					mode2 = snd_soc_read(codec, AK4376_24_MODE_CONTROL);
-					if ( fs <= 12000 ) {
-						mode2 |= 0x40;	//DSMLP=1
-						snd_soc_write(codec, AK4376_24_MODE_CONTROL, mode2);
-					} else {
-						mode2 &= ~0x40;	//DSMLP=0
-						snd_soc_write(codec, AK4376_24_MODE_CONTROL, mode2);
-					}
-					break;
-				case 512:
-					mode |= AK4376_CM_1;
-					break;
-				case 1024:
-					mode |= AK4376_CM_2;
-					break;
-				default:
-					return -EINVAL;
+			case 32:
+				mode |= AK4376_CM_0;
+				break;
+			case 64:
+				mode |= AK4376_CM_1;
+				break;
+			case 128:
+				mode |= AK4376_CM_3;
+				break;
+			case 256:
+				mode |= AK4376_CM_0;
+				mode2 = snd_soc_read(codec, AK4376_24_MODE_CONTROL);
+				if ( fs <= 12000 ) {
+					mode2 |= 0x40;	//DSMLP=1
+					snd_soc_write(codec, AK4376_24_MODE_CONTROL, mode2);
+				} else {
+					mode2 &= ~0x40;	//DSMLP=0
+					snd_soc_write(codec, AK4376_24_MODE_CONTROL, mode2);
+				}
+				break;
+			case 512:
+				mode |= AK4376_CM_1;
+				break;
+			case 1024:
+				mode |= AK4376_CM_2;
+				break;
+			default:
+				return -EINVAL;
 			}
-		} else {					//Low Power Mode (LPMODE == DSMLP == 1)
+		}
+		else {					//Low Power Mode (LPMODE == DSMLP == 1)
 			switch (mcki_rate) {
-				case 32:
-					mode |= AK4376_CM_0;
-					break;
-				case 64:
-					mode |= AK4376_CM_1;
-					break;
-				case 128:
-					mode |= AK4376_CM_3;
-					break;
-				case 256:
-					mode |= AK4376_CM_0;
-					break;
-				case 512:
-					mode |= AK4376_CM_1;
-					break;
-				case 1024:
-					mode |= AK4376_CM_2;
-					break;
-				default:
-					return -EINVAL;
+			case 32:
+				mode |= AK4376_CM_0;
+				break;
+			case 64:
+				mode |= AK4376_CM_1;
+				break;
+			case 128:
+				mode |= AK4376_CM_3;
+				break;
+			case 256:
+				mode |= AK4376_CM_0;
+				break;
+			case 512:
+				mode |= AK4376_CM_1;
+				break;
+			case 1024:
+				mode |= AK4376_CM_2;
+				break;
+			default:
+				return -EINVAL;
 			}
 		}
 
@@ -718,13 +718,16 @@ static int ak4376_set_pllblock(struct snd_soc_codec *codec, int fs)
 		if ( fs <= 24000 ) {
 			mode |= AK4376_CM_1;
 			nMClk = 512 * fs;
-		} else if ( fs <= 96000 ) {
+		}
+		else if ( fs <= 96000 ) {
 			mode |= AK4376_CM_0;
 			nMClk = 256 * fs;
-		} else if ( fs <= 192000 ) {
+		}
+		else if ( fs <= 192000 ) {
 			mode |= AK4376_CM_3;
 			nMClk = 128 * fs;
-		} else {		//fs > 192kHz
+		}
+		else {		//fs > 192kHz
 			mode |= AK4376_CM_1;
 			nMClk = 64 * fs;
 		}
@@ -739,7 +742,7 @@ static int ak4376_set_pllblock(struct snd_soc_codec *codec, int fs)
 		nPLLClk = 112896000;
 	}
 
-	if ( BICK_PLL == ak4376->nPllMode ) {		//BICK_PLL (Slave)
+	if ( ak4376->nPllMode == BICK_PLL ) {		//BICK_PLL (Slave)
 		if ( ak4376->nBickFreq == 0 ) {		//32fs
 			if ( fs <= 96000 ) PLDbit = 1;
 			else if ( fs <= 192000 ) PLDbit = 2;
@@ -751,7 +754,8 @@ static int ak4376_set_pllblock(struct snd_soc_codec *codec, int fs)
 			else if ( fs <= 192000 ) PLDbit = 3;
 			else PLDbit = 6;
 			nRefClk = 48 * fs / PLDbit;
-		} else {  									// 64fs
+		}
+		else {  									// 64fs
 			if ( fs <= 48000 ) PLDbit = 1;
 			else if ( fs <= 96000 ) PLDbit = 2;
 			else if ( fs <= 192000 ) PLDbit = 4;
@@ -763,15 +767,18 @@ static int ak4376_set_pllblock(struct snd_soc_codec *codec, int fs)
 				PLLMCKI = 9600000;
 				if ( (fs % 4000) == 0) nRefClk = 1920000;
 				else nRefClk = 384000;
-			} else if ( ak4376->nPllMCKI == 1 ) { //11.2896MHz
+			}
+			else if ( ak4376->nPllMCKI == 1 ) { //11.2896MHz
 				PLLMCKI = 11289600;
 				if ( (fs % 4000) == 0) return -EINVAL;
 				else nRefClk = 2822400;
-			} else if ( ak4376->nPllMCKI == 2 ) { //12.288MHz
+			}
+			else if ( ak4376->nPllMCKI == 2 ) { //12.288MHz
 				PLLMCKI = 12288000;
 				if ( (fs % 4000) == 0) nRefClk = 3072000;
 				else nRefClk = 768000;
-			} else {								//19.2MHz
+			}
+			else {								//19.2MHz
 				PLLMCKI = 19200000;
 				if ( (fs % 4000) == 0) nRefClk = 1920000;
 				else nRefClk = 384000;
@@ -794,9 +801,10 @@ static int ak4376_set_pllblock(struct snd_soc_codec *codec, int fs)
 	snd_soc_write(codec, AK4376_11_PLL_FB_CLK_DIVIDER1, ((PLMbit & 0xFF00) >> 8));
 	snd_soc_write(codec, AK4376_12_PLL_FB_CLK_DIVIDER2, ((PLMbit & 0x00FF) >> 0));
 
-	if ( BICK_PLL == ak4376->nPllMode ) {	//BICK_PLL (Slave)
+	if (ak4376->nPllMode == BICK_PLL ) {	//BICK_PLL (Slave)
 		snd_soc_update_bits(codec, AK4376_0E_PLL_CLK_SOURCE_SELECT, 0x03, 0x01);	//PLS=1(BICK)
-	} else {										//MCKI PLL (Slave/Master)
+	}
+	else {										//MCKI PLL (Slave/Master)
 		snd_soc_update_bits(codec, AK4376_0E_PLL_CLK_SOURCE_SELECT, 0x03, 0x00);	//PLS=0(MCKI)
 	}
 
@@ -808,9 +816,9 @@ static int ak4376_set_pllblock(struct snd_soc_codec *codec, int fs)
 
 static int ak4376_set_timer(struct snd_soc_codec *codec)
 {
-	int curdata;
+	int ret, curdata;
 	int count, tm, nfs;
-	unsigned int ret, lvdtm, vddtm;
+	int lvdtm, vddtm, hptm;
 	struct ak4376_priv *ak4376 = snd_soc_codec_get_drvdata(codec);
 	if(NULL == ak4376) {
 		loge("%s(%d): ak4376 is NULL\n",__FUNCTION__,__LINE__);
@@ -819,6 +827,7 @@ static int ak4376_set_timer(struct snd_soc_codec *codec)
 
 	lvdtm = 0;
 	vddtm = 0;
+	hptm = 0;
 
 	nfs = ak4376->fs1;
 
@@ -883,19 +892,19 @@ static int ak4376_set_fmt(struct snd_soc_codec *codec, unsigned int fmt)
 		case SND_SOC_DAIFMT_CBS_CFM:
 		case SND_SOC_DAIFMT_CBM_CFS:
 		default:
-			dev_err(codec->dev, "Clock mode unsupported");
-			return -EINVAL;
-	}
+		dev_err(codec->dev, "Clock mode unsupported");
+		return -EINVAL;
+		}
 
 	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
-		case SND_SOC_DAIFMT_I2S:
-			format |= AK4376_DIF_I2S_MODE;
-			break;
-		case SND_SOC_DAIFMT_LEFT_J:
-			format |= AK4376_DIF_MSB_MODE;
-			break;
-		default:
-			return -EINVAL;
+	case SND_SOC_DAIFMT_I2S:
+		format |= AK4376_DIF_I2S_MODE;
+		break;
+	case SND_SOC_DAIFMT_LEFT_J:
+		format |= AK4376_DIF_MSB_MODE;
+		break;
+	default:
+		return -EINVAL;
 	}
 
 	/* set format */
@@ -954,57 +963,59 @@ static int ak4376_hw_params_set(struct snd_soc_codec *codec)
 	fs &= ~AK4376_FS;
 
 	switch (ak4376->freq) {
-		case 8000:
-			fs |= AK4376_FS_8KHZ;
-			break;
-		case 11025:
-			fs |= AK4376_FS_11_025KHZ;
-			break;
-		case 16000:
-			fs |= AK4376_FS_16KHZ;
-			break;
-		case 22050:
-			fs |= AK4376_FS_22_05KHZ;
-			break;
-		case 32000:
-			fs |= AK4376_FS_32KHZ;
-			break;
-		case 44100:
-			fs |= AK4376_FS_44_1KHZ;
-			break;
-		case 48000:
-			fs |= AK4376_FS_48KHZ;
-			break;
-		case 88200:
-			fs |= AK4376_FS_88_2KHZ;
-			break;
-		case 96000:
-			fs |= AK4376_FS_96KHZ;
-			break;
-		case 176400:
-			fs |= AK4376_FS_176_4KHZ;
-			break;
-		case 192000:
-			fs |= AK4376_FS_192KHZ;
-			break;
-		case 352800:
-			fs |= AK4376_FS_352_8KHZ;
-			break;
-		case 384000:
-			fs |= AK4376_FS_384KHZ;
-			break;
-		default:
-			return -EINVAL;
+	case 8000:
+		fs |= AK4376_FS_8KHZ;
+		break;
+	case 11025:
+		fs |= AK4376_FS_11_025KHZ;
+		break;
+	case 16000:
+		fs |= AK4376_FS_16KHZ;
+		break;
+	case 22050:
+		fs |= AK4376_FS_22_05KHZ;
+		break;
+	case 32000:
+		fs |= AK4376_FS_32KHZ;
+		break;
+	case 44100:
+		fs |= AK4376_FS_44_1KHZ;
+		break;
+	case 48000:
+		fs |= AK4376_FS_48KHZ;
+		break;
+	case 88200:
+		fs |= AK4376_FS_88_2KHZ;
+		break;
+	case 96000:
+		fs |= AK4376_FS_96KHZ;
+		break;
+	case 176400:
+		fs |= AK4376_FS_176_4KHZ;
+		break;
+	case 192000:
+		fs |= AK4376_FS_192KHZ;
+		break;
+	case 352800:
+		fs |= AK4376_FS_352_8KHZ;
+		break;
+	case 384000:
+		fs |= AK4376_FS_384KHZ;
+		break;
+	default:
+		return -EINVAL;
 	}
 	snd_soc_write(codec, AK4376_05_CLOCK_MODE_SELECT, fs);
 
-	if ( PLL_OFF == ak4376->nPllMode ) {		//PLL Off
+	if ( ak4376->nPllMode == PLL_OFF ) {		//PLL Off
 		snd_soc_update_bits(codec, AK4376_13_DAC_CLK_SOURCE, 0x03, 0x00);	//DACCKS=0
 		ak4376_set_mcki(codec, ak4376->freq, ak4376->rclk);
-	} else if ( XTAL_MODE == ak4376->nPllMode ) {	//XTAL MODE
+	}
+	else if ( ak4376->nPllMode == XTAL_MODE ) {	//XTAL MODE
 		snd_soc_update_bits(codec, AK4376_13_DAC_CLK_SOURCE, 0x03, 0x02);	//DACCKS=2
 		ak4376_set_mcki(codec, ak4376->freq, ak4376->rclk);
-	} else {											//PLL mode
+	}
+	else {											//PLL mode
 		snd_soc_update_bits(codec, AK4376_13_DAC_CLK_SOURCE, 0x03, 0x01);	//DACCKS=1
 		ak4376_set_pllblock(codec, ak4376->freq);
 	}
@@ -1049,9 +1060,11 @@ static int ak4376_set_bickfs(struct snd_soc_codec *codec)
 
 	if ( ak4376->nBickFreq == 0 ) { 	//32fs
 		snd_soc_update_bits(codec, AK4376_15_AUDIO_IF_FORMAT, 0x03, 0x01);	//DL1-0=01(16bit, >=32fs)
-	} else if( ak4376->nBickFreq == 1 ) {	//48fs
+	}
+	else if( ak4376->nBickFreq == 1 ) {	//48fs
 		snd_soc_update_bits(codec, AK4376_15_AUDIO_IF_FORMAT, 0x03, 0x00);	//DL1-0=00(24bit, >=48fs)
-	} else {								//64fs
+	}
+	else {								//64fs
 		snd_soc_update_bits(codec, AK4376_15_AUDIO_IF_FORMAT, 0x03, 0x02);	//DL1-0=1x(32bit, >=64fs)
 	}
 
@@ -1175,10 +1188,12 @@ static int ak4376_set_lpmode(struct snd_soc_codec *codec)
 		snd_soc_update_bits(codec, AK4376_02_POWER_MANAGEMENT3, 0x10, 0x00);	//LPMODE=0(High Performance Mode)
 			if ( ak4376->fs1 <= 12000 ) {
 				snd_soc_update_bits(codec, AK4376_24_MODE_CONTROL, 0x40, 0x40);	//DSMLP=1
-			} else {
+			}
+			else {
 				snd_soc_update_bits(codec, AK4376_24_MODE_CONTROL, 0x40, 0x00);	//DSMLP=0
 			}
-	} else {							//Low Power Mode
+	}
+	else {							//Low Power Mode
 		snd_soc_update_bits(codec, AK4376_02_POWER_MANAGEMENT3, 0x10, 0x10);	//LPMODE=1(Low Power Mode)
 		snd_soc_update_bits(codec, AK4376_24_MODE_CONTROL, 0x40, 0x40);			//DSMLP=1
 	}
@@ -1351,20 +1366,20 @@ static int set_ak4376_vdd_power_off(struct snd_kcontrol *kcontrol, struct snd_ct
 
 	logi("%s(%d): value =%ld\n",__FUNCTION__,__LINE__,ucontrol->value.integer.value[0]);
 	switch (ucontrol->value.integer.value[0]) {
-		case OFF:
-			ak4376->hifi_power_off_flag = OFF;
-			if (ak4376->hifi_pwren > 0) {
-				gpio_direction_output(ak4376->hifi_pwren, 1);
-			}
-			break;
-		case ON:
-			ak4376->hifi_power_off_flag = ON;
-			if (ak4376->hifi_pwren > 0) {
-				gpio_direction_output(ak4376->hifi_pwren, 0);
-			}
-			break;
-		default:
-			return -EINVAL;
+	case OFF:
+		ak4376->hifi_power_off_flag = OFF;
+		if (ak4376->hifi_pwren > 0) {
+		    gpio_direction_output(ak4376->hifi_pwren, 1);
+		}
+		break;
+	case ON:
+		ak4376->hifi_power_off_flag = ON;
+		if (ak4376->hifi_pwren > 0) {
+		    gpio_direction_output(ak4376->hifi_pwren, 0);
+		}
+		break;
+	default:
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -1408,16 +1423,16 @@ static int hifi_swtich_dir_set(struct snd_kcontrol *kcontrol,
 	logi("%s(%d): value =%ld\n",__FUNCTION__,__LINE__,ucontrol->value.integer.value[0]);
 	if(ak4376->switch_dir > 0) {
 		switch (ucontrol->value.integer.value[0]) {
-			case OFF:
-				ak4376->switch_dir_flg = OFF;
-				gpio_direction_output(ak4376->switch_dir, 0);
-				break;
-			case ON:
-				ak4376->switch_dir_flg = ON;
-				gpio_direction_output(ak4376->switch_dir, 1);
-				break;
-			default:
-				return -EINVAL;
+		case OFF:
+			ak4376->switch_dir_flg = OFF;
+			gpio_direction_output(ak4376->switch_dir, 0);
+			break;
+		case ON:
+			ak4376->switch_dir_flg = ON;
+			gpio_direction_output(ak4376->switch_dir, 1);
+			break;
+		default:
+			return -EINVAL;
 		}
 	} else {
 		loge("%s(%d): switch_dir gpio num is error\n",__FUNCTION__,__LINE__);
@@ -1464,16 +1479,16 @@ static int hifi_swtich_acdc_set(struct snd_kcontrol *kcontrol,
 	logi("%s(%d): value =%ld\n",__FUNCTION__,__LINE__,ucontrol->value.integer.value[0]);
 	if(ak4376->switch_ac_dc > 0) {
 		switch (ucontrol->value.integer.value[0]) {
-			case OFF:
-				ak4376->switch_ac_dc_flg = OFF;
-				gpio_direction_output(ak4376->switch_ac_dc, 0);
-				break;
-			case ON:
-				ak4376->switch_ac_dc_flg = ON;
-				gpio_direction_output(ak4376->switch_ac_dc, 1);
-				break;
-			default:
-				return -EINVAL;
+		case OFF:
+			ak4376->switch_ac_dc_flg = OFF;
+			gpio_direction_output(ak4376->switch_ac_dc, 0);
+			break;
+		case ON:
+			ak4376->switch_ac_dc_flg = ON;
+			gpio_direction_output(ak4376->switch_ac_dc, 1);
+			break;
+		default:
+			return -EINVAL;
 		}
 	} else {
 		loge("%s(%d): switch_ac_dc gpio num is error\n",__FUNCTION__,__LINE__);
@@ -1520,20 +1535,20 @@ static int hifi_swtich_open_set(struct snd_kcontrol *kcontrol,
 	logi("%s(%d): value =%ld\n",__FUNCTION__,__LINE__,ucontrol->value.integer.value[0]);
 	if(ak4376->switch_mute > 0) {
 		switch (ucontrol->value.integer.value[0]) {
-			case SWITCH_OFF:
-				ak4376->switch_open_flg = SWITCH_OFF;
-				gpio_direction_output(ak4376->switch_mute, 1);
-				break;
-			case CODEC_ON:
-				ak4376->switch_open_flg = CODEC_ON;
-				gpio_direction_output(ak4376->switch_mute, 0);
-				break;
-			case HIFI_ON:
-				ak4376->switch_open_flg = HIFI_ON;
-				gpio_direction_output(ak4376->switch_mute, 0);
-				break;
-			default:
-				return -EINVAL;
+		case SWITCH_OFF:
+			ak4376->switch_open_flg = SWITCH_OFF;
+			gpio_direction_output(ak4376->switch_mute, 1);
+			break;
+		case CODEC_ON:
+			ak4376->switch_open_flg = CODEC_ON;
+			gpio_direction_output(ak4376->switch_mute, 0);
+			break;
+		case HIFI_ON:
+			ak4376->switch_open_flg = HIFI_ON;
+			gpio_direction_output(ak4376->switch_mute, 0);
+			break;
+		default:
+			return -EINVAL;
 		}
 	} else {
 		loge("%s(%d): switch_mute gpio num is error\n",__FUNCTION__,__LINE__);
@@ -1580,16 +1595,16 @@ static int hifi_swtich_sel_set(struct snd_kcontrol *kcontrol,
 	logi("%s(%d): value =%ld\n",__FUNCTION__,__LINE__,ucontrol->value.integer.value[0]);
 	if(ak4376->switch_sel > 0) {
 		switch (ucontrol->value.integer.value[0]) {
-			case OFF:
-				ak4376->switch_sel_flg = OFF;
-				gpio_direction_output(ak4376->switch_sel, 0);
-				break;
-			case ON:
-				ak4376->switch_sel_flg = ON;
-				gpio_direction_output(ak4376->switch_sel, 1);
-				break;
-			default:
-				return -EINVAL;
+		case OFF:
+			ak4376->switch_sel_flg = OFF;
+			gpio_direction_output(ak4376->switch_sel, 0);
+			break;
+		case ON:
+			ak4376->switch_sel_flg = ON;
+			gpio_direction_output(ak4376->switch_sel, 1);
+			break;
+		default:
+			return -EINVAL;
 		}
 	} else {
 		loge("%s(%d): switch_sel gpio num is error\n",__FUNCTION__,__LINE__);
@@ -1635,14 +1650,14 @@ static int hifi_swtich_vdd_set(struct snd_kcontrol *kcontrol,
 
 	logi("%s(%d): value =%ld\n",__FUNCTION__,__LINE__,ucontrol->value.integer.value[0]);
 	switch (ucontrol->value.integer.value[0]) {
-		case OFF:
-			ak4376_switch_regulator_disable(ak4376);
-			break;
-		case ON:
-			ak4376_switch_regulator_enable(ak4376);
-			break;
-		default:
-			return -EINVAL;
+	case OFF:
+		ak4376_switch_regulator_disable(ak4376);
+		break;
+	case ON:
+		ak4376_switch_regulator_enable(ak4376);
+		break;
+	default:
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -1686,16 +1701,16 @@ static int hifi_swtich_vdd_en_set(struct snd_kcontrol *kcontrol,
 	logi("%s(%d): value =%ld\n",__FUNCTION__,__LINE__,ucontrol->value.integer.value[0]);
 	if(ak4376->switch_power_en > 0) {
 		switch (ucontrol->value.integer.value[0]) {
-			case OFF:
-				ak4376->switch_power_en_flg = OFF;
-				gpio_direction_output(ak4376->switch_power_en, 0);
-				break;
-			case ON:
-				ak4376->switch_power_en_flg = ON;
-				gpio_direction_output(ak4376->switch_power_en, 1);
-				break;
-			default:
-				return -EINVAL;
+		case OFF:
+			ak4376->switch_power_en_flg = OFF;
+			gpio_direction_output(ak4376->switch_power_en, 0);
+			break;
+		case ON:
+			ak4376->switch_power_en_flg = ON;
+			gpio_direction_output(ak4376->switch_power_en, 1);
+			break;
+		default:
+			return -EINVAL;
 		}
 	} else {
 		loge("%s(%d): switch_power_en gpio num is error\n",__FUNCTION__,__LINE__);
@@ -1709,13 +1724,13 @@ static int get_pllmode(struct snd_kcontrol *kcontrol,
 	struct ak4376_priv *ak4376 = NULL;
 	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
 	if (NULL == codec) {
-		loge("%s(%d): FAIL codec is null pointer\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) FAIL codec is null pointer\n",__FUNCTION__,__LINE__);
 		return -ENXIO;
 	}
 
 	ak4376 = snd_soc_codec_get_drvdata(codec);
 	if (NULL == ak4376) {
-		loge("%s(%d): FAIL ak4376 is null pointer\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) FAIL ak4376 is null pointer\n",__FUNCTION__,__LINE__);
 		return -ENXIO;
 	}
 
@@ -1732,13 +1747,13 @@ static int set_pllmode(struct snd_kcontrol *kcontrol,
 	struct ak4376_priv *ak4376 = NULL;
 	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
 	if (NULL == codec) {
-		loge("%s(%d): FAIL codec is null pointer\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) FAIL codec is null pointer\n",__FUNCTION__,__LINE__);
 		return -ENXIO;
 	}
 
 	ak4376 = snd_soc_codec_get_drvdata(codec);
 	if (NULL == ak4376) {
-		loge("%s(%d): FAIL ak4376 is null pointer\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) FAIL ak4376 is null pointer\n",__FUNCTION__,__LINE__);
 		return -ENXIO;
 	}
 
@@ -1755,13 +1770,13 @@ static int get_msmode(struct snd_kcontrol *kcontrol,
 	struct ak4376_priv *ak4376 = NULL;
 	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
 	if (NULL == codec) {
-		loge("%s(%d): FAIL codec is null pointer\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) FAIL codec is null pointer\n",__FUNCTION__,__LINE__);
 		return -ENXIO;
 	}
 
 	ak4376 = snd_soc_codec_get_drvdata(codec);
 	if (NULL == ak4376) {
-		loge("%s(%d): FAIL ak4376 is null pointer\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) FAIL ak4376 is null pointer\n",__FUNCTION__,__LINE__);
 		return -ENXIO;
 	}
 
@@ -1778,18 +1793,18 @@ static int set_msmode(struct snd_kcontrol *kcontrol,
 	struct ak4376_priv *ak4376 = NULL;
 	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
 	if (NULL == codec) {
-		loge("%s(%d): FAIL codec is null pointer\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) FAIL codec is null pointer\n",__FUNCTION__,__LINE__);
 		return -ENXIO;
 	}
 
 	ak4376 = snd_soc_codec_get_drvdata(codec);
 	if (NULL == ak4376) {
-		loge("%s(%d): FAIL ak4376 is null pointer\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) FAIL ak4376 is null pointer\n",__FUNCTION__,__LINE__);
 		return -ENXIO;
 	}
 
 	ak4376->master_mode = ucontrol->value.enumerated.item[0];
-	if (AK4376_SLAVE_MODE == ak4376->master_mode) {
+	if (ak4376->master_mode == AK4376_SLAVE_MODE) {
 		snd_soc_update_bits(codec, AK4376_15_AUDIO_IF_FORMAT, 0x10, 0x00);	//MS bit = 0 slave mode
 	} else {
 		snd_soc_update_bits(codec, AK4376_15_AUDIO_IF_FORMAT, 0x10, 0x10);	//MS bit = 1 master mode
@@ -1808,7 +1823,7 @@ static int get_pll_mode_and_sample_rate(struct snd_kcontrol *kcontrol,
 	int pll_mode_and_sample_rate = PLL_OFF_48kHz;	//default is PLL_OFF_48kHz
 
 	if (NULL == kcontrol) {
-		loge("%s(%d): FAIL kcontrol is null pointer\n",__FUNCTION__, __LINE__);
+		loge("%s(%d) FAIL kcontrol is null pointer\n",__FUNCTION__, __LINE__);
 		return -ENXIO;
 	}
 	codec = snd_soc_kcontrol_codec(kcontrol);
@@ -1818,7 +1833,7 @@ static int get_pll_mode_and_sample_rate(struct snd_kcontrol *kcontrol,
 	}
 	ak4376 = snd_soc_codec_get_drvdata(codec);
 	if (NULL == ak4376) {
-		loge("%s(%d): FAIL ak4376 is null pointer\n",__FUNCTION__, __LINE__);
+		loge("%s(%d) FAIL ak4376 is null pointer\n",__FUNCTION__, __LINE__);
 		return -ENXIO;
 	}
 
@@ -1859,17 +1874,17 @@ static int set_pll_mode_and_sample_rate(struct snd_kcontrol *kcontrol,
 	int pll_mode_and_sample_rate = PLL_OFF_48kHz;	//default is PLL_OFF_48kHz
 
 	if (NULL == kcontrol) {
-		loge("%s(%d): FAIL kcontrol is null pointer\n",__FUNCTION__, __LINE__);
+		loge("%s(%d) FAIL kcontrol is null pointer\n",__FUNCTION__, __LINE__);
 		return -ENXIO;
 	}
 	codec = snd_soc_kcontrol_codec(kcontrol);
 	if (NULL == codec) {
-		loge("%s(%d): FAIL codec is null pointer\n",__FUNCTION__, __LINE__);
+		loge("%s(%d) FAIL codec is null pointer\n",__FUNCTION__, __LINE__);
 		return -ENXIO;
 	}
 	ak4376 = snd_soc_codec_get_drvdata(codec);
 	if (NULL == ak4376) {
-		loge("%s(%d): FAIL ak4376 is null pointer\n",__FUNCTION__, __LINE__);
+		loge("%s(%d) FAIL ak4376 is null pointer\n",__FUNCTION__, __LINE__);
 		return -ENXIO;
 	}
 
@@ -1960,38 +1975,38 @@ static int set_pll_mode_and_sample_rate(struct snd_kcontrol *kcontrol,
 			ak4376->rclk = SAMPLE_RATE_48KHZ;
 			ak4376->nPllMode = PLL_OFF;
 			break;
-	}
-
-	ak4376_hw_params_set(codec);
-
-	if ((pll_mode_and_sample_rate != PLL_OFF_48kHz) && (pll_mode_and_sample_rate_pre != PLL_OFF_48kHz)) {
-		if ((ak4376->pdn == ON) && (PMHLHP_CLOSE == 1)) {
-			logi("%s(%d): open PMHLHP\n",__FUNCTION__, __LINE__);
-			snd_soc_update_bits(codec, AK4376_03_POWER_MANAGEMENT4, 0x03, 0x03);
-			PMHLHP_CLOSE = 0;
-		} else {
-			logi("%s(%d): not open PMHLHP ak4376->pdn %d , PMHLHP_CLOSE %d\n",__FUNCTION__, __LINE__, ak4376->pdn, PMHLHP_CLOSE);
 		}
-	} else {
-		logi("%s(%d): not open PMHLHP\n",__FUNCTION__, __LINE__);
-	}
 
-	logi("%s(%d) ak4376->switch_ajust_seq=%d \n",__FUNCTION__, __LINE__, ak4376->switch_ajust_seq);
-	if(ON == ak4376->switch_ajust_seq){
-		if ((pll_mode_and_sample_rate == PLL_OFF_48kHz) && (pll_mode_and_sample_rate_pre != PLL_OFF_48kHz)) {
-			logi("%s(%d): ak4376_pdn_control enter \n",__FUNCTION__, __LINE__);
-			if (ON == ak4376->pdn){
-				logi("%s(%d): ak4376_pdn_control do turn off pdn\n",__FUNCTION__, __LINE__);
-				ak4376_pdn_control(codec, OFF);
+		ak4376_hw_params_set(codec);
+
+		if ((pll_mode_and_sample_rate != PLL_OFF_48kHz) && (pll_mode_and_sample_rate_pre != PLL_OFF_48kHz)) {
+			if ((ak4376->pdn == ON) && (PMHLHP_CLOSE == 1)) {
+				logi("%s(%d): open PMHLHP\n",__FUNCTION__, __LINE__);
+				snd_soc_update_bits(codec, AK4376_03_POWER_MANAGEMENT4, 0x03, 0x03);
+				PMHLHP_CLOSE = 0;
+			} else {
+				logi("%s(%d): not open PMHLHP ak4376->pdn %d , PMHLHP_CLOSE %d\n",__FUNCTION__, __LINE__, ak4376->pdn, PMHLHP_CLOSE);
 			}
 		} else {
-			logi("%s(%d): ak4376_pdn_control do nothing and leave \n",__FUNCTION__, __LINE__);
+			logi("%s(%d): not open PMHLHP\n",__FUNCTION__, __LINE__);
 		}
-	}
 
-	pll_mode_and_sample_rate_pre = pll_mode_and_sample_rate;
-	logi("%s(%d) pll_mode_and_sample_rate=%d pll_mode_and_sample_rate_pre=%d\n",__FUNCTION__, __LINE__, pll_mode_and_sample_rate,pll_mode_and_sample_rate_pre);
-	return 0;
+		logi("%s(%d) ak4376->switch_ajust_seq=%d \n",__FUNCTION__, __LINE__, ak4376->switch_ajust_seq);
+		if(ak4376->switch_ajust_seq == ON){
+			if ((pll_mode_and_sample_rate == PLL_OFF_48kHz) && (pll_mode_and_sample_rate_pre != PLL_OFF_48kHz)) {
+				logi("%s(%d): ak4376_pdn_control enter \n",__FUNCTION__, __LINE__);
+				if (ak4376->pdn == ON){
+					logi("%s(%d): ak4376_pdn_control do turn off pdn\n",__FUNCTION__, __LINE__);
+					ak4376_pdn_control(codec, OFF);
+				}
+			} else {
+				logi("%s(%d): ak4376_pdn_control do nothing and leave \n",__FUNCTION__, __LINE__);
+			}
+		}
+
+		pll_mode_and_sample_rate_pre = pll_mode_and_sample_rate;
+		logi("%s(%d) pll_mode_and_sample_rate=%d pll_mode_and_sample_rate_pre=%d\n",__FUNCTION__, __LINE__, pll_mode_and_sample_rate,pll_mode_and_sample_rate_pre);
+		return 0;
 }
 
 static int get_mclk(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
@@ -2033,16 +2048,16 @@ static int set_mclk(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *uc
 
 	logi("%s(%d): value = %ld\n", __FUNCTION__, __LINE__, ucontrol->value.integer.value[0]);
 	switch (ucontrol->value.integer.value[0]) {
-		case OFF:
-			ak4376->hifi_mclk_en = OFF;
-			ak4376_mclk_enable(ak4376, false);
-			break;
-		case ON:
-			ak4376->hifi_mclk_en = ON;
-			ak4376_mclk_enable(ak4376, true);
-			break;
-		default:
-			return -EINVAL;
+	case OFF:
+		ak4376->hifi_mclk_en = OFF;
+		ak4376_mclk_enable(ak4376, false);
+		break;
+	case ON:
+		ak4376->hifi_mclk_en = ON;
+		ak4376_mclk_enable(ak4376, true);
+		break;
+	default:
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -2162,33 +2177,33 @@ static int ak4376_dac_event2(struct snd_soc_codec *codec, int event)
 	MSmode = snd_soc_read(codec, AK4376_15_AUDIO_IF_FORMAT);
 
 	switch (event) {
-		case SND_SOC_DAPM_PRE_PMU:	/* before widget power up */
-			ak4376->nDACOn = ON;
-			snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x01,0x01);		//PMCP1=1
-			mdelay(6);																//wait 6ms
-			udelay(500);															//wait 0.5ms
-			snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x30,0x30);		//PMLDO1P/N=1
-			mdelay(1);																//wait 1ms
-			break;
-		case SND_SOC_DAPM_POST_PMU:	/* after widget power up */
-			snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x02,0x02);		//PMCP2=1
-			mdelay(4);																//wait 4ms
-			udelay(500);															//wait 0.5ms
-			break;
-		case SND_SOC_DAPM_PRE_PMD:	/* before widget power down */
-			snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x02,0x00);		//PMCP2=0
-			break;
-		case SND_SOC_DAPM_POST_PMD:	/* after widget power down */
-			snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x30,0x00);		//PMLDO1P/N=0
-			snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x01,0x00);		//PMCP1=0
+	case SND_SOC_DAPM_PRE_PMU:	/* before widget power up */
+		ak4376->nDACOn = ON;
+		snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x01,0x01);		//PMCP1=1
+		mdelay(6);																//wait 6ms
+		udelay(500);															//wait 0.5ms
+		snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x30,0x30);		//PMLDO1P/N=1
+		mdelay(1);																//wait 1ms
+		break;
+	case SND_SOC_DAPM_POST_PMU:	/* after widget power up */
+		snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x02,0x02);		//PMCP2=1
+		mdelay(4);																//wait 4ms
+		udelay(500);															//wait 0.5ms
+		break;
+	case SND_SOC_DAPM_PRE_PMD:	/* before widget power down */
+		snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x02,0x00);		//PMCP2=0
+		break;
+	case SND_SOC_DAPM_POST_PMD:	/* after widget power down */
+		snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x30,0x00);		//PMLDO1P/N=0
+		snd_soc_update_bits(codec, AK4376_01_POWER_MANAGEMENT2, 0x01,0x00);		//PMCP1=0
 
-			if (PLL_OFF == ak4376->nPllMode) {
-				if (MSmode & 0x10) {	//Master mode
-					snd_soc_update_bits(codec, AK4376_15_AUDIO_IF_FORMAT, 0x10,0x00);	//MS bit = 0
-				}
+		if (ak4376->nPllMode == PLL_OFF) {
+			if (MSmode & 0x10) {	//Master mode
+				snd_soc_update_bits(codec, AK4376_15_AUDIO_IF_FORMAT, 0x10,0x00);	//MS bit = 0
 			}
-			ak4376->nDACOn = OFF;
-			break;
+		}
+		ak4376->nDACOn = OFF;
+		break;
 	}
 	return 0;
 }
@@ -2220,34 +2235,34 @@ static int ak4376_pll_event2(struct snd_soc_codec *codec, int event)
 	}
 	logi("%s(%d),event = %d\n",__FUNCTION__,__LINE__, event);
 	switch (event) {
-		case SND_SOC_DAPM_PRE_PMU:	/* before widget power up */
-		case SND_SOC_DAPM_POST_PMU:	/* after widget power up */
-			/* if hardware without switch , ak4376 maybe be used incall mode , and support changed sample-rate
-			so ak4376_hw_params_set should be controled by kcontrol in set_pll_mode_and_sample_rate() */
-			if (ak4376->swtich_existence) {
-				ak4376_hw_params_set(codec);
-			}
-			if(!ak4376->master_mode) {
-				ak4376_set_fmt(codec, SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBS_CFS);
-			} else {
-				ak4376_set_fmt(codec, SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBM_CFM);
-			}
+	case SND_SOC_DAPM_PRE_PMU:	/* before widget power up */
+	case SND_SOC_DAPM_POST_PMU:	/* after widget power up */
+		/* if hardware without switch , ak4376 maybe be used incall mode , and support changed sample-rate
+		so ak4376_hw_params_set should be controled by kcontrol in set_pll_mode_and_sample_rate() */
+		if (ak4376->swtich_existence) {
+			ak4376_hw_params_set(codec);
+		}
+		if(!ak4376->master_mode) {
+			ak4376_set_fmt(codec, SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBS_CFS);
+		} else {
+			ak4376_set_fmt(codec, SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBM_CFM);
+		}
 
-			if ((BICK_PLL == ak4376->nPllMode) || (MCKI_PLL == ak4376->nPllMode)) {
-				snd_soc_update_bits(codec, AK4376_00_POWER_MANAGEMENT1, 0x01,0x01);	//PMPLL=1
-			} else if (XTAL_MODE == ak4376->nPllMode) {
-				snd_soc_update_bits(codec, AK4376_00_POWER_MANAGEMENT1, 0x10,0x10);	//PMOSC=1
-			}
-			break;
-		case SND_SOC_DAPM_PRE_PMD:	/* before widget power down */
-		case SND_SOC_DAPM_POST_PMD:	/* after widget power down */
-			if ((BICK_PLL == ak4376->nPllMode) || (MCKI_PLL == ak4376->nPllMode)) {
-				snd_soc_update_bits(codec, AK4376_00_POWER_MANAGEMENT1, 0x01,0x00);	//PMPLL=0
-			} else if (XTAL_MODE == ak4376->nPllMode) {
-				snd_soc_update_bits(codec, AK4376_00_POWER_MANAGEMENT1, 0x10,0x00);	//PMOSC=0
-			}
-			ak4376_set_mute(codec);
-			break;
+		if ((ak4376->nPllMode == BICK_PLL) || (ak4376->nPllMode == MCKI_PLL)) {
+			snd_soc_update_bits(codec, AK4376_00_POWER_MANAGEMENT1, 0x01,0x01);	//PMPLL=1
+		} else if (ak4376->nPllMode == XTAL_MODE) {
+			snd_soc_update_bits(codec, AK4376_00_POWER_MANAGEMENT1, 0x10,0x10);	//PMOSC=1
+		}
+		break;
+	case SND_SOC_DAPM_PRE_PMD:	/* before widget power down */
+	case SND_SOC_DAPM_POST_PMD:	/* after widget power down */
+		if ((ak4376->nPllMode == BICK_PLL) || (ak4376->nPllMode == MCKI_PLL)) {
+			snd_soc_update_bits(codec, AK4376_00_POWER_MANAGEMENT1, 0x01,0x00);	//PMPLL=0
+		} else if (ak4376->nPllMode == XTAL_MODE) {
+			snd_soc_update_bits(codec, AK4376_00_POWER_MANAGEMENT1, 0x10,0x00);	//PMOSC=0
+		}
+		ak4376_set_mute(codec);
+		break;
 	}
 
 	return 0;
@@ -2337,13 +2352,13 @@ static inline u32 ak4376_read_reg_cache(struct snd_soc_codec *codec, u16 reg)
 
 	if(reg <= AK4376_24_MODE_CONTROL){
 		return (u32)cache[reg];
-	} else if(AK4376_26_DAC_ADJ1 == reg) {
+	} else if(reg == AK4376_26_DAC_ADJ1) {
 		return (u32)cache[AK4376_24_MODE_CONTROL+1];
-	} else if(AK4376_2A_DAC_ADJ2 == reg) {
+	} else if(reg == AK4376_2A_DAC_ADJ2){
 		return (u32)cache[AK4376_24_MODE_CONTROL+2];
 	}
 
-	loge("%s(%d): reg is invalid value,return 0\n",__FUNCTION__,__LINE__);
+	loge("%s(%d) reg is invaild value,return 0\n",__FUNCTION__,__LINE__);
 	return 0;
 }
 
@@ -2411,10 +2426,10 @@ unsigned int ak4376_reg_read(struct snd_soc_codec *codec, unsigned int reg)
 	logd("%s(%d) pdn =%d, hifi_power_off_flag =%d\n",__FUNCTION__,
 		__LINE__, ak4376->pdn, ak4376->hifi_power_off_flag);
 
-	if (OFF == ak4376->pdn || ON == ak4376->hifi_power_off_flag) {
+	if (ak4376->pdn == OFF || ak4376->hifi_power_off_flag == ON) {
 		rdata = ak4376_read_reg_cache(codec, reg);
 		logd("%s Read reg[0x%x]cache, rdata =%u\n",__FUNCTION__,reg,rdata);
-	} else if (ON == ak4376->pdn && OFF == ak4376->hifi_power_off_flag) {
+	} else if (ak4376->pdn == ON && ak4376->hifi_power_off_flag == OFF) {
 		wlen = 1;
 		rlen = 1;
 		tx[0] = reg;
@@ -2478,7 +2493,7 @@ static int ak4376_write_register(struct snd_soc_codec *codec, unsigned int reg,
 
 	ak4376_write_reg_cache(codec, reg, value);
 
-	if (ON == ak4376->pdn && OFF == ak4376->hifi_power_off_flag) {
+	if (ak4376->pdn == ON && ak4376->hifi_power_off_flag == OFF) {
 		while (retry < I2C_WRITE_READ_RETRY_TIMES) {
 			retry++;
 			rc = i2c_master_send(ak4376->i2c, tx, wlen);
@@ -2586,37 +2601,37 @@ static int ak4376_set_bias_level(struct snd_soc_codec *codec,
 	logi("%s(%d) level=%d, codec->dapm.bias_level=%d\n",__FUNCTION__, __LINE__, level, snd_soc_dapm_get_bias_level(dapm));
 
 	switch (level) {
-		case SND_SOC_BIAS_ON:
-			break;
-		case SND_SOC_BIAS_PREPARE:
-			if (SND_SOC_BIAS_STANDBY == snd_soc_dapm_get_bias_level(dapm))
-				logi("%s(%d) bias_level = SND_SOC_BIAS_STANDBY\n",__FUNCTION__,__LINE__);
-			if (SND_SOC_BIAS_ON == snd_soc_dapm_get_bias_level(dapm))
-				logi("%s(%d) bias_level = SND_SOC_BIAS_ON\n",__FUNCTION__,__LINE__);
-			break;
-		case SND_SOC_BIAS_STANDBY:
-			if (SND_SOC_BIAS_PREPARE == snd_soc_dapm_get_bias_level(dapm)) {
-				logi("%s(%d) bias_level = SND_SOC_BIAS_PREPARE\n",__FUNCTION__,__LINE__);
-				if (ak4376->swtich_existence) {
-					ak4376_pdn_control(codec, OFF);
-				}
-			} else if (SND_SOC_BIAS_OFF == snd_soc_dapm_get_bias_level(dapm))
-				logi("%s(%d) bias_level = SND_SOC_BIAS_OFF\n",__FUNCTION__,__LINE__);
-			break;
-		case SND_SOC_BIAS_OFF:
-			if (SND_SOC_BIAS_STANDBY == snd_soc_dapm_get_bias_level(dapm)) {
-				logi("%s(%d) bias_level = SND_SOC_BIAS_STANDBY\n",__FUNCTION__,__LINE__);
-				logi("%s(%d) ak4376->switch_ajust_seq=%d \n",__FUNCTION__, __LINE__, ak4376->switch_ajust_seq);
-				if (ak4376->switch_ajust_seq == OFF){
-					ak4376_pdn_control(codec, OFF);
-				}
+	case SND_SOC_BIAS_ON:
+		break;
+	case SND_SOC_BIAS_PREPARE:
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_STANDBY)
+			logi("%s(%d) bias_level = SND_SOC_BIAS_STANDBY\n",__FUNCTION__,__LINE__);
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_ON)
+			logi("%s(%d) bias_level = SND_SOC_BIAS_ON\n",__FUNCTION__,__LINE__);
+		break;
+	case SND_SOC_BIAS_STANDBY:
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_PREPARE) {
+			logi("%s(%d) bias_level = SND_SOC_BIAS_PREPARE\n",__FUNCTION__,__LINE__);
+			if (ak4376->swtich_existence) {
+				ak4376_pdn_control(codec, OFF);
 			}
-			break;
+		} else if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF)
+			logi("%s(%d) bias_level = SND_SOC_BIAS_OFF\n",__FUNCTION__,__LINE__);
+		break;
+	case SND_SOC_BIAS_OFF:
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_STANDBY) {
+			logi("%s(%d) bias_level = SND_SOC_BIAS_STANDBY\n",__FUNCTION__,__LINE__);
+			logi("%s(%d) ak4376->switch_ajust_seq=%d \n",__FUNCTION__, __LINE__, ak4376->switch_ajust_seq);
+			if (ak4376->switch_ajust_seq == OFF){
+				ak4376_pdn_control(codec, OFF);
+			}
+		}
+		break;
 	}
 	snd_soc_dapm_init_bias_level(dapm, level);
 
 	/* show chip regs for debug, after enable ak4376 */
-	if (SND_SOC_BIAS_ON == level) {
+	if (level == SND_SOC_BIAS_ON) {
 		ak4376_show_reg_debug(codec);
 	}
 
@@ -2638,37 +2653,37 @@ static int ak4376_set_bias_level(struct snd_soc_codec *codec,
 	logi("%s(%d) level=%d, codec->dapm.bias_level=%d\n",__FUNCTION__, __LINE__, level, codec->dapm.bias_level);
 
 	switch (level) {
-		case SND_SOC_BIAS_ON:
-			break;
-		case SND_SOC_BIAS_PREPARE:
-			if (SND_SOC_BIAS_STANDBY == codec->dapm.bias_level)
-				logi("%s(%d) bias_level = SND_SOC_BIAS_STANDBY\n",__FUNCTION__,__LINE__);
-			if (SND_SOC_BIAS_ON == codec->dapm.bias_level)
-				logi("%s(%d) bias_level = SND_SOC_BIAS_ON\n",__FUNCTION__,__LINE__);
-			break;
-		case SND_SOC_BIAS_STANDBY:
-			if (SND_SOC_BIAS_PREPARE == codec->dapm.bias_level) {
-				logi("%s(%d) bias_level = SND_SOC_BIAS_PREPARE\n",__FUNCTION__,__LINE__);
-				if (ak4376->swtich_existence) {
-					ak4376_pdn_control(codec, OFF);
-				}
-			} else if (SND_SOC_BIAS_OFF == codec->dapm.bias_level)
-				logi("%s(%d) bias_level = SND_SOC_BIAS_OFF\n",__FUNCTION__,__LINE__);
-			break;
-		case SND_SOC_BIAS_OFF:
-			if (SND_SOC_BIAS_STANDBY == codec->dapm.bias_level) {
-				logi("%s(%d) bias_level = SND_SOC_BIAS_STANDBY\n",__FUNCTION__,__LINE__);
-				logi("%s(%d) ak4376->switch_ajust_seq=%d \n",__FUNCTION__, __LINE__, ak4376->switch_ajust_seq);
-				if (OFF == ak4376->switch_ajust_seq){
-					ak4376_pdn_control(codec, OFF);
-				}
+	case SND_SOC_BIAS_ON:
+		break;
+	case SND_SOC_BIAS_PREPARE:
+		if (codec->dapm.bias_level == SND_SOC_BIAS_STANDBY)
+			logi("%s(%d) bias_level = SND_SOC_BIAS_STANDBY\n",__FUNCTION__,__LINE__);
+		if (codec->dapm.bias_level == SND_SOC_BIAS_ON)
+			logi("%s(%d) bias_level = SND_SOC_BIAS_ON\n",__FUNCTION__,__LINE__);
+		break;
+	case SND_SOC_BIAS_STANDBY:
+		if (codec->dapm.bias_level == SND_SOC_BIAS_PREPARE) {
+			logi("%s(%d) bias_level = SND_SOC_BIAS_PREPARE\n",__FUNCTION__,__LINE__);
+			if (ak4376->swtich_existence) {
+				ak4376_pdn_control(codec, OFF);
 			}
-			break;
+		} else if (codec->dapm.bias_level == SND_SOC_BIAS_OFF)
+			logi("%s(%d) bias_level = SND_SOC_BIAS_OFF\n",__FUNCTION__,__LINE__);
+		break;
+	case SND_SOC_BIAS_OFF:
+		if (codec->dapm.bias_level == SND_SOC_BIAS_STANDBY) {
+			logi("%s(%d) bias_level = SND_SOC_BIAS_STANDBY\n",__FUNCTION__,__LINE__);
+			logi("%s(%d) ak4376->switch_ajust_seq=%d \n",__FUNCTION__, __LINE__, ak4376->switch_ajust_seq);
+			if (ak4376->switch_ajust_seq == OFF){
+				ak4376_pdn_control(codec, OFF);
+			}
+		}
+		break;
 	}
 	codec->dapm.bias_level = level;
 
 	/* show chip regs for debug, after enable ak4376 */
-	if (SND_SOC_BIAS_ON == level) {
+	if (level == SND_SOC_BIAS_ON) {
 		ak4376_show_reg_debug(codec);
 	}
 
@@ -2725,32 +2740,32 @@ static int ak4376_init_reg(struct snd_soc_codec *codec)
 	DeviceID = ak4376_reg_read(codec, AK4376_15_AUDIO_IF_FORMAT);
 
 	switch (DeviceID >> 5) {
-		case 0:
-			ak4376->nDeviceID = 0;		//0:AK4375
-			logi("%s(%d) AK4375 is connecting.\n",__FUNCTION__,__LINE__);
-			break;
-		case 1:
-			ak4376->nDeviceID = 1;		//1:AK4375A
-			logi("%s(%d) AK4375A is connecting.\n",__FUNCTION__,__LINE__);
-			break;
-		case 2:
-			ak4376->nDeviceID = 2;		//2:AK4376
-			logi("%s(%d) AK4376 is connecting.\n",__FUNCTION__,__LINE__);
-			break;
-		default:
-			ak4376->nDeviceID = 3;		//3:Other IC
-			logi("%s(%d) This device are neither AK4375/A nor AK4376.\n",__FUNCTION__,__LINE__);
+	case 0:
+		ak4376->nDeviceID = 0;		//0:AK4375
+		logi("%s(%d) AK4375 is connecting.\n",__FUNCTION__,__LINE__);
+		break;
+	case 1:
+		ak4376->nDeviceID = 1;		//1:AK4375A
+		logi("%s(%d) AK4375A is connecting.\n",__FUNCTION__,__LINE__);
+		break;
+	case 2:
+		ak4376->nDeviceID = 2;		//2:AK4376
+		logi("%s(%d) AK4376 is connecting.\n",__FUNCTION__,__LINE__);
+		break;
+	default:
+		ak4376->nDeviceID = 3;		//3:Other IC
+		logi("%s(%d) This device are neither AK4375/A nor AK4376.\n",__FUNCTION__,__LINE__);
 	}
 
 	#if LINUX_VERSION_CODE > KERNEL_VERSION(4,4,0)
-		if (SND_SOC_BIAS_STANDBY == snd_soc_codec_get_bias_level(codec)) {
+		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_STANDBY) {
 			if(ak4376->switch_ajust_seq == ON){
 				logi("%s(%d) ak4376->switch_ajust_seq=%d, turn off the pdn after init reg \n",__FUNCTION__, __LINE__, ak4376->switch_ajust_seq);
 				ak4376_pdn_control(codec, OFF);
 			}
 		}
 	#else
-		if (SND_SOC_BIAS_STANDBY == codec->dapm.bias_level) {
+		if (codec->dapm.bias_level == SND_SOC_BIAS_STANDBY) {
 			if(ak4376->switch_ajust_seq == ON){
 				logi("%s(%d) ak4376->switch_ajust_seq=%d, turn off the pdn after init reg \n",__FUNCTION__, __LINE__, ak4376->switch_ajust_seq);
 				ak4376_pdn_control(codec, OFF);
@@ -2827,28 +2842,18 @@ static struct snd_soc_codec_driver soc_codec_dev_ak4376 = {
 	.resume = ak4376_resume,
 	.read = ak4376_reg_read,
 	.write = ak4376_write_register,
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0)
-	.component_driver = {
-		.controls = ak4376_snd_controls,
-		.num_controls = ARRAY_SIZE(ak4376_snd_controls),
-		.dapm_widgets = ak4376_dapm_widgets,
-		.num_dapm_widgets = ARRAY_SIZE(ak4376_dapm_widgets),
-		.dapm_routes = ak4376_intercon,
-		.num_dapm_routes = ARRAY_SIZE(ak4376_intercon),
-	},
-#else
 	.controls = ak4376_snd_controls,
 	.num_controls = ARRAY_SIZE(ak4376_snd_controls),
-	.dapm_widgets = ak4376_dapm_widgets,
-	.num_dapm_widgets = ARRAY_SIZE(ak4376_dapm_widgets),
-	.dapm_routes = ak4376_intercon,
-	.num_dapm_routes = ARRAY_SIZE(ak4376_intercon),
-#endif
+
 	.idle_bias_off = true,
 	.set_bias_level = ak4376_set_bias_level,
 	.reg_cache_size = ARRAY_SIZE(ak4376_reg),
 	.reg_word_size = sizeof(u8),
 	.reg_cache_default = ak4376_reg,
+	.dapm_widgets = ak4376_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(ak4376_dapm_widgets),
+	.dapm_routes = ak4376_intercon,
+	.num_dapm_routes = ARRAY_SIZE(ak4376_intercon),
 };
 
 static int ak4376_populate_get_gpio_pdata(struct device *dev, struct ak4376_priv *pdata)
@@ -2868,7 +2873,7 @@ static int ak4376_populate_get_gpio_pdata(struct device *dev, struct ak4376_priv
 	}
 
 	if (!gpio_is_valid(pdata->priv_pdn_en)) {
-		loge("%s: ak4376_hifi_pdn gpio is invalid!\n",__FUNCTION__);
+		loge("%s:ak4376_hifi_pdn gpio is unvalid!\n",__FUNCTION__);
 		ret = -EIO;
 		goto priv_pdn_en_gpio_request_error;
 	}
@@ -2892,7 +2897,7 @@ static int ak4376_populate_get_gpio_pdata(struct device *dev, struct ak4376_priv
 		}
 
 		if (!gpio_is_valid(pdata->hifi_pwren)) {
-			loge("%s: ak4376_hifi_pwren gpio is invalid!\n",__FUNCTION__);
+			loge("%s:ak4376_hifi_pwren gpio is unvalid!\n",__FUNCTION__);
 			ret = -EIO;
 			goto hifi_pwren_gpio_request_error;
 		}
@@ -2955,7 +2960,7 @@ static int ak4376_populate_get_switch_gpio_pdata(struct device *dev, struct ak43
 		}
 
 		if (!gpio_is_valid(pdata->switch_ac_dc)) {
-			loge("%s: switch_ac_dc gpio is invalid!\n",__FUNCTION__);
+			loge("%s:switch_ac_dc gpio is unvalid!\n",__FUNCTION__);
 			ret = -EIO;
 			goto switch_ac_dc_gpio_request_error;
 		}
@@ -2984,7 +2989,7 @@ static int ak4376_populate_get_switch_gpio_pdata(struct device *dev, struct ak43
 		}
 
 		if (!gpio_is_valid(pdata->switch_dir)) {
-			loge("%s: switch_dir gpio is invalid!\n",__FUNCTION__);
+			loge("%s:switch_dir gpio is unvalid!\n",__FUNCTION__);
 			ret = -EIO;
 			goto switch_dir_gpio_request_error;
 		}
@@ -3013,7 +3018,7 @@ static int ak4376_populate_get_switch_gpio_pdata(struct device *dev, struct ak43
 		}
 
 		if (!gpio_is_valid(pdata->switch_mute)) {
-			loge("%s: switch_mute gpio is invalid!\n",__FUNCTION__);
+			loge("%s:switch_mute gpio is unvalid!\n",__FUNCTION__);
 			ret = -EIO;
 			goto switch_mute_gpio_request_error;
 		}
@@ -3042,14 +3047,14 @@ static int ak4376_populate_get_switch_gpio_pdata(struct device *dev, struct ak43
 		}
 
 		if (!gpio_is_valid(pdata->switch_sel)) {
-			loge("%s: switch_sel gpio is invalid!\n",__FUNCTION__);
+			loge("%s:switch_sel gpio is unvalid!\n",__FUNCTION__);
 			ret = -EIO;
 			goto switch_sel_gpio_request_error;
 		}
 
 		ret = gpio_request(pdata->switch_sel, "switch_sel");
 		if (ret < 0) {
-			loge("%s(%d): switch_sel gpio request failed %d",
+			loge( "%s(%d): switch_sel gpio request failed %d",
 				__FUNCTION__,__LINE__, ret);
 			goto switch_sel_gpio_request_error;
 		}
@@ -3072,7 +3077,7 @@ static int ak4376_populate_get_switch_gpio_pdata(struct device *dev, struct ak43
 		}
 
 		if (!gpio_is_valid(pdata->switch_power_en)) {
-			loge("%s: switch_power_en gpio is invalid!\n",__FUNCTION__);
+			loge("%s:switch_power_en gpio is unvalid!\n",__FUNCTION__);
 			ret = -EIO;
 			goto switch_power_en_gpio_request_error;
 		}
@@ -3201,7 +3206,7 @@ static int ak4376_switch_get_regulator(struct device *dev, struct ak4376_priv *p
 	if (IS_ERR(pdata->swtich_vdd) || !pdata->swtich_vdd)
 	{
 		ret = PTR_ERR(pdata->swtich_vdd);
-		loge("%s(%d): Regulator get failed swtich_vdd rc = %d\n" ,__FUNCTION__,__LINE__, ret);
+		loge("%s(%d):Regulator get failed swtich_vdd rc = %d\n" ,__FUNCTION__,__LINE__, ret);
 		return -EINVAL;
 	}
 
@@ -3223,7 +3228,7 @@ static int ak4376_put_switch_regulator(struct ak4376_priv *pdata)
 	}
 
 	if (IS_ERR(pdata->swtich_vdd)) {
-		loge("%s(%d): regulator swtich_vdd is err\n" ,__FUNCTION__,__LINE__);
+		loge("%s(%d):regulator swtich_vdd is err\n" ,__FUNCTION__,__LINE__);
 		return -EINVAL;
 	}
 
@@ -3249,20 +3254,20 @@ static int ak4376_switch_regulator_enable(struct ak4376_priv *pdata)
 	}
 
 	if (IS_ERR(pdata->swtich_vdd)) {
-		loge("%s(%d): regulator swtich_vdd is err\n" ,__FUNCTION__,__LINE__);
+		loge("%s(%d):regulator swtich_vdd is err\n" ,__FUNCTION__,__LINE__);
 		return -EINVAL;
 	}
 
 	ret = regulator_set_voltage(pdata->swtich_vdd, pdata->switch_voltage,
 							pdata->switch_voltage);
 	if (ret) {
-		loge("%s(%d): regulator set_vtg failed_vdd rc=%d\n", __FUNCTION__, __LINE__,ret);
+		loge("%s(%d):regulator set_vtg failed_vdd rc=%d\n", __FUNCTION__, __LINE__,ret);
 		return -EINVAL;
 	}
 
 	ret = regulator_enable(pdata->swtich_vdd);
 	if (ret) {
-		loge("%s(%d): regulator swtich_vdd failed rc=%d\n", __FUNCTION__, __LINE__, ret);
+		loge("%s(%d):regulator swtich_vdd failed rc=%d\n", __FUNCTION__, __LINE__, ret);
 		return -EINVAL;
 	}
 
@@ -3288,13 +3293,13 @@ static int ak4376_switch_regulator_disable(struct ak4376_priv *pdata)
 	}
 
 	if (IS_ERR(pdata->swtich_vdd)) {
-		loge("%s(%d): regulator swtich_vdd is err\n" ,__FUNCTION__,__LINE__);
+		loge("%s(%d):regulator swtich_vdd is err\n" ,__FUNCTION__,__LINE__);
 		return -EINVAL;
 	}
 
 	ret = regulator_disable(pdata->swtich_vdd);
 	if (ret) {
-		loge("%s(%d): regulator swtich_vdd disable err\n" ,__FUNCTION__,__LINE__);
+		loge("%s(%d):regulator swtich_vdd disable err\n" ,__FUNCTION__,__LINE__);
 		return -EINVAL;
 	}
 
@@ -3323,7 +3328,7 @@ static void set_PMU_xo_freq_codec_drv_config(struct device_node *node)
 			hisi_pmic_reg_write(HI6555_0X11A_REG, reg_val_new);
 			pr_info("%s: update PMU 0X11A from 0x%x to 0x%x , val = %x\n", __FUNCTION__, reg_val_old, reg_val_new, val);
 		} else {
-			pr_err("%s: invalid value for reg %d\n", __FUNCTION__, val);
+			pr_err("%s: invaild value for reg %d\n", __FUNCTION__, val);
 		}
 	} else {
 		pr_info("%s: no need to change hi6555 config\n", __FUNCTION__);
@@ -3344,15 +3349,14 @@ static int ak4376_i2c_probe(struct i2c_client *i2c,
 	logi("%s(%d)\n",__FUNCTION__,__LINE__);
 	ak4376 = kzalloc(sizeof(struct ak4376_priv), GFP_KERNEL);
 
-	if (NULL == ak4376){
-		loge("%s(%d): ak4376 priv data is NULL\n",__FUNCTION__,__LINE__);
+	if (ak4376 == NULL){
+		loge("%s(%d) ak4376 priv data is NULL\n",__FUNCTION__,__LINE__);
 		return -ENOMEM;
 	}
-#ifdef AK4376_KERNEL_4_1_DEBUG
+
 	if ((ret = sysfs_create_group(&i2c->dev.kobj, &ak4376_attr_group)) < 0) {
 		loge("%s: failed to register ak4376 i2c sysfs, ret =%d\n", __func__, ret);
 	}
-#endif
 
 	i2c_set_clientdata(i2c, ak4376);
 
@@ -3406,32 +3410,32 @@ static int ak4376_i2c_probe(struct i2c_client *i2c,
 
 	ret = ak4376_populate_get_gpio_pdata(&i2c->dev, ak4376);
 	if (ret < 0){
-		loge("%s(%d): get gpios failed\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) get gpios failed\n",__FUNCTION__,__LINE__);
 		goto get_gpio_err;
 	}
 
 	ret = ak4376_populate_get_switch_gpio_pdata(&i2c->dev, ak4376);
 	if (ret < 0) {
-		loge("%s(%d): get switch gpios failed\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) get switch gpios failed\n",__FUNCTION__,__LINE__);
 		goto get_gpio_err;
 	}
 
 	ret = ak4376_switch_get_regulator(&i2c->dev, ak4376);
 	if (ret < 0){
-		loge("%s(%d): get regulator failed\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) get regulator failed\n",__FUNCTION__,__LINE__);
 		goto get_regulator_err;
 	}
 
 	ret = ak4376_switch_regulator_enable(ak4376);
 	if (ret < 0){
-		loge("%s(%d): enable switch regulator failed\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) enable switch regulator failed\n",__FUNCTION__,__LINE__);
 		goto get_regulator_err;
 	}
 
 	ret = snd_soc_register_codec(&i2c->dev,
 			&soc_codec_dev_ak4376, &ak4376_dai[0], ARRAY_SIZE(ak4376_dai));
 	if (ret < 0){
-		loge("%s(%d): register codec failed\n",__FUNCTION__,__LINE__);
+		loge("%s(%d)\n",__FUNCTION__,__LINE__);
 #ifdef CONFIG_HUAWEI_DSM
 		audio_dsm_report_info(AUDIO_CODEC, DSM_HIFI_AK4376_CODEC_PROBE_ERR, "ak4376 snd_soc_register_codec fail! %d.\n",ret);
 #endif
@@ -3442,15 +3446,12 @@ static int ak4376_i2c_probe(struct i2c_client *i2c,
 
 	ak4376->mclk = devm_clk_get(&i2c->dev, "clk_pmuaudioclk");
 	if (IS_ERR(ak4376->mclk)) {
-		loge("%s(%d): ak4376 mclk not found\n", __FUNCTION__,__LINE__);
+		loge("%s(%d) ak4376 mclk not found\n", __FUNCTION__,__LINE__);
 		ret = PTR_ERR(ak4376->mclk);
 		goto register_codec_regulator_err;
 	}
 
-	ret = clk_prepare_enable(ak4376->mclk);
-        if (ret) {
-		loge("%s(%d): ak4376 mclk enable failed, ret = %d\n", __FUNCTION__,__LINE__, ret);
-        }
+	clk_prepare_enable(ak4376->mclk);
 	ak4376->hifi_mclk_en = ON;
 	logi("%s(%d) register codec ok, pdn=%d, freq =%d\n", __FUNCTION__, __LINE__, 
 		ak4376->pdn, ak4376->freq);
@@ -3472,14 +3473,11 @@ static int ak4376_i2c_remove(struct i2c_client *client)
 	logi("%s(%d)\n",__FUNCTION__,__LINE__);
 
 	if(NULL == ak4376) {
-		loge("%s(%d): ak4376 priv data is NULL\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) ak4376 priv data is NULL\n",__FUNCTION__,__LINE__);
 		return -ENOMEM;
 	}
 
-#ifdef AK4376_KERNEL_4_1_DEBUG
 	sysfs_remove_group(&client->dev.kobj, &ak4376_attr_group);
-#endif
-
 	ak4376_put_switch_regulator(ak4376);
 	ak4376_free_gpio_pdata(ak4376);
 	kfree(ak4376);
@@ -3496,7 +3494,7 @@ static void ak4376_i2c_shutdown(struct i2c_client *client)
 	logi("%s(%d)\n", __FUNCTION__, __LINE__);
 
 	if(NULL == ak4376) {
-		loge("%s(%d): ak4376 priv data is NULL\n",__FUNCTION__,__LINE__);
+		loge("%s(%d) ak4376 priv data is NULL\n",__FUNCTION__,__LINE__);
 		return ;
 	}
 

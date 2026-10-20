@@ -99,11 +99,14 @@ sesInfoFree(struct cifs_ses *buf_to_free)
 	kfree(buf_to_free->serverOS);
 	kfree(buf_to_free->serverDomain);
 	kfree(buf_to_free->serverNOS);
-	kzfree(buf_to_free->password);
+	if (buf_to_free->password) {
+		memset(buf_to_free->password, 0, strlen(buf_to_free->password));
+		kfree(buf_to_free->password);
+	}
 	kfree(buf_to_free->user_name);
 	kfree(buf_to_free->domainName);
-	kzfree(buf_to_free->auth_key.response);
-	kzfree(buf_to_free);
+	kfree(buf_to_free->auth_key.response);
+	kfree(buf_to_free);
 }
 
 struct cifs_tcon *
@@ -134,7 +137,10 @@ tconInfoFree(struct cifs_tcon *buf_to_free)
 	}
 	atomic_dec(&tconInfoAllocCount);
 	kfree(buf_to_free->nativeFileSystem);
-	kzfree(buf_to_free->password);
+	if (buf_to_free->password) {
+		memset(buf_to_free->password, 0, strlen(buf_to_free->password));
+		kfree(buf_to_free->password);
+	}
 	kfree(buf_to_free);
 }
 
@@ -305,7 +311,7 @@ check_smb_hdr(struct smb_hdr *smb)
 }
 
 int
-checkSMB(char *buf, unsigned int total_read, struct TCP_Server_Info *server)
+checkSMB(char *buf, unsigned int total_read)
 {
 	struct smb_hdr *smb = (struct smb_hdr *)buf;
 	__u32 rfclen = be32_to_cpu(smb->smb_buf_length);
@@ -486,7 +492,7 @@ is_valid_oplock_break(char *buffer, struct TCP_Server_Info *srv)
 					   CIFS_INODE_DOWNGRADE_OPLOCK_TO_L2,
 					   &pCifsInode->flags);
 
-				queue_work(cifsoplockd_wq,
+				queue_work(cifsiod_wq,
 					   &netfile->oplock_break);
 				netfile->oplock_break_cancelled = false;
 

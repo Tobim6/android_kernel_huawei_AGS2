@@ -30,6 +30,4 @@ static inline void put_sharemem_struct(struct tag_TC_NS_Shared_MEM *sharemem)
 	}
 }
 
-int TC_NS_register_ion_mem(void);
-
 #endif

@@ -11,7 +11,6 @@
 #include <linux/printk.h>
 
 #define MAX_NAME_LEN 32
-#define MAX_REV_LEN 8
 
 struct __bootdevice {
 	enum bootdevice_type type;
@@ -23,16 +22,19 @@ struct __bootdevice {
 	u8 life_time_est_typ_a;
 	u8 life_time_est_typ_b;
 	unsigned int manfid;
-#ifdef CONFIG_HISI_AB_PARTITION
 	enum AB_PARTITION_TYPE ab_partition_support;
-#endif
 	u8 ptn_index;
 	/* UFS and EMMC all */
 	struct rpmb_config_info rpmb_config;
 	volatile int32_t rpmb_done;
-	int (*get_rev)(const struct device *, char *);
 };
 
+#define MAX_PARTITION_NAME_LENGTH       36
+struct flash_find_index_user {
+	char name[MAX_PARTITION_NAME_LENGTH];
+	int index;
+};
+#define INDEXEACCESSDATA _IOWR('M', 26, struct flash_find_index_user)
 
 static struct semaphore flash_find_index_sem;
 
@@ -128,7 +130,6 @@ int get_rpmb_config_ready_status(void){
 struct rpmb_config_info get_rpmb_config(void){
 	return bootdevice.rpmb_config;
 }
-
 void set_bootdevice_type(enum bootdevice_type type)
 {
 	bootdevice.type = type;
@@ -143,35 +144,6 @@ void set_bootdevice_name(struct device *dev)
 {
 	bootdevice.dev = dev;
 }
-
-void set_bootdevice_rev_handler(int (*get_rev_func)(const struct device *, char *))
-{
-	bootdevice.get_rev = get_rev_func;
-}
-
-static int rev_proc_show(struct seq_file *m, void *v)
-{
-	char rev[MAX_REV_LEN + 1] = {0};
-	int ret = -EINVAL;
-
-	if (bootdevice.get_rev) {
-		ret = bootdevice.get_rev(bootdevice.dev, rev);
-		seq_printf(m, "%s\n", rev);
-	}
-	return ret;
-}
-
-static int rev_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, rev_proc_show, NULL);
-}
-
-static const struct file_operations rev_proc_fops = {
-	.open = rev_proc_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
 
 static int type_proc_show(struct seq_file *m, void *v)
 {
@@ -271,18 +243,27 @@ static const struct file_operations cid_proc_fops = {
 	.release = single_release,
 };
 
-void set_bootdevice_product_name(char *product_name)
+void set_bootdevice_product_name(char *product_name, u32 len)
 {
-	strlcpy(bootdevice.product_name,
-		product_name,
-		sizeof(bootdevice.product_name));
+	u32 min_len = min_t(uint8_t, len, MAX_NAME_LEN);
+
+	strlcpy(bootdevice.product_name, product_name, min_len);
+	bootdevice.product_name[min_len] = '\0';
 }
 
-/*len is expected to be sizeof(product_name),
-  include last byte space for '\0'*/
 void get_bootdevice_product_name(char* product_name, u32 len)
 {
-	strlcpy(product_name, bootdevice.product_name, len);/* [false alarm] */
+	u32 min_len = min_t(uint8_t, len, MAX_NAME_LEN);
+
+	if(min_len == 0)
+	{
+		product_name[0] = '\0';
+		return;
+	}
+
+	strlcpy(product_name, bootdevice.product_name, min_len);
+	product_name[min_len-1] = '\0';
+	return;
 }
 
 static int product_name_proc_show(struct seq_file *m, void *v)
@@ -405,7 +386,6 @@ static const struct file_operations manfid_proc_fops = {
 	.release	= single_release,
 };
 
-#ifdef CONFIG_HISI_AB_PARTITION
 /*lint -save -e715 -e818*/
 static int ab_partition_support_proc_show(struct seq_file *m, void *v)
 {
@@ -465,7 +445,6 @@ static const struct file_operations ab_partition_support_proc_fops = {
 	.llseek		= seq_lseek,/*lint !e64 !e65*/ 
 	.release	= single_release,
 };
-#endif
 /*lint -restore*/
 
 static int flash_find_index_proc_show(struct seq_file *m, void *v)
@@ -480,6 +459,7 @@ static int flash_find_index_proc_open(struct inode *p_inode, struct file *p_file
 	return single_open(p_file, flash_find_index_proc_show, NULL);
 }
 
+#define INDEXEACCESSDATA _IOWR('M', 26, struct flash_find_index_user)
 
 static long flash_find_index_proc_ioctl(struct file *p_file, unsigned int cmd, unsigned long arg)
 {
@@ -501,10 +481,8 @@ static long flash_find_index_proc_ioctl(struct file *p_file, unsigned int cmd, u
 			info.name[MAX_PARTITION_NAME_LENGTH - 1] = '\0';
 
 			info.index = flash_get_ptn_index(info.name);
-			if (info.index < 0) {
-				up(&flash_find_index_sem);
+			if (info.index < 0)
 				return -1;
-			}
 
 			bootdevice.ptn_index = (unsigned char)info.index;
 			break;
@@ -538,7 +516,6 @@ static int __init proc_bootdevice_init(void)
 		return -EFAULT;
 	}
 
-	proc_create("bootdevice/rev", 0, NULL, &rev_proc_fops);
 	proc_create("bootdevice/type", 0, NULL, &type_proc_fops);
 	proc_create("bootdevice/name", 0, NULL, &name_proc_fops);
 	proc_create("bootdevice/size", 0, NULL, &size_proc_fops);
@@ -550,9 +527,7 @@ static int __init proc_bootdevice_init(void)
 	proc_create("bootdevice/life_time_est_typ_b", 0, NULL,
 		&life_time_est_typ_b_proc_fops);
 	proc_create("bootdevice/manfid", 0, NULL, &manfid_proc_fops);
-#ifdef CONFIG_HISI_AB_PARTITION
 	proc_create("bootdevice/ab_partition_support", 0660, (struct proc_dir_entry *)NULL, &ab_partition_support_proc_fops);
-#endif
 	sema_init(&flash_find_index_sem, 1);
 	proc_create("bootdevice/flash_find_index", 0660, (struct proc_dir_entry *)NULL, &flash_find_index_proc_fops);
 

@@ -1,29 +1,40 @@
+/*******************************************************************************
 
-#ifndef __RDR_HISI_AP_ADAPTER_H__
-#define __RDR_HISI_AP_ADAPTER_H__
+  版权所有 (C), 2001-2011, 华为技术有限公司
 
+ *******************************************************************************
+ 文 件 名   : rdr_hisi_platform_kirin.h
+ 版 本 号   : 初稿
+ 作    者   : 蒋孝伟 00207786
+ 生成日期   : 2015年1月12日
+ 最近修改   :
+ 功能描述   : AP侧适配RDR框架，相关数据结构及函数定义
+ 修改历史   :
+ 1.日    期 : 2015年1月12日
+ 作    者   : 蒋孝伟 00207786
+ 修改内容   : 创建文件
+
+ *******************************************************************************/
 #include <linux/thread_info.h>
 #include <linux/hisi/rdr_hisi_platform.h>
+
 #include <linux/hisi/rdr_hisi_ap_hook.h>
-#include <soc_acpu_baseaddr_interface.h>
-#include <soc_sctrl_interface.h>
 
 #define REG_NAME_LEN 12
 #define PRODUCT_VERSION_LEN 32
 #define PRODUCT_DEVICE_LEN 32
 #define REGS_DUMP_MAX_NUM   10
 #define AP_DUMP_MAGIC   0x19283746
-#define BBOX_VERSION    0x1000B	/*v1.0.11 */
+#define BBOX_VERSION    0x10008	/*v1.0.8 */
 #define AP_DUMP_END_MAGIC   0x1F2E3D4C
 #define SIZE_1K         0x400
 #define SYSTEM_BUILD_POP    "/system/build.prop"
 #define AMNTN_MODULE_NAME_LEN 12
-#define AMNTN_MODULE_COMP_LEN 48
-#define NMI_NOTIFY_LPM3_ADDR SOC_SCTRL_SCLPMCUCTRL_ADDR(SOC_ACPU_SCTRL_BASE_ADDR)
+#define NMI_NOTIFY_LPM3_ADDR 0xFFF0A510
 #define WDT_KICK_SLICE_TIMES    (3)
 #define FPGA 1
 
-#define PSTORE_PATH            "/proc/balong/pstore/"
+#define PSTORE_PATH            "/sys/fs/pstore/"
 #define FASTBOOT_LOG_FILE      "/proc/balong/log/fastboot_log"
 #define LAST_FASTBOOT_LOG_FILE "/proc/balong/log/last_fastboot_log"
 
@@ -48,7 +59,6 @@ typedef struct {
 	unsigned char version[PRODUCT_VERSION_LEN];
 	u32 modid;
 	u32 e_exce_type;
-	u32 e_exce_subtype;
 	u64 coreid;
 	u64 slice;
 	struct rdr_register_module_result ap_rdr_info;
@@ -91,11 +101,3 @@ int ap_exchSWI(void *arg);
 int ap_exchPABT(void *arg);
 int ap_exchDABT(void *arg);
 int save_mntndump_log(void *arg);
-
-u32 bbox_test_get_exce_size(void);
-int bbox_test_registe_exception(void);
-void bbox_test_enable(int enable);
-void bbox_test_print_exc(void);
-int bbox_test_unregiste_exception(void);
-int rdr_hisiap_cleartext_print(char *dir_path, u64 log_addr, u32 log_len);
-#endif

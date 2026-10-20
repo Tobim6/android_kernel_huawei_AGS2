@@ -22,9 +22,8 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
-#include <linux/hisi-iommu.h>
-#include <linux/ion-iommu.h>
-#include <linux/version.h>
+#include <linux/hisi/hisi-iommu.h>
+#include <linux/hisi/ion-iommu.h>
 
 /*#define IOMMU_DEBUG*/
 #ifndef IOMMU_DEBUG
@@ -168,6 +167,31 @@ static pgtable_t smmu_pgd_to_pte(unsigned int ppte_table)
 	return phys_to_page(page_table_addr);
 }
 
+int iommu_map_tile(struct iommu_domain *domain, unsigned long iova,
+		   struct scatterlist *sg, size_t size, int prot,
+		   struct tile_format *format)
+{
+	if (unlikely(domain->ops->map_tile == NULL))
+		return -ENODEV;
+
+	BUG_ON(iova & (~PAGE_MASK));
+
+	return domain->ops->map_tile(domain, iova, sg, size, prot, format);
+}
+EXPORT_SYMBOL_GPL(iommu_map_tile);
+
+int iommu_unmap_tile(struct iommu_domain *domain, unsigned long iova,
+		     size_t size)
+{
+	if (unlikely(domain->ops->unmap_tile == NULL))
+		return -ENODEV;
+
+	BUG_ON(iova & (~PAGE_MASK));
+
+	return domain->ops->unmap_tile(domain, iova, size);
+}
+EXPORT_SYMBOL_GPL(iommu_unmap_tile);
+
 int of_get_iova_info(struct device_node *np, unsigned long *iova_start,
 		     unsigned long *iova_size, unsigned long *iova_align)
 {
@@ -178,13 +202,13 @@ int of_get_iova_info(struct device_node *np, unsigned long *iova_start,
 	if (!np)
 		return -ENODEV;
 
-	node = of_find_node_by_name(np, "iommu_info");
+	node = of_find_node_by_name(np, "iommu_info"); /*lint !e838*/
 	if (!node) {
 		dbg("find iommu_info node error\n");
 		return -ENODEV;
 	}
 	ret = of_property_read_u32(node, "start-addr",
-				   (u32 *)iova_start);
+				   (u32 *)iova_start); /*lint !e838*/
 	if (ret) {
 		dbg("read iova start address error\n");
 		ret = -EINVAL;
@@ -353,7 +377,7 @@ pte_ready:
 				pteval |= SMMU_PTE_RO;
 			else
 				WARN_ON("you do not set read attribute!");
-			if (prot & IOMMU_EXEC)
+			if (prot & IOMMU_NOEXEC)
 				pteval |= SMMU_PTE_XN_BIT(0);
 			else
 				pteval |= SMMU_PTE_XN_BIT(1);
@@ -468,7 +492,9 @@ static size_t hisi_smmu_unmap(struct iommu_domain *domain, unsigned long iova,
 
 	if (!domain) {
 		dbg("domain is null\n");
+		/*lint -e570 -esym(570,*)*/
 		return -ENODEV;
+		/*lint -e570 +esym(570,*)*/
 	}
 	/*unmapping the range of iova */
 	ret = hisi_smmu_handle_unmapping(domain, iova, size);
@@ -479,7 +505,6 @@ static size_t hisi_smmu_unmap(struct iommu_domain *domain, unsigned long iova,
 		return 0;
 }
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 0))
 static phys_addr_t hisi_smmu_iova_to_phys(struct iommu_domain *domain,
 					  dma_addr_t iova)
 {
@@ -501,28 +526,6 @@ static phys_addr_t hisi_smmu_iova_to_phys(struct iommu_domain *domain,
 
 	return __pfn_to_phys(pte_pfn(pte)) | (iova & ~SMMU_PAGE_MASK);
 }
-#else
-static phys_addr_t hisi_smmu_iova_to_phys(struct iommu_domain *domain,
-					  dma_addr_t iova)
-{
-	struct smmu_pgd_t *pgdp, pgd;
-	pte_t smmu_pte;
-
-	pgdp = (struct smmu_pgd_t *)hisi_smmu->va_pgtable_addr;
-	if (!pgdp)
-		return 0;
-
-	pgd = *(pgdp + smmu_pgd_index(iova));
-	if (smmu_pgd_none(pgd))
-		return 0;
-
-	smmu_pte.pte = *((unsigned int *)smmu_pte_page_vaddr(&pgd) + smmu_pte_index(iova));
-	if (smmu_pte_none(smmu_pte.pte))
-		return 0;
-
-	return __pfn_to_phys(pte_pfn(smmu_pte)) | (iova & ~SMMU_PAGE_MASK);
-}
-#endif
 
 static int hisi_attach_dev(struct iommu_domain *domain, struct device *dev)
 {
@@ -549,6 +552,183 @@ static void hisi_detach_dev(struct iommu_domain *domain, struct device *dev)
 		dbg("%s:error! data entry has been delected\n", __func__);
 	}
 	dbg("%s: device:%s not use iommu\n", __func__, dev_name(dev));
+}
+
+static dma_addr_t get_phys_addr(struct scatterlist *sg)
+{
+	dma_addr_t dma_addr = sg_dma_address(sg);
+
+	if (dma_addr == 0)
+		dma_addr = sg_phys(sg);
+	return dma_addr;
+}
+
+/*
+ *iova: the start address for tile mapping
+ *size: the physical memory size
+ *sg: the node of scatter list where are the start node of physical memory
+ *sg_offset:the physical memory offset in the sg node ,where is the start
+	 position of physical memory
+ *port: the pape property of virtual memory
+ * this function complete one row mapping.
+ */
+static size_t hisi_map_tile_row(struct iommu_domain *domain, unsigned long
+				iova, size_t size, struct scatterlist *sg,
+				size_t sg_offset,
+				struct hisi_map_tile_position *map_position,
+				unsigned int prot)
+{
+
+	unsigned long map_size;	/*the memory size that will be mapped */
+	unsigned long phys_addr;
+	unsigned long mapped_size = 0;	/*memory size that has been mapped */
+	int ret;
+
+	while (1) {
+		/*
+		 *get the remain memory,if current sg node is not enough memory,
+		 *we map the remain memory firstly.
+		 */
+		map_size = size - mapped_size;
+		if (map_size > (sg->length - sg_offset))
+			map_size = (sg->length - sg_offset);
+
+		/*get the start physical address */
+		phys_addr = (unsigned long)get_phys_addr(sg) + sg_offset;
+		ret =
+		    hisi_smmu_map(domain, iova + mapped_size, phys_addr,
+				  map_size, prot);
+		if (ret) {
+			pr_err("[%s] hisi_smmu_map failed!\n", __func__);
+			break;
+		}
+		/*update mapped memory size */
+		mapped_size += map_size;
+		/*
+		 * if mapping finished,we update the offset of current node
+		 * and save the position. otherwise we clean the sg_offset
+		 * to zero and get next sg node.
+		 */
+		if (mapped_size < size) {
+			sg_offset = 0;
+			sg = sg_next(sg);
+			if (!sg) {
+				pr_err
+				    ("[%s] error physical memory not enough\n",
+				     __func__);
+				break;
+			}
+		} else {
+			sg_offset += map_size;
+			/*
+			 * if physcial memory of this node is exhausted,
+			 * we choose next node
+			 */
+			if (sg_offset == sg->length) {
+				sg_offset = 0;
+				sg = sg_next(sg);
+			}
+			break;
+		}
+	}
+	/*save current position */
+	map_position->sg = sg;
+	map_position->offset = sg_offset;
+
+	return mapped_size;
+}
+
+/*
+ *domain:the iommu domain for mapping
+ *iova:the start virtual address
+ *sg: the scatter list of physical memory
+ *size:the total size of all virtual memory
+ *port:the property of page table of virtual memory
+ *format:the parameter of tile mapping
+ *this function map physical memory in tile mode
+ */
+static int hisi_smmu_map_tile(struct iommu_domain *domain, unsigned long iova,
+			      struct scatterlist *sg, size_t size, int prot,
+			      struct tile_format *format)
+{
+
+	unsigned int phys_length;
+	struct scatterlist *sg_node;
+	unsigned int row_number, row;
+	unsigned int size_virt, size_phys;
+	unsigned int sg_offset;
+	int ret = 0;
+	unsigned int mapped_size, header_size;
+	struct hisi_map_tile_position map_position;
+
+	ret = size;
+	/* calculate the whole length of phys mem */
+	for (phys_length = 0, sg_node = sg; sg_node; sg_node = sg_next(sg_node))
+		phys_length += ALIGN(sg_node->length, SZ_4K);
+	header_size = format->header_size;
+
+	/* calculate the number of raws */
+	row_number =
+	    ((phys_length -
+	      header_size) >> PAGE_SHIFT) / format->phys_page_line;
+	dbg("phys_length: 0x%x , rows: 0x%x, header_size: 0x%x\n", phys_length,
+	    row_number, header_size);
+
+	/*caculate the need physical memory and virtual memory for one row */
+	size_phys = (format->phys_page_line * PAGE_SIZE);
+	size_virt = (format->virt_page_line * PAGE_SIZE);
+
+	sg_offset = 0;
+	sg_node = sg;
+
+	/*set start position */
+	map_position.sg = sg;
+	map_position.offset = 0;
+
+	/*map header */
+	if (header_size) {
+		mapped_size =
+		    hisi_map_tile_row(domain, iova, header_size, sg_node,
+				      sg_offset, &map_position, prot);
+		if (mapped_size != header_size) {
+			WARN(1, "map head fail\n");
+			ret = -EINVAL;
+			goto error;
+		}
+		iova += ALIGN(header_size, size_virt);
+	}
+	/* map row by row */
+	for (row = 0; row < row_number; row++) {
+		/* get physical memory position */
+		if (map_position.sg) {
+			sg_node = map_position.sg;
+			sg_offset = map_position.offset;
+		} else {
+			pr_err("[%s]:physical memory is not enough\n",
+			       __func__);
+			break;
+		}
+		/* map one row */
+		/*lint -e647 -esym(647,*)*/
+		mapped_size =
+		    hisi_map_tile_row(domain, iova + (size_virt * row),
+				      size_phys, sg_node, sg_offset,
+				      &map_position, prot);
+		/*lint -e647 +esym(647,*)*/
+		if (mapped_size != size_phys) {
+			WARN(1, "hisi_map_tile_row failed!\n");
+			ret = -EINVAL;
+			break;
+		}
+	};
+error:
+	return ret;
+}
+
+static size_t hisi_smmu_unmap_tile(struct iommu_domain *domain,
+				   unsigned long iova, size_t size)
+{
+	return hisi_smmu_unmap(domain, iova, size);
 }
 
 size_t hisi_iommu_map_sg(struct iommu_domain *domain, unsigned long iova,
@@ -604,6 +784,8 @@ static struct iommu_ops hisi_smmu_ops = {
 	.detach_dev = hisi_detach_dev,
 	.iova_to_phys = hisi_smmu_iova_to_phys,
 	.pgsize_bitmap = SMMU_PAGE_SIZE,
+	.map_tile = hisi_smmu_map_tile,
+	.unmap_tile = hisi_smmu_unmap_tile,
 };
 
 /*show page table*/
@@ -644,7 +826,9 @@ static ssize_t dbg_smmu_read(struct file *file, char __user *buf, size_t count,
 	}
 	iova_end = dbg_iova_start + dbg_iova_size;
 	dbg("iova_end = 0x%x\n", iova_end);
+	/*lint -e685 -esym(685,*)*/
 	if ((dbg_iova_start == INVALID_IO_ADDR) || (iova_end > MAX_IO_ADDR)) {
+	/*lint -e685 +esym(685,*)*/
 		dbg("parameter error :dbg_iova_start=0x%x, \
 				dbg_iova_size=0x%x, iova_end=0x%x\n",
 				dbg_iova_start, dbg_iova_size, iova_end);

@@ -19,6 +19,7 @@
 #include <linux/uaccess.h>
 #include <huawei_platform/log/hw_log.h>
 #include "dsm_core.h"
+#include "dsm_lib.h"
 
 /* int debug_output = 1; */
 #define HWLOG_TAG	DSM
@@ -40,6 +41,9 @@ static struct dsm_msgq g_dsm_msgq;
 
 static struct dsm_server g_dsm_server;
 static struct work_struct dsm_work;
+static struct dsm_client *ext_dsm_client[EXTERN_DSM_CLIENT_MAX];
+static struct dsm_dev ext_dev[EXTERN_DSM_CLIENT_MAX];
+static DEFINE_MUTEX(ext_client_lock);
 
 /*
 *FUNCTION: dsm_update_client_vendor_info
@@ -186,7 +190,7 @@ void dsm_unregister_client (struct dsm_client *dsm_client,struct dsm_dev *dev)
 		pr_info("pointer is NULL, please check the parameters!\n");
 		return;
 	}
-	mutex_lock(&g_dsm_server.mtx_lock);
+
 	for(i=0; i<CLIENT_SIZE; i++){
 		/* find the client and free it */
 		conflict = strncmp(g_dsm_server.client_list[i]->client_name, dev->name, CLIENT_NAME_LEN);
@@ -199,7 +203,6 @@ void dsm_unregister_client (struct dsm_client *dsm_client,struct dsm_dev *dev)
 			break;
 		}
 	}
-	mutex_unlock(&g_dsm_server.mtx_lock);
 }
 
 inline int dsm_client_ocuppy(struct dsm_client *client)
@@ -239,32 +242,31 @@ int dsm_client_record(struct dsm_client *client, const char *fmt, ...)
 {
 	va_list ap;
 	int size = 0;
-	size_t avail = 0;
+	char *str;
+	struct snprintf_ctxt ctxt;
 
 	if (!client) {
 		DSM_LOG_ERR("%s no client to record\n", __func__);
 		goto out;
 	}
 
-	if (client->buff_size - 1 <= client->used_size) {
+	if (client->buff_size <= client->used_size) {
 		DSM_LOG_ERR("%s no buffer to record\n", __func__);
 		goto out;
 	}
 
-	avail = client->buff_size - client->used_size - 1;
+	ctxt.avail = client->buff_size - client->used_size - 1;
+	str = (char *)&client->dump_buff[client->used_size];
+	ctxt.next = str;
 
 	va_start(ap, fmt);
-	size = vsnprintf((char*)&client->dump_buff[client->used_size], avail, fmt, ap);
+	__xprintf(fmt, ap, printf_putc, &ctxt);
 	va_end(ap);
-	if(size < 0) {
-		DSM_LOG_ERR("%s:record buffer failed!\n", __func__);
-		goto out;
-	}
 
+	*ctxt.next = 0;
+	size = ctxt.next - str;
 	client->used_size += size;
-	if(client->used_size >= client->buff_size) {
-		client->used_size = client->buff_size - 1;
-	}
+
 out:
 	return size;
 }
@@ -328,7 +330,7 @@ int dsm_client_copy_ext(struct dsm_client *client, void *src, int sz)
 	}
 
 	if ((dsm_kfifo_get_data_len() + sz) > MSGQ_SIZE) {
-		DSM_LOG_ERR("%s no enough space in msgQ, [used_size] - %u bytes\n",
+		DSM_LOG_ERR("%s no enough space in msgQ, [used_size] - %lu bytes\n",
 			__func__, dsm_kfifo_get_data_len());
 		goto out;
 	}
@@ -449,6 +451,51 @@ out:
 	return client;
 }
 
+static int dsm_register_extern_client(struct dsm_extern_client *ext_client)
+{
+	static int ext_client_cnt = 0;
+
+	if (NULL == ext_client) {
+		DSM_LOG_ERR("%s:the ext_client is null, invalid.\n", __func__);
+		return -ENOENT;
+	}
+
+
+	if(ext_client->buf_size < 0 ) {
+		DSM_LOG_ERR("%s:the ext_client buffer size is negative,invalid.\n", __func__);
+		return -ENOENT;
+	}
+
+	mutex_lock(&ext_client_lock);
+	if(ext_client_cnt >= EXTERN_DSM_CLIENT_MAX) {
+		DSM_LOG_ERR("%s:the count of external client registed exceeds the upper limit.\n", __func__);
+		mutex_unlock(&ext_client_lock);
+		return -ENOENT;
+	}
+
+	ext_dev[ext_client_cnt].buff_size = ext_client->buf_size;
+	ext_dev[ext_client_cnt].name = ext_client->client_name;
+
+	if (NULL != dsm_find_client((char *)ext_dev[ext_client_cnt].name)) {
+		DSM_LOG_ERR("[dsm_register_extern_client]register %s has exist, dont register again!\n",
+				ext_dev[ext_client_cnt].name);
+		mutex_unlock(&ext_client_lock);
+		return -EEXIST;
+	}
+
+	ext_dsm_client[ext_client_cnt] = dsm_register_client(&ext_dev[ext_client_cnt]);
+	if (!ext_dsm_client[ext_client_cnt]) {
+		DSM_LOG_ERR("[dsm_register_extern_client]register %s failed!\n",
+				ext_dev[ext_client_cnt].name);
+		mutex_unlock(&ext_client_lock);
+		return -ENOMEM;
+	}
+
+	ext_client_cnt++;
+	mutex_unlock(&ext_client_lock);
+	return 0;
+}
+
 static inline void dsm_client_set_idle(struct dsm_client *client)
 {
 	client->used_size = 0;
@@ -562,7 +609,7 @@ static ssize_t dsm_read(struct file *file, char __user *buf, size_t count, loff_
 	#ifdef CONFIG_HUAWEI_DATA_ACQUISITION
 		if (dsm_is_errno_in_da_range(client->error_no)) {
 			len = dsm_kfifo_get_data_len();
-			DSM_LOG_DEBUG("[msgQ_len] - %zu bytes, [count] - %zu bytes\n",
+			DSM_LOG_DEBUG("[msgQ_len] - %lu bytes, [count] - %lu bytes\n",
 				len, count);
 			if (len > 0) {
 				if (mutex_lock_interruptible(&g_dsm_msgq.read_lock)) {
@@ -583,7 +630,7 @@ static ssize_t dsm_read(struct file *file, char __user *buf, size_t count, loff_
 				DSM_LOG_ERR("ignore coping to user as msgQ is empty\n");
 			}
 			dsm_client_set_idle(client);
-			DSM_LOG_INFO("total %zu bytes read from msgQ to user\n", copy_size);
+			DSM_LOG_INFO("total %lu bytes read from msgQ to user\n", copy_size);
 		} else {
 	#endif
 		copy_size = min(count, (client->used_size - client->read_size));
@@ -592,7 +639,7 @@ static ssize_t dsm_read(struct file *file, char __user *buf, size_t count, loff_
 		client->read_size += copy_size;
 		if (client->read_size >= client->used_size)
 			dsm_client_set_idle(client);
-		DSM_LOG_DEBUG("%zu bytes read to user\n", copy_size);
+		DSM_LOG_DEBUG("%lu bytes read to user\n", copy_size);
 	#ifdef CONFIG_HUAWEI_DATA_ACQUISITION
 		}
 	#endif
@@ -613,7 +660,7 @@ static ssize_t dsm_write(struct file *file, const char __user *buf, size_t count
 		goto out;
 	}
 	if ((count > DSM_MAX_LOG_SIZE) || (count < DSM_MIN_LOG_SIZE)) {
-		DSM_LOG_ERR("count is %zu,out of range\n", count);
+		DSM_LOG_ERR("count is %lu,out of range\n",count);
 		goto out;
 	}
 	buff = (char *)kzalloc(count, GFP_KERNEL);
@@ -691,6 +738,7 @@ static long dsm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	long ret = 0;
 	int error = 0;
 	char buff[CLIENT_NAME_LEN] = {0};
+	struct dsm_extern_client tmp_ext_client;
 
 	DSM_LOG_DEBUG("%s enter,\n", __func__);
 
@@ -777,6 +825,14 @@ static long dsm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				ret = -ENXIO;
 			}
 			break;
+	case DSM_IOCTL_REGISTER_EXTERN_CLIENT:
+			if (copy_from_user(&tmp_ext_client, (struct dsm_extern_client *)arg,
+				sizeof(struct dsm_extern_client))) {
+				ret = -EFAULT;
+			} else {
+				dsm_register_extern_client(&tmp_ext_client);
+			}
+			break;
 	default:
 			DSM_LOG_ERR("unknown ioctl command :%d\n", cmd);
 			ret = -EINVAL;
@@ -813,7 +869,7 @@ static ssize_t dsm_cnotify_store(struct device *dev,
 		goto out;
 	}
 	if ((count > DSM_MAX_LOG_SIZE) || (count < DSM_MIN_LOG_SIZE)) {
-		DSM_LOG_ERR("count is %zu,out of range\n", count);
+		DSM_LOG_ERR("count is %lu,out of range\n",count);
 		goto out;
 	}
 
@@ -895,7 +951,6 @@ out:
 
 EXPORT_SYMBOL(dsm_client_ocuppy);
 EXPORT_SYMBOL(dsm_register_client);
-EXPORT_SYMBOL(dsm_unregister_client);
 EXPORT_SYMBOL(dsm_client_record);
 EXPORT_SYMBOL(dsm_client_notify);
 EXPORT_SYMBOL(dsm_find_client);

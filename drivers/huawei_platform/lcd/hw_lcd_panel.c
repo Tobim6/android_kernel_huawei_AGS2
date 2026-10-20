@@ -34,7 +34,6 @@
 #include "hw_lcd_panel.h"
 #include "hw_lcd_effects.h"
 #include <huawei_platform/log/log_jank.h>
-#include <securec.h>
 
 /***********************************************************
 *platform driver definition
@@ -332,7 +331,7 @@ static int hw_lcd_parse_dts(struct device_node* np)
 		HISI_FB_ERR("parse power-off-sequence failed!\n");
 		return -ENOMEM;
 	}
-	if (lcd_info.power_off_seq.cnt > (int)POWER_OFF_SEQ_MAX) {
+	if (lcd_info.power_off_seq.cnt > POWER_OFF_SEQ_MAX) {
 		HISI_FB_ERR("power off seq count:%d greater than max count:%d, failed!\n", lcd_info.power_off_seq.cnt, POWER_OFF_SEQ_MAX);
 		return -ENOMEM;
 	}
@@ -952,18 +951,18 @@ static int hw_lcd_on(struct platform_device* pdev)
 	if (is_enable_vsp_vsn_debug()){
 		lcd_debug_set_vsp_vsn(hw_lcd_scharger_vcc_set_cmds, ARRAY_SIZE(hw_lcd_scharger_vcc_set_cmds));
 			/*set scharger vcc*/
-		(void)vcc_cmds_tx(NULL, hw_lcd_scharger_vcc_set_cmds, \
+		vcc_cmds_tx(NULL, hw_lcd_scharger_vcc_set_cmds, \
 					ARRAY_SIZE(hw_lcd_scharger_vcc_set_cmds));
 	}
 #endif
 		if (!hw_lcd_is_enter_sleep_mode()) {
 			//lcd vcc enable
 			if (hw_lcd_is_ctl_tp_power()) {
-				(void)vcc_cmds_tx(pdev, hw_lcdanalog_vcc_enable_cmds,
+				vcc_cmds_tx(pdev, hw_lcdanalog_vcc_enable_cmds,
 				            ARRAY_SIZE(hw_lcdanalog_vcc_enable_cmds));
 			}
 
-			(void)vcc_cmds_tx(pdev, hw_lcdio_vcc_enable_cmds,
+			vcc_cmds_tx(pdev, hw_lcdio_vcc_enable_cmds,
 						ARRAY_SIZE(hw_lcdio_vcc_enable_cmds));
 
 			// lcd pinctrl normal
@@ -995,7 +994,7 @@ static int hw_lcd_on(struct platform_device* pdev)
 
 			if (POWER_CTRL_BY_REGULATOR == lcd_info.power_ctrl_mode) {
 				//vsp/vsn enable
-				(void)vcc_cmds_tx(NULL, hw_lcd_scharger_vcc_enable_cmds, \
+				vcc_cmds_tx(NULL, hw_lcd_scharger_vcc_enable_cmds, \
 							ARRAY_SIZE(hw_lcd_scharger_vcc_enable_cmds));
 				HISI_FB_INFO("lcd is ctrl by regulator! lcd_info.power_ctrl_mode = %d\n", lcd_info.power_ctrl_mode);
 			}
@@ -1152,7 +1151,7 @@ static int hw_lcd_off(struct platform_device* pdev)
 			}
 			if(POWER_CTRL_BY_REGULATOR == lcd_info.power_ctrl_mode) {
 				//vsp/vsn disable
-				(void)vcc_cmds_tx(NULL, hw_lcd_scharger_vcc_disable_cmds, \
+				vcc_cmds_tx(NULL, hw_lcd_scharger_vcc_disable_cmds, \
 				ARRAY_SIZE(hw_lcd_scharger_vcc_disable_cmds));
 			}
 
@@ -1171,11 +1170,11 @@ static int hw_lcd_off(struct platform_device* pdev)
 			                ARRAY_SIZE(hw_lcd_pinctrl_lowpower_cmds));
 
 			//lcd vcc disable
-			(void)vcc_cmds_tx(pdev, hw_lcdio_vcc_disable_cmds,
+			vcc_cmds_tx(pdev, hw_lcdio_vcc_disable_cmds,
 					ARRAY_SIZE(hw_lcdio_vcc_disable_cmds));
 
 			if (hw_lcd_is_ctl_tp_power()) {
-				(void)vcc_cmds_tx(pdev, hw_lcdanalog_vcc_disable_cmds,
+				vcc_cmds_tx(pdev, hw_lcdanalog_vcc_disable_cmds,
 				            ARRAY_SIZE(hw_lcdanalog_vcc_disable_cmds));
 			}
 
@@ -1221,11 +1220,11 @@ static int hw_lcd_remove(struct platform_device* pdev)
 	HISI_FB_DEBUG("fb%d, +.\n", hisifd->index);
 
 	// lcd vcc finit
-	(void)vcc_cmds_tx(pdev, hw_lcd_vcc_finit_cmds,
+	vcc_cmds_tx(pdev, hw_lcd_vcc_finit_cmds,
 	            ARRAY_SIZE(hw_lcd_vcc_finit_cmds));
 
 	// scharger vcc finit
-	(void)vcc_cmds_tx(pdev, hw_lcd_scharger_vcc_put_cmds,
+	vcc_cmds_tx(pdev, hw_lcd_scharger_vcc_put_cmds,
 	            ARRAY_SIZE(hw_lcd_scharger_vcc_put_cmds));
 
 	// lcd pinctrl finit
@@ -1368,10 +1367,10 @@ static int hw_lcd_set_backlight(struct platform_device* pdev, uint32_t bl_level)
 		/*enable/disable backlight*/
 		down(&lcd_info.bl_sem);
 		if (bl_level == 0 && last_bl_level != 0) {
-			(void)vcc_cmds_tx(NULL, hw_lcd_scharger_bl_disable_cmds, \
+			vcc_cmds_tx(NULL, hw_lcd_scharger_bl_disable_cmds, \
 					ARRAY_SIZE(hw_lcd_scharger_bl_disable_cmds));
 		} else if (last_bl_level == 0 && bl_level != 0) {
-			(void)vcc_cmds_tx(NULL, hw_lcd_scharger_bl_enable_cmds, \
+			vcc_cmds_tx(NULL, hw_lcd_scharger_bl_enable_cmds, \
 					ARRAY_SIZE(hw_lcd_scharger_bl_enable_cmds));
 		}
 		last_bl_level = bl_level;
@@ -1410,15 +1409,15 @@ static int hw_lcd_set_fastboot(struct platform_device* pdev)
 
 	if (POWER_CTRL_BY_REGULATOR == lcd_info.power_ctrl_mode) {
 		/*set scharger vcc*/
-		(void)vcc_cmds_tx(NULL, hw_lcd_scharger_vcc_set_cmds, \
+		vcc_cmds_tx(NULL, hw_lcd_scharger_vcc_set_cmds, \
 		            ARRAY_SIZE(hw_lcd_scharger_vcc_set_cmds));
 
 		/*scharger vcc enable*/
-		(void)vcc_cmds_tx(NULL, hw_lcd_scharger_vcc_enable_cmds, \
+		vcc_cmds_tx(NULL, hw_lcd_scharger_vcc_enable_cmds, \
 		            ARRAY_SIZE(hw_lcd_scharger_vcc_enable_cmds));
 
 		/*scharger bl enable*/
-		(void)vcc_cmds_tx(NULL, hw_lcd_scharger_bl_enable_cmds, \
+		vcc_cmds_tx(NULL, hw_lcd_scharger_bl_enable_cmds, \
 		            ARRAY_SIZE(hw_lcd_scharger_bl_enable_cmds));
 	}
 	// lcd pinctrl normal
@@ -1464,7 +1463,7 @@ static ssize_t hw_lcd_model_show(struct platform_device* pdev,
 
 	HISI_FB_DEBUG("fb%d, +.\n", hisifd->index);
 
-	ret = snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "%s\n", lcd_info.panel_name);
+	ret = snprintf(buf, PAGE_SIZE, "%s\n", lcd_info.panel_name);
 
 	HISI_FB_DEBUG("fb%d, -.\n", hisifd->index);
 
@@ -1479,7 +1478,7 @@ static ssize_t hw_lcd_model_show(struct platform_device* pdev,
 static ssize_t hw_lcd_cabc_mode_show(struct platform_device* pdev,
                                      char* buf)
 {
-	return snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "%d\n", lcd_info.cabc_mode);
+	return snprintf(buf, PAGE_SIZE, "%d\n", lcd_info.cabc_mode);
 }
 
 /*
@@ -1743,7 +1742,7 @@ static ssize_t hw_lcd_inversion_store(struct platform_device* pdev,
 */
 static ssize_t hw_lcd_inversion_show(struct platform_device* pdev, char* buf)
 {
-	return snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "%d\n", lcd_info.inversion_mode);
+	return snprintf(buf, PAGE_SIZE, "%d\n", lcd_info.inversion_mode);
 }
 
 /*
@@ -1869,7 +1868,7 @@ static ssize_t hw_lcd_scan_store(struct platform_device* pdev,
 */
 static ssize_t hw_lcd_scan_show(struct platform_device* pdev, char* buf)
 {
-	return snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "%d\n", lcd_info.scan_mode);
+	return snprintf(buf, PAGE_SIZE, "%d\n", lcd_info.scan_mode);
 }
 
 /*
@@ -1936,9 +1935,9 @@ static ssize_t hw_lcd_check_reg_show(struct platform_device* pdev, char* buf)
 		}
 	}
 	if (!ret) {
-		ret = snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "OK\n");
+		ret = snprintf(buf, PAGE_SIZE, "OK\n");
 	} else {
-		ret = snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "ERROR\n");
+		ret = snprintf(buf, PAGE_SIZE, "ERROR\n");
 	}
 	HISI_FB_DEBUG("fb%d, -.\n", hisifd->index);
 
@@ -2002,9 +2001,9 @@ static ssize_t hw_lcd_mipi_detect_show(struct platform_device* pdev, char* buf)
 
 	HISI_FB_DEBUG("fb%d, +.\n", hisifd->index);
 	if (!mipi_dsi_read_compare(&data, mipi_dsi0_base)) {
-		ret = snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "OK\n");
+		ret = snprintf(buf, PAGE_SIZE, "OK\n");
 	} else {
-		ret = snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "ERROR\n");
+		ret = snprintf(buf, PAGE_SIZE, "ERROR\n");
 	}
 	HISI_FB_DEBUG("fb%d, -.\n", hisifd->index);
 
@@ -2033,7 +2032,7 @@ static ssize_t hw_lcd_hkadc_show(struct platform_device* pdev, char* buf)
 	}
 
 	HISI_FB_DEBUG("fb%d, +.\n", hisifd->index);
-	ret = snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "%d\n", hkadc_buf * 4);
+	ret = snprintf(buf, PAGE_SIZE, "%d\n", hkadc_buf * 4);
 	HISI_FB_DEBUG("fb%d, -.\n", hisifd->index);
 
 	return ret;
@@ -2148,11 +2147,11 @@ static ssize_t hw_lcd_gram_check_show(struct platform_device* pdev, char* buf)
 	for (i = 0; i < CHECKSUM_SIZE; i++) {
 		char* data = lcd_check_reg[0].payload;
 		*data = 0x73 + i;
-		(void)mipi_dsi_cmds_rx((rd + i), lcd_check_reg, \
+		mipi_dsi_cmds_rx((rd + i), lcd_check_reg, \
 		                 ARRAY_SIZE(lcd_check_reg), mipi_dsi0_base);
 	}
 
-	ret = snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "%d %d %d %d %d %d %d %d\n", \
+	ret = snprintf(buf, PAGE_SIZE, "%d %d %d %d %d %d %d %d\n", \
 	               rd[0], rd[1], rd[2], rd[3], rd[4], rd[5], rd[6], rd[7]);
 	HISI_FB_INFO("%d %d %d %d %d %d %d %d\n", \
 	             rd[0], rd[1], rd[2], rd[3], rd[4], rd[5], rd[6], rd[7]);
@@ -2291,8 +2290,8 @@ static int hw_lcd_set_display_region(struct platform_device* pdev,
 	lcd_disp_x[2] = dirty->x & 0xff;
 	lcd_disp_x[3] = ((dirty->x + dirty->w - 1) >> 8) & 0xff;
 	lcd_disp_x[4] = (dirty->x + dirty->w - 1) & 0xff;
-	lcd_disp_y[1] = (((unsigned int)dirty->y) >> 8) & 0xff;
-	lcd_disp_y[2] = ((unsigned int)dirty->y) & 0xff;
+	lcd_disp_y[1] = (dirty->y >> 8) & 0xff;
+	lcd_disp_y[2] = dirty->y & 0xff;
 	lcd_disp_y[3] = ((dirty->y + dirty->h - 1) >> 8) & 0xff;
 	lcd_disp_y[4] = (dirty->y + dirty->h - 1) & 0xff;
 
@@ -2328,7 +2327,7 @@ static ssize_t hw_lcd_sleep_ctrl_show(struct platform_device* pdev, char* buf)
 	}
 
 	HISI_FB_DEBUG("fb%d, +.\n", hisifd->index);
-	ret = snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "g_enable_PT_test=%d, lcd_info.pt_test_support=%d\n",
+	ret = snprintf(buf, PAGE_SIZE, "g_enable_PT_test=%d, lcd_info.pt_test_support=%d\n",
 		g_enable_PT_test, lcd_info.pt_test_support);
 	HISI_FB_DEBUG("fb%d, -.\n", hisifd->index);
 
@@ -2685,7 +2684,7 @@ static ssize_t hw_lcd_bl_info_show(struct platform_device* pdev, char* buf)
 
 	HISI_FB_DEBUG("fb%d, +.\n", hisifd->index);
 	if (buf) {
-		ret = snprintf_s(buf, PAGE_SIZE, PAGE_SIZE - 1, "blmax:%u,blmin:%u,lcdtype:%s,\n",
+		ret = snprintf(buf, PAGE_SIZE, "blmax:%u,blmin:%u,lcdtype:%s,\n",
 				hisifd->panel_info.bl_max, hisifd->panel_info.bl_min, "LCD");
 	}
 
@@ -2818,7 +2817,7 @@ static int __init hw_lcd_probe(struct platform_device* pdev)
 
 	pdev->id = 1;
 	pinfo = hw_lcd_data.panel_info;
-	(void)memset_s(pinfo, sizeof(struct hisi_panel_info), 0, sizeof(struct hisi_panel_info));
+	memset(pinfo, 0, sizeof(struct hisi_panel_info));
 	/*Parse panel info*/
 	hw_lcd_info_init(np, pinfo);
 
@@ -2896,10 +2895,10 @@ static int __init hw_lcd_probe(struct platform_device* pdev)
 	// lcd vcc enable
 	if (is_fastboot_display_enable()) {
 		if (hw_lcd_is_ctl_tp_power()) {
-			(void)vcc_cmds_tx(pdev, hw_lcdanalog_vcc_enable_cmds,
+			vcc_cmds_tx(pdev, hw_lcdanalog_vcc_enable_cmds,
 			            ARRAY_SIZE(hw_lcdanalog_vcc_enable_cmds));
 		}
-		(void)vcc_cmds_tx(pdev, hw_lcdio_vcc_enable_cmds,
+		vcc_cmds_tx(pdev, hw_lcdio_vcc_enable_cmds,
 				ARRAY_SIZE(hw_lcdio_vcc_enable_cmds));
 	}
 	/*id0 && id1 gpio request*/
@@ -3008,15 +3007,15 @@ static int __init hw_lcd_init(void)
 		return ret;
 	}
 
-	(void)memset_s(&lcd_info, sizeof(struct hw_lcd_information), 0, sizeof(struct hw_lcd_information));
+	memset(&lcd_info, 0, sizeof(struct hw_lcd_information));
 	lcd_info.lcd_compatible = (char*)of_get_property(np, "lcd_panel_type", NULL);
 	if (!lcd_info.lcd_compatible) {
 		HISI_FB_INFO("Is not normal lcd and return\n");
 		return ret;
 	} else {
 		len = strlen(lcd_info.lcd_compatible);
-		(void)memset_s(this_driver.driver.of_match_table->compatible, PANEL_COMP_LENGTH, 0, PANEL_COMP_LENGTH);
-		strncpy_s(this_driver.driver.of_match_table->compatible, PANEL_COMP_LENGTH, lcd_info.lcd_compatible,  PANEL_COMP_LENGTH - 1);
+		memset(this_driver.driver.of_match_table->compatible, 0, PANEL_COMP_LENGTH);
+		strncpy(this_driver.driver.of_match_table->compatible, lcd_info.lcd_compatible, (len > PANEL_COMP_LENGTH ? PANEL_COMP_LENGTH : len));
 		HISI_FB_INFO("lcd_info.lcd_compatible=%s, len = %zd!\n", lcd_info.lcd_compatible, strlen(lcd_info.lcd_compatible));
 	}
 	ret = platform_driver_register(&this_driver);

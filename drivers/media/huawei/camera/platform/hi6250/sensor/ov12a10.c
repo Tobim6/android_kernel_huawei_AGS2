@@ -28,15 +28,12 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/rpmsg.h>
-#include <securec.h>
 
-#include "hw_flash.h"
 #include "hwsensor.h"
 #include "sensor_commom.h"
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 #define GPIO_LOW_STATE       0
 #define GPIO_HIGH_STATE      1
 #define OV12A10_SUNNY_POS    0
@@ -323,8 +320,9 @@ static int ov12a10_match_id(hwsensor_intf_t* si, void * data)
     struct pinctrl_state *pinctrl_def  = NULL;
     struct pinctrl_state *pinctrl_idle = NULL;
     struct pinctrl *p = NULL;
-    int rc = 0;
     char *sensor_name [] = { "OV12A10_SUNNY", "OV12A10_LITEON", "OV12A10_FOXCONN" };
+    int rc = 0;
+
     if (!si || !data){
         cam_err("%s : si or data is null", __func__);
         return -1;
@@ -332,8 +330,7 @@ static int ov12a10_match_id(hwsensor_intf_t* si, void * data)
 
     sensor = I2S(si);
     cdata  = (struct sensor_cfg_data *)data;
-    loge_if_ret(memset_s(cdata->cfg.name, DEVICE_NAME_SIZE, 0, DEVICE_NAME_SIZE));
-	
+    memset(cdata->cfg.name, 0, DEVICE_NAME_SIZE);
     if (!strncmp(sensor->board_info->name, sensor_dts_name, strlen(sensor_dts_name)))
     {
         p = devm_pinctrl_get(s_ov12a10.dev);
@@ -408,28 +405,24 @@ static int ov12a10_match_id(hwsensor_intf_t* si, void * data)
         cam_info("%s module_id_0 %d module_id_1 %d .\n",__func__, module_id_0, module_id_1);
         if((module_id_0 == GPIO_LOW_STATE) && (module_id_1 == GPIO_LOW_STATE)){
             //sunny module
-            strncpy_s(cdata->cfg.name, DEVICE_NAME_SIZE, sensor_name[OV12A10_SUNNY_POS], 
-                strlen(sensor_name[OV12A10_SUNNY_POS]));
+            strncpy(cdata->cfg.name, sensor_name[OV12A10_SUNNY_POS], strlen(sensor_name[OV12A10_SUNNY_POS])+1);
             cdata->data = sensor->board_info->sensor_index;
             rc = 0;
         }
         else if((module_id_0 == GPIO_HIGH_STATE) && (module_id_1 == GPIO_HIGH_STATE)){
             //liteon module
-            strncpy_s(cdata->cfg.name, DEVICE_NAME_SIZE, sensor_name[OV12A10_LITEON_POS], 
-                strlen(sensor_name[OV12A10_LITEON_POS]));
+            strncpy(cdata->cfg.name, sensor_name[OV12A10_LITEON_POS], strlen(sensor_name[OV12A10_LITEON_POS])+1);
             cdata->data = sensor->board_info->sensor_index;
             rc = 0;
         }
         else if((module_id_0 == GPIO_LOW_STATE) && (module_id_1 == GPIO_HIGH_STATE)){
             //foxconn module
-            strncpy_s(cdata->cfg.name, DEVICE_NAME_SIZE, sensor_name[OV12A10_FOXCONN_POS], 
-                strlen(sensor_name[OV12A10_FOXCONN_POS]));
+            strncpy(cdata->cfg.name, sensor_name[OV12A10_FOXCONN_POS], strlen(sensor_name[OV12A10_FOXCONN_POS])+1);
             cdata->data = sensor->board_info->sensor_index;
             rc = 0;
         }
         else{
-            strncpy_s(cdata->cfg.name, DEVICE_NAME_SIZE, sensor->board_info->name,
-                strlen(sensor->board_info->name));
+            strncpy(cdata->cfg.name, sensor->board_info->name, strlen(sensor->board_info->name)+1);
             cdata->data = sensor->board_info->sensor_index;
             cam_err("%s failed to get the module id value.\n",__func__);
             rc = 0;
@@ -438,8 +431,7 @@ static int ov12a10_match_id(hwsensor_intf_t* si, void * data)
         gpio_free(sensor->board_info->gpios[FSIN].gpio);
         goto matchID_exit;
     } else {
-        strncpy_s(cdata->cfg.name, DEVICE_NAME_SIZE, sensor->board_info->name, 
-	     strlen(sensor->board_info->name));
+        strncpy(cdata->cfg.name, sensor->board_info->name, strlen(sensor->board_info->name)+1);
         cdata->data = sensor->board_info->sensor_index;
         rc = 0;
         goto matchID_exit;
@@ -565,7 +557,7 @@ static int __init ov12a10_init_module(void)
 static void __exit ov12a10_exit_module(void)
 {
     rpmsg_sensor_unregister((void*)&s_ov12a10);
-    hwsensor_unregister(Sensor2Pdev(s_ov12a10));
+    hwsensor_unregister(&s_ov12a10.intf);
     platform_driver_unregister(&s_ov12a10_driver);
 }
 //lint -restore

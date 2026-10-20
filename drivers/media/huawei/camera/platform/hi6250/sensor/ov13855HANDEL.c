@@ -35,7 +35,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 struct mutex ov13855HANDEL_power_lock;
 
 static hwsensor_vtbl_t s_ov13855HANDEL_vtbl;
@@ -475,7 +474,7 @@ static int32_t ov13855HANDEL_platform_probe(struct platform_device* pdev)
     rc = rpmsg_sensor_register(pdev, (void *)&s_ov13855HANDEL);
     if (0 != rc){
         cam_err("%s rpmsg_sensor_register fail.\n", __func__);
-        hwsensor_unregister(Sensor2Pdev(s_ov13855HANDEL));
+        hwsensor_unregister(&s_ov13855HANDEL.intf);
         goto ov13855HANDEL_sensor_probe_fail;
     }
 
@@ -492,7 +491,7 @@ static int __init ov13855HANDEL_init_module(void)
 static void __exit ov13855HANDEL_exit_module(void)
 {
     rpmsg_sensor_unregister((void*)&s_ov13855HANDEL);
-    hwsensor_unregister(Sensor2Pdev(s_ov13855HANDEL));
+    hwsensor_unregister(&s_ov13855HANDEL.intf);
     platform_driver_unregister(&s_ov13855HANDEL_driver);
 }
 //lint -restore

@@ -13,10 +13,8 @@
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
 #include <asm/io.h>
-#include "hwspinlock_internal.h"
-#include <linux/hisi/hisi_log.h>
 
-#define HISI_LOG_TAG  HISI_HWSPINLOCK_DEBUGFS_TAG
+#include "hwspinlock_internal.h"
 /*
  * debugfs file node:
  * - dev/debugfs/hwspinlock/debug
@@ -31,14 +29,14 @@
  * - "echo unlock 'ID'", unlock the hwspinlock;
  * - "cat debug", show current the resources of hwspinlock,but now have requested all locks.
  */
+
 struct hwspinlock_hisi {
        int id_in_group;
        void __iomem *address;
 };
-#ifdef CONFIG_HISI_DEBUG_FS
+
 static struct dentry *hwspinlock_debug_dir;
 static struct dentry *hwspinlock_fn;
-#endif
 static struct hwspinlock *hwlock;
 static int locked;
 /*lint -e750 -esym(750,*)*/

@@ -15,7 +15,7 @@
 /*  Initiate status request - call to get status of port partner */
 void FUSB3601_requestDpStatus(struct Port *port);
 /*  Initiate config request - call to configure port partner */
-void FUSB3601_requestDpConfig(struct Port *port);
+void FUSB3601_requestDpConfig(struct Port *port, DisplayPortConfig_t in);
 
 /*  Hostcomm interface functionality */
 void FUSB3601_WriteDpControls(struct Port *port, FSC_U8* data);

@@ -13,24 +13,13 @@
 #include <linux/slab.h>
 #include <linux/io.h>
 #include <linux/version.h>
-#include <linux/export.h>
-#include <linux/hisi/hisi_log.h>
-#define HISI_LOG_TAG HISI_BLACKBOX_TAG
 
 #include <linux/hisi/rdr_pub.h>
-#include <mntn_subtype_exception.h>
-#include "rdr_print.h"
+
 #include "rdr_inner.h"
 #include "rdr_field.h"
 #include "rdr_print.h"
 #include "rdr_debug.h"
-
-#undef __REBOOT_REASON_MAP
-#define __REBOOT_REASON_MAP(x,y) {#x, x, #y, y},
-struct cmdword reboot_reason_map[] = {
-	#include <mntn_reboot_reason_map.h>
-};
-#undef __REBOOT_REASON_MAP
 
 
 
@@ -54,14 +43,14 @@ unsigned int bbox_check_edition(void)
 
 	fd = (int)sys_open(FILE_EDITION, O_RDONLY, FILE_LIMIT);
 	if (fd < 0) {
-		BB_PRINT_ERR("[%s]: open %s failed, return [%d]\n", __func__,
+		pr_err("[%s]: open %s failed, return [%d]\n", __func__,
 			FILE_EDITION, fd);
 		return EDITION_USER;
 	}
 
 	cnt = sys_read((unsigned int)fd, &tmp, sizeof(tmp));
 	if (cnt < 0) {
-		BB_PRINT_ERR("[%s]: read %s failed, return [%ld]\n",
+		pr_err("[%s]: read %s failed, return [%ld]\n",
 			__func__, FILE_EDITION, cnt);
 		dump_flag = EDITION_USER;
 		goto out;
@@ -71,16 +60,16 @@ unsigned int bbox_check_edition(void)
 		type = (unsigned int)(unsigned char)(tmp - START_CHAR_0);
 
 		if (OVERSEA_USER == type) {
-			BB_PRINT_PN("%s: The edition is Oversea BETA, type is %#x\n", __func__, type);
+			BB_PRINT_DBG("%s: The edition is Oversea BETA, type is %#x\n", __func__, type);
 			dump_flag = EDITION_OVERSEA_BETA;
 		} else if (BETA_USER == type) {
-			BB_PRINT_PN("%s: The edition is Internal BETA, type is %#x\n", __func__, type);
+			BB_PRINT_DBG("%s: The edition is Internal BETA, type is %#x\n", __func__, type);
 			dump_flag =  EDITION_INTERNAL_BETA;
 		} else if (COMMERCIAL_USER == type){
-			BB_PRINT_PN("%s: The edition is Commercial User, type is %#x\n", __func__, type);
+			BB_PRINT_DBG("%s: The edition is Commercial User, type is %#x\n", __func__, type);
 			dump_flag = EDITION_USER;
 		} else {
-			BB_PRINT_PN("%s: The edition is default User, type is %#x\n", __func__, type);
+			BB_PRINT_DBG("%s: The edition is default User, type is %#x\n", __func__, type);
 			dump_flag = EDITION_USER;
 		}
 	} else {
@@ -92,18 +81,12 @@ out:
 	sys_close((unsigned int)fd);
 	return dump_flag;
 }
-#define TIMELEN 8
-#define DATELEN 11
-extern int get_kernel_build_time(char* blddt, int dtlen, char* bldtm, int tmlen);
 
 void rdr_get_builddatetime(u8 *out)
 {
 	u8 *pout = out;
-	u8 *p = NULL;
-	u8 date[DATELEN  + 1] = {0};
-	u8 time[TIMELEN + 1] = {0};
+	u8 *p = (u8 *) __DATE__;	/* Nov 11 2013 */
 	int cnt = RDR_BUILD_DATE_TIME_LEN;
-	int ret = -EINVAL;
 
 	if (NULL == out) {
 		BB_PRINT_ERR("[%s], out is null!\n", __func__);
@@ -111,39 +94,26 @@ void rdr_get_builddatetime(u8 *out)
 	}
 	memset((void *)out, 0, RDR_BUILD_DATE_TIME_LEN);
 
-	ret = get_kernel_build_time(date, DATELEN, time, TIMELEN);
-	if(ret) {
-		BB_PRINT_ERR("[%s], get kernel build time failed!\n", __func__);
-		goto error;
-	}
-	date[DATELEN] = '\0';
-	time[TIMELEN] = '\0';
-
-	p = date;
 	while (*p) {
 		if (!cnt)
-			goto error;
+			return;
 		if (*p != ' ') {
 			*pout++ = *p++;
 			cnt--;
-		} else {
+		} else
 			p++;
-		}
 	}
 
-	p = time;
+	p = (u8 *) __TIME__;	/* 11:04:08 */
 	while (*p) {
 		if (!cnt)
-			goto error;
+			return;
 		if (*p != ':') {
 			*pout++ = *p++;
 			cnt--;
-		} else {
+		} else
 			p++;
-		}
 	}
-
-error:
 	out[RDR_BUILD_DATE_TIME_LEN - 1] = '\0';
 	return;
 }
@@ -205,6 +175,129 @@ char *rdr_get_timestamp(void)
 	return databuf;
 }
 
+/*Add, please keep the same as definition in reboot_reason.c in fastboot !!!!*/
+struct cmdword reboot_reason_map[] = {
+	{"AP_S_COLDBOOT", AP_S_COLDBOOT},
+	{"bootloader", BOOTLOADER},
+	{"recovery", RECOVERY},
+	{"resetfactory", RESETFACTORY},
+	{"resetuser", RESETUSER},
+	{"sdupdate", SDUPDATE},
+	{"chargereboot", CHARGEREBOOT},
+	{"resize", RESIZE},
+	{"erecovery", ERECOVERY},
+	{"usbupdate", USBUPDATE},
+	{"cust", CUST},
+	{"oem_rtc", OEM_RTC},
+	{"unknown", UNKNOWN},
+	{"mountfail", MOUNTFAIL},
+	{"hungdetect", HUNGDETECT},
+	{"coldboot", COLDBOOT},
+	{"updatedataimg", UPDATEDATAIMG},
+	{"AP_S_FASTBOOTFLASH", AP_S_FASTBOOTFLASH},
+	{"AP_S_ABNORMAL", AP_S_ABNORMAL},
+	{"AP_S_TSENSOR0", AP_S_TSENSOR0},
+	{"AP_S_TSENSOR1", AP_S_TSENSOR1},
+	{"AP_S_AWDT", AP_S_AWDT},
+	{"CHARGER_S_WDT", CHARGER_S_WDT},
+	{"G3D_S_G3DTSENSOR", G3D_S_G3DTSENSOR},
+	{"LPM3_S_LPMCURST", LPM3_S_LPMCURST},
+	{"CP_S_CPTSENSOR", CP_S_CPTSENSOR},
+	{"IOM3_S_IOMCURST", IOM3_S_IOMCURST},
+	{"ASP_S_ASPWD", ASP_S_ASPWD},
+	{"CP_S_CPWD", CP_S_CPWD},
+	{"IVP_S_IVPWD", IVP_S_IVPWD},
+	{"ISP_S_ISPWD", ISP_S_ISPWD},
+	{"AP_S_DDR_UCE_WD", AP_S_DDR_UCE_WD},
+	{"AP_S_DDR_FATAL_INTER", AP_S_DDR_FATAL_INTER},
+	{"OCBC_S_WD", OCBC_S_WD},
+	{"AP_S_PANIC", AP_S_PANIC},
+	{"AP_S_NOC", AP_S_NOC},
+	{"AP_S_RESUME_SLOWY", AP_S_RESUME_SLOWY},
+	{"AP_S_DDRC_SEC", AP_S_DDRC_SEC},
+	{"AP_S_F2FS", AP_S_F2FS},
+	{"AP_S_COMBINATIONKEY", AP_S_COMBINATIONKEY},
+	{"AP_S_BL31_PANIC", AP_S_BL31_PANIC},
+	{"AP_S_MAILBOX", AP_S_MAILBOX},
+	{"AP_S_HHEE_PANIC", AP_S_HHEE_PANIC},
+	{"CP_S_MODEMDMSS", CP_S_MODEMDMSS},
+	{"CP_S_MODEMAP", CP_S_MODEMAP},
+	{"CP_S_MODEMNOC", CP_S_MODEMNOC},
+	{"CP_S_EXCEPTION", CP_S_EXCEPTION},
+	{"CP_S_RESETFAIL", CP_S_RESETFAIL},
+	{"CP_S_NORMALRESET", CP_S_NORMALRESET},
+	{"CP_S_RILD_EXCEPTION", CP_S_RILD_EXCEPTION},
+	{"CP_S_DRV_EXC",CP_S_DRV_EXC},
+	{"CP_S_PAM_EXC", CP_S_PAM_EXC},
+	{"CP_S_GUAS_EXC",CP_S_GUAS_EXC},
+	{"CP_S_CTTF_EXC", CP_S_CTTF_EXC},
+	{"CP_S_CAS_CPROC_EXC", CP_S_CAS_CPROC_EXC},
+	{"CP_S_GUDSP_EXC",CP_S_GUDSP_EXC},
+	{"CP_S_TLPS_EXC", CP_S_TLPS_EXC},
+	{"CP_S_TLDSP_EXC",CP_S_TLDSP_EXC},
+	{"CP_S_CPHY_EXC", CP_S_CPHY_EXC},
+	{"CP_S_GUCNAS_EXC",CP_S_GUCNAS_EXC},
+	{"CP_S_3RD_EXCEPTION", CP_S_3RD_EXCEPTION},
+	{"LPM3_S_EXCEPTION", LPM3_S_EXCEPTION},
+	{"SOCHIFI_S_EXCEPTION", SOCHIFI_S_EXCEPTION},
+	{"HIFI_S_RESETFAIL", HIFI_S_RESETFAIL},
+	{"ISP_S_EXCEPTION", ISP_S_EXCEPTION},
+	{"IVP_S_EXCEPTION", IVP_S_EXCEPTION},
+	{"IOM3_S_EXCEPTION", IOM3_S_EXCEPTION},
+	{"TEE_S_EXCEPTION", TEE_S_EXCEPTION},
+	{"MMC_S_EXCEPTION", MMC_S_EXCEPTION},
+	{"CODECHIFI_S_EXCEPTION", CODECHIFI_S_EXCEPTION},
+	{"IOM3_S_USER_EXCEPTION", IOM3_S_USER_EXCEPTION},
+	{"HISEE_S_EXCEPTION", HISEE_S_EXCEPTION},
+	{"reserved4", RESERVED4},
+	{"AP_S_PMU", AP_S_PMU},
+	{"AP_S_SMPL", AP_S_SMPL},
+	{"AP_S_SCHARGER", AP_S_SCHARGER},
+	{"VolUsbUpdate", BR_KEY_VOLUMN_DOWN_UP_UPDATE_USB},
+	{"ForceSdUpdate", BR_KEY_VOLUMN_DOWN_UP_UPDATE_SD_FORCE},
+	{"VolUpRecovery", BR_KEY_VOLUMN_UP},
+	{"press1s", BR_KEY_POWERON_PRESS_1S},
+	{"press10s", BR_KEY_POWERON_PRESS_10S},
+	{"CheckpointRecovery", BR_CHECKPOINT_RECOVERY},
+	{"CheckpointErecovery", BR_CHECKPOINT_ERECOVERY},
+	{"CheckpointSdUpdate", BR_CHECKPOINT_SDUPDATE},
+	{"CheckpointUsbUpdate", BR_CHECKPOINT_USBUPDATE},
+	{"CheckpointResetFactory", BR_CHECKPOINT_RESETFACTORY},
+	{"CheckpointHotaUpdate", BR_CHECKPOINT_HOTAUPDATE},
+	{"PoweronNoBat", BR_POWERON_BY_USB_NO_BAT},
+	{"nogui", BR_NOGUI},
+	{"Factory", BR_FACTORY_VERSION},
+	{"ResetHappen", BR_RESET_HAPPEN},
+	{"OemRtc", BR_POWEROFF_ALARM},
+	{"PoweroffCharging", BR_POWEROFF_CHARGE},
+	{"SMPL", BR_POWERON_BY_SMPL},
+	{"CheckpointUpdateDataimg", BR_CHECKPOINT_UPDATEDATAIMG},
+	{"CPU_BUCK", BR_REBOOT_CPU_BUCK},
+	{"XLOADER_S_DDRINIT_FAIL", XLOADER_S_DDRINIT_FAIL},
+	{"XLOADER_S_EMMCINIT_FAIL", XLOADER_S_EMMCINIT_FAIL},
+	{"XLOADER_S_LOAD_FAIL", XLOADER_S_LOAD_FAIL},
+	{"XLOADER_S_VERIFY_FAIL", XLOADER_S_VERIFY_FAIL},
+	{"XLOADER_S_WATCHDOG", XLOADER_S_WATCHDOG},
+	{"FASTBOOT_EMMCINIT_FAIL", FASTBOOT_S_EMMCINIT_FAIL},
+	{"FASTBOOT_S_PANIC", FASTBOOT_S_PANIC},
+	{"FASTBOOT_S_WATCHDOG", FASTBOOT_S_WATCHDOG},
+	{"AP_S_PRESS6S", AP_S_PRESS6S},
+	{"FASTBOOT_S_OCV_VOL_ERR", FASTBOOT_S_OCV_VOL_ERR},
+	{"FASTBOOT_S_BAT_TEMP_ERR", FASTBOOT_S_BAT_TEMP_ERR},
+	{"FASTBOOT_S_MISC_ERR", FASTBOOT_S_MISC_ERR},
+	{"FB_S_LD_DTIMG_ERR", FASTBOOT_S_LOAD_DTIMG_ERR},
+	{"FB_S_LD_OTHR_IMGS_ERR", FASTBOOT_S_LOAD_OTHER_IMGS_ERR},
+	{"FB_S_KERNEL_IMG_ERR", FASTBOOT_S_KERNEL_IMG_ERR},
+	{"FASTBOOT_LOADLPMCU_FAIL", FASTBOOT_S_LOADLPMCU_FAIL},
+	{"FASTBOOT_VERIFY_FAIL", FASTBOOT_S_IMG_VERIFY_FAIL},
+	{"FASTBOOT_SOC_TEMP_HIGH", FASTBOOT_S_SOC_TEMP_ERR},
+	{"FASTBOOT_FLASHCERT_FAIL", FASTBOOT_S_FLASH_PROTECTION_PANIC},
+	{"BFM_S_NATIVE_BOOT_FAIL", BFM_S_BOOT_NATIVE_BOOT_FAIL},
+	{"BFM_S_BOOT_TIMEOUT", BFM_S_BOOT_TIMEOUT},
+	{"BFM_S_FW_BOOT_FAIL", BFM_S_BOOT_FRAMEWORK_BOOT_FAIL},
+	{"BFM_S_NATIVE_DATA_FAIL", BFM_S_BOOT_NATIVE_DATA_FAIL},
+};
+
 struct blackbox_modid_list g_modid_list[] = {
 	{HISI_BB_MOD_MODEM_DRV_START, HISI_BB_MOD_MODEM_DRV_END, "MODEM DRV"},
 	{HISI_BB_MOD_MODEM_OSA_START, HISI_BB_MOD_MODEM_OSA_END, "MODEM OSA"},
@@ -235,9 +328,6 @@ struct blackbox_modid_list g_modid_list[] = {
 	{(unsigned int)HISI_BB_MOD_MODEM_LPS_START, (unsigned int)HISI_BB_MOD_MODEM_LPS_END, "MODEM LPS"},
 	{(unsigned int)HISI_BB_MOD_MODEM_LMSP_START, (unsigned int)HISI_BB_MOD_MODEM_LMSP_END,
 	 "MODEM LMSP"},
-	{(unsigned int)HISI_BB_MOD_NPU_START, (unsigned int)HISI_BB_MOD_NPU_END, "NPU"},
-	{(unsigned int)HISI_BB_MOD_CONN_START, (unsigned int)HISI_BB_MOD_CONN_END, "CONN"},
-     /* delow end */
 	{(unsigned int)HISI_BB_MOD_RANDOM_ALLOCATED_START, (unsigned int)HISI_BB_MOD_RANDOM_ALLOCATED_END,
 	 "blackbox random allocated"},
 };
@@ -285,9 +375,6 @@ char *exception_core[RDR_CORE_MAX + 1] = {
 	"REGULATOR",
 	"BFM",
 	"HISEE",
-	"NPU",
-	"CONN",
-	"EXCEPTION_TRACE",
 	"UNDEF",
 };
 
@@ -346,17 +433,8 @@ char *rdr_get_exception_core(u64 coreid)
 	case RDR_HISEE:
 		core = exception_core[13];
 		break;
-	case RDR_NPU:
-		core = exception_core[14];
-		break;
-	case RDR_CONN:
-		core = exception_core[15];
-		break;
-	case RDR_EXCEPTION_TRACE:
-		core = exception_core[16];
-		break;
 	default:
-		core = exception_core[17];
+		core = exception_core[14];
 		break;
 	}
 	return core;
@@ -415,7 +493,7 @@ static int bb_reboot_nb(struct notifier_block *nb, unsigned long foo, void *bar)
 {
 	int i = 10;
 	/* prevent access the emmc now: */
-	BB_PRINT_PN("%s: shutdown +\n", __func__);
+	BB_PRINT_DBG("%s: shutdown +\n", __func__);
 	atomic_set(&bb_in_reboot, 1);/*lint !e1058 !e446 */
 	while (i--) {
 		if (atomic_read(&bb_in_saving))
@@ -425,7 +503,7 @@ static int bb_reboot_nb(struct notifier_block *nb, unsigned long foo, void *bar)
 		BB_PRINT_DBG("rdr:is saving rdr, wait 1s ...\n");
 	}
 	rdr_field_reboot_done();
-	BB_PRINT_PN("%s: shutdown -\n", __func__);
+	BB_PRINT_DBG("%s: shutdown -\n", __func__);
 
 	return 0;
 }
@@ -434,28 +512,12 @@ static u64 RESERVED_RDR_PHYMEM_ADDR;
 static u64 RESERVED_RDR_PHYMEM_SIZE;
 static RDR_NVE g_nve;
 static u64 g_max_logsize;
-enum RDR_DTS_DATA_INDX {
-	MAX_LOGNUM = 0,
-	DUMPLOG_TIMEOUT,
-	REBOOT_TIMES,
-	DIAGINFO_SIZE,
-	RDR_DTS_U32Nums,
-};
-
-struct rdr_dts_prop {
-	int indx;
-	const char *propname;
-	u32 data;
-} g_rdr_dts_data[RDR_DTS_U32Nums] = {
-	{MAX_LOGNUM,        "rdr-log-max-nums",},
-	{DUMPLOG_TIMEOUT,   "wait-dumplog-timeout",},
-	{REBOOT_TIMES,      "unexpected-max-reboot-times",},
-	{DIAGINFO_SIZE,     "rdr-diaginfo-size",},
-};
+static u32 g_wait_dumplog_timeout;
+static u32 g_max_reboot_times;
 
 u32 rdr_get_reboot_times(void)
 {
-	return g_rdr_dts_data[REBOOT_TIMES].data;
+	return g_max_reboot_times;
 }
 
 u64 rdr_reserved_phymem_addr(void)
@@ -470,7 +532,7 @@ u64 rdr_reserved_phymem_size(void)
 
 int rdr_get_dumplog_timeout(void)
 {
-	return g_rdr_dts_data[DUMPLOG_TIMEOUT].data;
+	return g_wait_dumplog_timeout;
 }
 
 u64 rdr_get_logsize(void)
@@ -478,19 +540,9 @@ u64 rdr_get_logsize(void)
 	return g_max_logsize;
 }
 
-u32 rdr_get_diaginfo_size(void)
-{
-	return g_rdr_dts_data[DIAGINFO_SIZE].data;
-}
-
 RDR_NVE rdr_get_nve(void)
 {
 	return g_nve;
-}
-
-u32 rdr_get_lognum(void)
-{
-	return g_rdr_dts_data[MAX_LOGNUM].data;
 }
 
 char *blackbox_get_modid_str(u32 modid)
@@ -510,39 +562,13 @@ char *blackbox_get_modid_str(u32 modid)
 
 #include <linux/of.h>
 #include <linux/of_address.h>
-static int rdr_get_property_data_u32(struct device_node *np)
-{
-	u32 value = 0;
-	int i,ret;
-
-	if (!np) {
-		BB_PRINT_ERR("[%s], parameter device_node np is NULL!\n", __func__);
-		return -1;
-	}
-
-	for(i=0; i<RDR_DTS_U32Nums; i++) {
-		ret = of_property_read_u32(np, g_rdr_dts_data[i].propname, &value);
-		if (ret) {
-			BB_PRINT_ERR("[%s], cannot find g_rdr_dts_data[%d],[%s] in dts!\n",
-				  __func__, i, g_rdr_dts_data[i].propname);
-			return ret;
-		}
-
-		g_rdr_dts_data[i].data = value;
-		BB_PRINT_DBG("[%s], get %s [0x%x] in dts!\n", __func__,
-		     g_rdr_dts_data[i].propname, value);
-	}
-
-	return 0;
-}
-
 int rdr_common_early_init(void)
 {
 	int i, ret, len;
 	struct device_node *np = NULL;
 	struct resource res;
 	const char *prdr_dumpctrl;
-	u32 value = 0, j;
+	u32 value, j;
 	u32 data[RDR_CORE_MAX];
 	struct device_node *bbox_addr;
 
@@ -585,7 +611,7 @@ int rdr_common_early_init(void)
 	len = strlen(prdr_dumpctrl);
 	for (i = --len; i >= 0; i--) {
 		if (prdr_dumpctrl[i] == '1')
-			g_nve |= (u64)1 <<(unsigned int)(len - i);
+			g_nve |= (u64)1 << (len - i);
 	}
 	BB_PRINT_DBG("[%s], get nve [0x%llx] in dts!\n", __func__, g_nve);
 	ret = of_property_read_u32(np, "rdr-log-max-size", &value);
@@ -598,9 +624,15 @@ int rdr_common_early_init(void)
 	BB_PRINT_DBG("[%s], get rdr-log-max-size [0x%llx] in dts!\n", __func__,
 		     g_max_logsize);
 
-	if ((ret = rdr_get_property_data_u32(np)) < 0) {
+	ret = of_property_read_u32(np, "wait-dumplog-timeout", &value);
+	if (ret) {
+		BB_PRINT_ERR("[%s], cannot find wait-dumplog-timeout in dts!\n",
+			     __func__);
 		return ret;
 	}
+	g_wait_dumplog_timeout = value;
+	BB_PRINT_DBG("[%s], get g_wait_dumplog_timeout [0x%x] in dts!\n",
+		     __func__, g_wait_dumplog_timeout);
 
 	ret = of_property_read_u32(np, "rdr_area_num", &value);
 	if (ret) {
@@ -627,6 +659,16 @@ int rdr_common_early_init(void)
 		BB_PRINT_DBG("[%s], get rdr_area_num[%u]:[0x%x] in dts!\n",
 			     __func__, j, data[j]);
 	}
+
+	ret = of_property_read_u32(np, "unexpected-max-reboot-times", &value);
+	if (ret) {
+		BB_PRINT_ERR("[%s], cannot find unexpected-max-reboot-times in dts!\n",
+			     __func__);
+		return ret;
+	}
+	g_max_reboot_times = value;
+	BB_PRINT_DBG("[%s], unexpected-max-reboot-times [0x%x] in dts!\n", __func__,
+		     value);
 
 	return ret;
 }
@@ -670,7 +712,7 @@ u32 rdr_get_reboot_type(void)
 static int __init early_parse_reboot_reason_cmdline(char *reboot_reason_cmdline)
 {
 	int i;
-
+	printk("[%s]\n", __func__);
 	memset(g_reboot_reason, 0x0, RDR_REBOOT_REASON_LEN);
 	memcpy(g_reboot_reason, reboot_reason_cmdline, RDR_REBOOT_REASON_LEN - 1);
 
@@ -680,7 +722,7 @@ static int __init early_parse_reboot_reason_cmdline(char *reboot_reason_cmdline)
 			break;
 		}
 	}
-	BB_PRINT_PN("[%s][%s][%d]\n", __func__, g_reboot_reason, g_reboot_type);
+	printk("[%s][%s][%d]\n", __func__, g_reboot_reason, g_reboot_type);
 	return 0;
 }
 
@@ -736,7 +778,7 @@ void *hisi_bbox_map(phys_addr_t paddr, size_t size)
 
 	return vaddr;
 }
-EXPORT_SYMBOL(hisi_bbox_map);
+
 void hisi_bbox_unmap(const void *vaddr)
 {
 	if (pfn_valid(RESERVED_RDR_PHYMEM_ADDR >> PAGE_SHIFT)) {
@@ -745,7 +787,6 @@ void hisi_bbox_unmap(const void *vaddr)
 		iounmap((void __iomem *)vaddr);
 	}
 }
-EXPORT_SYMBOL(hisi_bbox_unmap);
 
 /*******************************************************************************
 Function:       bbox_save_done
@@ -770,7 +811,7 @@ void bbox_save_done(char *logpath, u32 step)
 		return;
 	}
 
-	BB_PRINT_PN("logpath is [%s], step is [%d]\n", logpath, step);
+	BB_PRINT_ERR("logpath is [%s], step is [%d]\n", logpath, step);
 	if (BBOX_SAVE_STEP_DONE == step) {
 
 		/*组合done文件的绝对路径，作为sys_mkdir的参数 */
@@ -926,4 +967,3 @@ int rdr_record_reboot_times2file(void)
 	BB_PRINT_END();
 	return buf;
 }
-

@@ -50,8 +50,7 @@ int read_tp_color_adapter(char * buf,int buf_size)
 		hwlog_err("hisi_nve_direct_access read error(%d)\n", ret);
 		return -1;
 	}
-	/* buf_size value is NV_DATA_SIZE 104 */
-	strncpy(buf, user_info.nv_data, buf_size - 1);
+	strncpy(buf, user_info.nv_data, sizeof(buf));
 	return 0;
 }
 EXPORT_SYMBOL(read_tp_color_adapter);
@@ -66,7 +65,7 @@ int write_tp_color_adapter(char * buf)
 	user_info.valid_size = 15;
 	strncpy(user_info.nv_name, "TPCOLOR", sizeof(user_info.nv_name));
 	user_info.nv_name[sizeof(user_info.nv_name) - 1] = '\0';
-	strncpy(user_info.nv_data, buf, sizeof(user_info.nv_data) - 1);
+	strncpy(user_info.nv_data, buf, sizeof(user_info.nv_data));
 	ret = hisi_nve_direct_access(&user_info);
 	if (ret) {
 		hwlog_err("hisi_nve_direct_access write error(%d)\n", ret);

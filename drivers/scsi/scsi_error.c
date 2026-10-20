@@ -65,7 +65,7 @@ void scsi_eh_wakeup(struct Scsi_Host *shost)
 	if (atomic_read(&shost->host_busy) == shost->host_failed) {
 		trace_scsi_eh_wakeup(shost);
 		wake_up_process(shost->ehandler);
-		SCSI_LOG_ERROR_RECOVERY(3, shost_printk(KERN_INFO, shost,
+		SCSI_LOG_ERROR_RECOVERY(5, shost_printk(KERN_INFO, shost,
 			"Waking error handler thread\n"));
 	}
 }
@@ -316,9 +316,6 @@ int scsi_block_when_processing_errors(struct scsi_device *sdev)
 
 	online = scsi_device_online(sdev);
 
-	SCSI_LOG_ERROR_RECOVERY(5, sdev_printk(KERN_INFO, sdev,
-		"%s: rtn: %d\n", __func__, online));
-
 	return online;
 }
 EXPORT_SYMBOL(scsi_block_when_processing_errors);
@@ -468,13 +465,15 @@ static void scsi_report_sense(struct scsi_device *sdev,
  *	When a deferred error is detected the current command has
  *	not been executed and needs retrying.
  */
-int scsi_check_sense(struct scsi_cmnd *scmd)
+static int scsi_check_sense(struct scsi_cmnd *scmd)
 {
 	struct scsi_device *sdev = scmd->device;
 	struct scsi_sense_hdr sshdr;
 
 	if (! scsi_command_normalize_sense(scmd, &sshdr))
+	{
 		return FAILED;	/* no valid sense data */
+	}
 
 	scsi_report_sense(sdev, &sshdr);
 
@@ -601,8 +600,8 @@ int scsi_check_sense(struct scsi_cmnd *scmd)
 
 	case HARDWARE_ERROR:
 		if (sshdr.asc == 0x1 &&
-			sshdr.ascq == 0x0) {/*for hi1861 internel error*/
-			pr_err("%s: hi1861 hwerror\n", __func__);
+			sshdr.ascq == 0x0) {/*for hiVV internel error*/
+			pr_err("%s: hiVV hwerror\n", __func__);
 			return FAILED;
 		}
 		if (scmd->device->retry_hwerror) {
@@ -643,7 +642,6 @@ int scsi_check_sense(struct scsi_cmnd *scmd)
 		return SUCCESS;
 	}
 }
-EXPORT_SYMBOL_GPL(scsi_check_sense);
 
 static void scsi_handle_queue_ramp_up(struct scsi_device *sdev)
 {
@@ -2386,10 +2384,10 @@ scsi_ioctl_reset(struct scsi_device *dev, int __user *arg)
 	struct request req;
 	unsigned long flags;
 	int error = 0, rtn, val;
-#ifndef BYPASS_AUTHORITY_VERIFY
+
 	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO))
 		return -EACCES;
-#endif
+
 	error = get_user(val, arg);
 	if (error)
 		return error;

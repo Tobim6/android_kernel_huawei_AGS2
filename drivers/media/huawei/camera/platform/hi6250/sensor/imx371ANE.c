@@ -13,7 +13,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 
 #define POWER_DELAY_1               1
 
@@ -23,7 +22,7 @@ struct mutex imx371ANE_power_lock;
 //lint -save -e846 -e514 -e866 -e30 -e84 -e785 -e64 -e826 -e838 -e715 -e747 -e778 -e774 -e732 -e650 -e31 -e731 -e528 -e753 -e737
 int imx371ANE_config(hwsensor_intf_t* si, void  *argp);
 
-static struct platform_device *s_pdev = NULL;
+static hwsensor_intf_t *s_intf = NULL;
 static sensor_t *s_sensor = NULL;
 struct sensor_power_setting hw_imx371ANE_power_up_setting[] = {
     //MCAM0 AFVDD & mipi enable 3V [LDO25]
@@ -478,11 +477,11 @@ static int32_t imx371ANE_platform_probe(struct platform_device* pdev)
         cam_err("%s hwsensor_register fail.\n", __func__);
         goto imx371ANE_sensor_probe_fail;
     }
-    s_pdev = pdev;
+    s_intf = intf;
     rc = rpmsg_sensor_register(pdev, (void*)sensor);
     if (0 != rc){
         cam_err("%s rpmsg_sensor_register fail.\n", __func__);
-        hwsensor_unregister(s_pdev);
+        hwsensor_unregister(intf);
         goto imx371ANE_sensor_probe_fail;
     }
     s_sensor = sensor;
@@ -504,9 +503,9 @@ static void __exit imx371ANE_exit_module(void)
         rpmsg_sensor_unregister((void*)s_sensor);
         s_sensor = NULL;
     }
-    if (NULL != s_pdev) {
-        hwsensor_unregister(s_pdev);
-        s_pdev = NULL;
+    if (NULL != s_intf) {
+        hwsensor_unregister(s_intf);
+        s_intf = NULL;
     }
     platform_driver_unregister(&s_imx371ANE_driver);
 }

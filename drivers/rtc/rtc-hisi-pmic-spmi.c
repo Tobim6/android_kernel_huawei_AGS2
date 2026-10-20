@@ -65,8 +65,6 @@
 
 #ifdef CONFIG_HUAWEI_DSM
 #define DSM_RTC_BUF_SIZE (256)
-#define DSM_RTC_PMU_READCOUNT_ERROR_NUM (925005000)
-#define DSM_RTC_SET_RTC_TMIE_WARNING_NUM (925005001)
 #endif
 
 struct hisi_rtc_dev {
@@ -102,9 +100,9 @@ do{\
 		if(!dsm_client_ocuppy(get_rtc_dsm_client())){\
 			dsm_client_record(get_rtc_dsm_client(), fmt, ##args); \
 			dsm_client_notify(get_rtc_dsm_client(), err_no); \
-			printk(KERN_INFO "[RTC DSM]rtc dsm report err = %d\n",err_no);\
+			printk(KERN_INFO "[RTC DSM]rtc dsm report err_no = %d\n",err_no);\
 		}else\
-		    printk(KERN_ERR "[RTC DSM]rtc dsm is busy err = %d\n",err_no);\
+		    printk(KERN_ERR "[RTC DSM]rtc dsm is busy err_no = %d\n",err_no);\
 	}else\
 		 printk(KERN_ERR "[RTC DSM]rtc dsm client is null\n");\
 }while(0)
@@ -156,13 +154,9 @@ enum pmu_rtc_ops {
 };
 
 #define RTC_REGISTER_FN_ID             (0xc500ddd0)
-noinline int atfd_hisi_service_rtc_smc(u64 _function_id, u64 _arg0, u64 _arg1,
-				       u64 _arg2)
+noinline int atfd_hisi_service_rtc_smc(u64 function_id, u64 arg0, u64 arg1,
+				       u64 arg2)
 {
-	register u64 function_id asm("x0") = _function_id;
-	register u64 arg0 asm("x1") = _arg0;
-	register u64 arg1 asm("x2") = _arg1;
-	register u64 arg2 asm("x3") = _arg2;
 	asm volatile (__asmeq("%0", "x0")
 		      __asmeq("%1", "x1")
 		      __asmeq("%2", "x2")
@@ -218,7 +212,7 @@ static inline struct hisi_rtc_dev *hisi_rtc_ldata_get(void)
 }
 
 #ifdef CONFIG_HISI_RTC_SECURE_FEATURE
-static int hisi_rtc_nve_write(unsigned int index, const int *data,
+static int hisi_rtc_nve_write(unsigned int index, int *data,
 			      unsigned int len)
 {
 	int ret;
@@ -362,7 +356,7 @@ unsigned long hisi_pmu_rtc_readcount(void)
 	time =  hisi_pmu_rtc_read_bulk(data->pmu_rtc_baseaddr + PMU_RTC_DR);
 	if (lastTime > time){
 		/* DMD RTC PRINT INFO */
-		rtc_dsm_report(DSM_RTC_PMU_READCOUNT_ERROR_NUM, "Pmu rtc readcount error, time : %u, lasttime : %u\n", time, lastTime);
+		rtc_dsm_report(DSM_RTC_PMU_READCOUNT_ERROR_NO, "Pmu rtc readcount error, time : %u, lasttime : %u\n", time, lastTime);
 	}
 	lastTime = time;
 
@@ -371,10 +365,6 @@ unsigned long hisi_pmu_rtc_readcount(void)
 	return hisi_pmu_rtc_read_bulk(data->pmu_rtc_baseaddr + PMU_RTC_DR);
 #endif
 }
-
-#ifdef CONFIG_HISI_PMU_RTC_READCOUNT
-EXPORT_SYMBOL_GPL(hisi_pmu_rtc_readcount);
-#endif
 
 void hisi_pmu_rtc_setalarmtime(unsigned long time)
 {
@@ -479,7 +469,7 @@ static int hisi_soc_rtc_set_time(struct device *dev, struct rtc_time *tm)
 	err = dsm_rtc_valid_tm(tm);
 	if (err != 0){
 		/* DSM RTC SET TIME ERROR */
-		rtc_dsm_report(DSM_RTC_SET_RTC_TMIE_WARNING_NUM, "Soc rtc set time error, time : %d-%d-%d-%d-%d-%d\n", (tm->tm_year + 1900),(tm->tm_mon+1), tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+		rtc_dsm_report(DSM_RTC_SET_RTC_TMIE_WARNING_NO, "Soc rtc set time error, time : %d-%d-%d-%d-%d-%d\n", (tm->tm_year + 1900),(tm->tm_mon+1), tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
 	}
 #endif
 	rtc_tm_to_time(tm, &time);
@@ -649,6 +639,7 @@ static int hisi_rtc_remove(struct spmi_device *pdev)
 
 	rtc_device_unregister(ldata->rtc_dev);
 	iounmap(ldata->soc_rtc_baseaddr);
+	kfree(ldata);
 
 	return 0;
 }

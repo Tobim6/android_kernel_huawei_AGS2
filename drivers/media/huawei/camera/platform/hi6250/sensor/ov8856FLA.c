@@ -12,7 +12,6 @@
 #include "hw_csi.h"
 
 #define I2S(i) container_of(i, sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 
 static hwsensor_vtbl_t s_ov8856FLA_vtbl;
 static bool power_on_status = false;//false: power off, true:power on
@@ -561,8 +560,10 @@ int ov8856FLA_config(hwsensor_intf_t* si, void  *argp)
         case SEN_CONFIG_READ_REG_SETTINGS:
             break;
         case SEN_CONFIG_ENABLE_CSI:
+            //ret = si->vtbl->csi_enable(si);
             break;
         case SEN_CONFIG_DISABLE_CSI:
+            //ret = si->vtbl->csi_disable(si);
             break;
         case SEN_CONFIG_MATCH_ID:
             ret = si->vtbl->match_id(si,argp);
@@ -621,7 +622,7 @@ static int __init ov8856FLA_init_module(void)
 
 static void __exit ov8856FLA_exit_module(void)
 {
-    hwsensor_unregister(Sensor2Pdev(s_ov8856FLA));
+    hwsensor_unregister(&s_ov8856FLA.intf);
     platform_driver_unregister(&s_ov8856FLA_driver);
 }
 /*lint -restore*/

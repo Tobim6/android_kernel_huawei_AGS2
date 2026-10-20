@@ -25,26 +25,12 @@
 #if defined(CONFIG_HISI_FB_970)
 #include "hisi_display_effect_kirin970.h"
 #endif
-#if defined(CONFIG_HISI_FB_V501)
-#include "hisi_display_effect_dssv501.h"
-#endif
-#if defined(CONFIG_HISI_FB_V510)
-#include "hisi_display_effect_dssv501.h"
-#endif
-#if defined(CONFIG_HISI_FB_V320)
-#include "hisi_display_effect_dssv320.h"
-#endif
-
-#if defined(CONFIG_HISI_FB_V330)
-#include "hisi_display_effect_dssv330.h"
-#endif
-
 
 #define CE_VALUE_BITWIDTH			(8)
 #define CE_VALUE_RANK				(1 << CE_VALUE_BITWIDTH)
 #define METADATA_SIZE				(1024)
 
-#if defined(CONFIG_HISI_FB_3660) || defined (CONFIG_HISI_FB_V320)
+#if defined(CONFIG_HISI_FB_3660)
 #define DISPLAY_EFFECT_USE_FRM_END_INT
 #define XBLOCKNUM					(6)
 #define YBLOCKNUM					(6)
@@ -53,18 +39,15 @@
 #define HIACE_GHIST_RANK			(32)
 #define CE_SIZE_HIST				HIACE_GHIST_RANK + YBLOCKNUM * XBLOCKNUM * HIACE_LHIST_RANK
 #define CE_SIZE_LUT					YBLOCKNUM * XBLOCKNUM * HIACE_GAMMA_RANK
-#elif defined (CONFIG_HISI_FB_970) || defined (CONFIG_HISI_FB_V501) || defined (CONFIG_HISI_FB_V510) || defined (CONFIG_HISI_FB_V330)
+#elif defined (CONFIG_HISI_FB_970)
 #define XBLOCKNUM					(6)
 #define YBLOCKNUM					(6)
 #define HIACE_LHIST_RANK			(16)
 #define HIACE_GAMMA_RANK			(8)
 #define HIACE_GHIST_RANK			(32)
 #define HIACE_FNA_RANK				(1)
-#define CE_SIZE_HIST				(HIACE_GHIST_RANK * 2 + YBLOCKNUM * XBLOCKNUM * HIACE_LHIST_RANK + YBLOCKNUM * XBLOCKNUM * HIACE_FNA_RANK + 1)
-#define CE_SIZE_LUT					(YBLOCKNUM * XBLOCKNUM * HIACE_GAMMA_RANK)
-#define DETAIL_WEIGHT_SIZE          (9)
-#define LOG_LUM_EOTF_LUT_SIZE       (32)
-#define LUMA_GAMA_LUT_SIZE          (21)
+#define CE_SIZE_HIST				HIACE_GHIST_RANK * 2 + YBLOCKNUM * XBLOCKNUM * HIACE_LHIST_RANK + YBLOCKNUM * XBLOCKNUM * HIACE_FNA_RANK + 1
+#define CE_SIZE_LUT					YBLOCKNUM * XBLOCKNUM * HIACE_GAMMA_RANK
 #else
 #define CE_SIZE_HIST				CE_VALUE_RANK
 #define CE_SIZE_LUT					CE_VALUE_RANK
@@ -77,15 +60,7 @@
 #define DEBUG_EFFECT_DELAY			((int)BIT(1)) // Count average delay of each step
 #define DEBUG_EFFECT_FRAME			((int)BIT(2)) // Trace every frame
 #define DEBUG_EFFECT_METADATA		((int)BIT(3)) // Print metadata
-#define DISPLAYENGINE_BL_DEBUG_FRAMES 5
 
-// RGBW
-#define LG_NT36772A_RGBW_ID          8
-#define LG_NT36772A_RGBW_ID_HMA          12
-#define BOE_HX83112E_RGBW_ID_HMA          13
-extern const int JDI_TD4336_RT8555_RGBW_ID;
-extern const int SHARP_TD4336_RT8555_RGBW_ID;
-extern const int LG_NT36772A_RT8555_RGBW_ID;
 /*
 *1542 = gamma_r + gamma_g + gamma_b = (257 + 257 + 257) * sizeof(u16);
 *1542 = degamma_r + degamma_g + degamma_b = (257 + 257 +257) * sizeof(u16);
@@ -159,11 +134,6 @@ typedef struct dss_display_effect_metadata {
 	struct mutex ctrl_lock;
 } dss_display_effect_metadata_t;
 
-typedef struct dss_display_effect_xcc {
-	uint32_t xcc_enable;
-	int xcc_table[12];
-} dss_display_effect_xcc_t;
-
 typedef struct display_engine_info {
 	bool is_ready;
 	bool blc_used;
@@ -182,16 +152,10 @@ typedef struct display_engine_info {
 	int pixel_gain_limit;
 	int pixel_gain_speed;
 	int pwm_duty_gain;
-	int rgbw_total_glim;
 	//hbm params
-	bool hbm_dimming;
 	int hbm_level;
-	int last_hbm_level;
 	struct disp_lcdbrightnesscoloroeminfo lcd_color_oeminfo;
-	struct mutex param_lock;
-	struct display_engine_amoled_param amoled_param;
 } display_engine_info_t;
-
 typedef struct dss_ce_info {
 	// Running control
 	bool new_hist_rpt;
@@ -201,7 +165,7 @@ typedef struct dss_ce_info {
 	int gradual_frames;
 	bool to_stop_hdr;
 	bool to_stop_sre;
-#if !defined(CONFIG_HISI_FB_3650) && !defined (CONFIG_HISI_FB_6250)
+#if defined(CONFIG_HISI_FB_3660) || defined (CONFIG_HISI_FB_970)
 	struct mutex hist_lock;
 	struct mutex lut_lock;
 #endif
@@ -211,9 +175,7 @@ typedef struct dss_ce_info {
 	uint32_t lut_sel;
 	char __iomem *lut_base;
 	uint32_t histogram[CE_SIZE_HIST];
-#if defined (CONFIG_HISI_FB_970) ||defined (CONFIG_HISI_FB_V501) || defined (CONFIG_HISI_FB_V510) || defined (CONFIG_HISI_FB_V330)
-	compat_pointer(lut_table);
-#elif defined(CONFIG_HISI_FB_3660) || defined (CONFIG_HISI_FB_V320)
+#if defined(CONFIG_HISI_FB_3660) || defined (CONFIG_HISI_FB_970)
 	uint32_t lut_table[CE_SIZE_LUT];
 #else
 	uint8_t lut_table[CE_SIZE_LUT];
@@ -229,7 +191,7 @@ typedef struct dss_ce_info {
 } dss_ce_info_t;
 
 typedef struct ce_service {
-#if !defined(CONFIG_HISI_FB_3650) && !defined (CONFIG_HISI_FB_6250)
+#if defined(CONFIG_HISI_FB_3660) || defined (CONFIG_HISI_FB_970)
 	bool is_ready;
 	bool new_hist;
 	bool new_lut;
@@ -293,9 +255,8 @@ typedef struct acm_reg_table {
 /*******************************************************************************
 ** FUNCTIONS PROTOTYPES
 */
-extern uint32_t g_enable_effect;
-extern uint32_t g_debug_effect;
-extern int g_factory_gamma_enable;
+extern int g_enable_effect;
+extern int g_debug_effect;
 
 void hisi_effect_init(struct hisi_fb_data_type *hisifd);
 void hisi_effect_deinit(struct hisi_fb_data_type *hisifd);
@@ -304,26 +265,21 @@ int hisifb_ce_service_blank(int blank_mode, struct fb_info *info);
 int hisifb_ce_service_get_support(struct fb_info *info, void __user *argp);
 int hisifb_ce_service_get_limit(struct fb_info *info, void __user *argp);
 int hisifb_ce_service_get_param(struct fb_info *info, void __user *argp);
-int hisifb_ce_service_set_param(struct fb_info *info, const void __user *argp);
-int hisifb_ce_service_enable_hiace(struct fb_info *info, const void __user *argp);
+int hisifb_ce_service_set_param(struct fb_info *info, void __user *argp);
+int hisifb_ce_service_enable_hiace(struct fb_info *info, void __user *argp);
 int hisifb_ce_service_get_hist(struct fb_info *info, void __user *argp);
-int hisifb_ce_service_set_lut(struct fb_info *info, const void __user *argp);
-int hisifb_ce_service_set_HDR10_lut(struct fb_info *info, void __user *argp);
+int hisifb_ce_service_set_lut(struct fb_info *info, void __user *argp);
 int hisifb_get_reg_val(struct fb_info *info, void __user *argp);
-int hisifb_display_engine_register(struct hisi_fb_data_type *hisifd);
-int hisifb_display_engine_unregister(struct hisi_fb_data_type *hisifd);
 int hisifb_display_engine_blank(int blank_mode, struct fb_info *info);
 int hisifb_display_engine_init(struct fb_info *info, void __user *argp);
 int hisifb_display_engine_deinit(struct fb_info *info, void __user *argp);
 int hisifb_display_engine_param_get(struct fb_info *info, void __user *argp);
 int hisifb_display_engine_param_set(struct fb_info *info, void __user *argp);
-void hisifb_display_engine_workqueue_handler(struct work_struct *work);
 ssize_t hisifb_display_effect_al_ctrl_show(struct fb_info *info, char *buf);
 ssize_t hisifb_display_effect_al_ctrl_store(struct fb_info *info, const char *buf, size_t count);
 ssize_t hisifb_display_effect_ce_ctrl_show(struct fb_info *info, char *buf);
 ssize_t hisifb_display_effect_ce_ctrl_store(struct fb_info *info, const char *buf, size_t count);
 ssize_t hisifb_display_effect_bl_ctrl_show(struct fb_info *info, char *buf);
-ssize_t hisifb_display_effect_bl_ctrl_store(struct fb_info *info, const char *buf, size_t count);
 ssize_t hisifb_display_effect_bl_enable_ctrl_show(struct fb_info *info, char *buf);
 ssize_t hisifb_display_effect_bl_enable_ctrl_store(struct fb_info *info, const char *buf, size_t count);
 ssize_t hisifb_display_effect_sre_ctrl_show(struct fb_info *info, char *buf);
@@ -334,20 +290,18 @@ void hisifb_display_effect_func_switch(struct hisi_fb_data_type *hisifd, const c
 
 bool hisifb_display_effect_is_need_ace(struct hisi_fb_data_type *hisifd);
 bool hisifb_display_effect_is_need_blc(struct hisi_fb_data_type *hisifd);
-bool hisifb_display_effect_check_bl_value(int curr, int last);
-bool hisifb_display_effect_check_bl_delta(int curr, int last);
 bool hisifb_display_effect_fine_tune_backlight(struct hisi_fb_data_type *hisifd, int backlight_in, int *backlight_out);
 
 void init_acm_ce(struct hisi_fb_data_type *hisifd);
 void hisi_dss_dpp_ace_set_reg(struct hisi_fb_data_type *hisifd);
 void hisi_dpp_ace_end_handle_func(struct work_struct *work);
 
-#if !defined(CONFIG_HISI_FB_3650) && !defined (CONFIG_HISI_FB_6250)
+#if defined(CONFIG_HISI_FB_3660) || defined(CONFIG_HISI_FB_970)
 void init_hiace(struct hisi_fb_data_type *hisifd);
 void init_noisereduction(struct hisi_fb_data_type *hisifd);
 void hisi_dss_dpp_hiace_set_reg(struct hisi_fb_data_type *hisifd);
 void hisi_dpp_hiace_end_handle_func(struct work_struct *work);
-void hisifb_update_dynamic_gamma(struct hisi_fb_data_type *hisifd, const char* buffer, size_t len);
+void hisifb_update_dynamic_gamma(struct hisi_fb_data_type *hisifd, const char* buffer, int len);
 int hisifb_use_dynamic_gamma(struct hisi_fb_data_type *hisifd, char __iomem *dpp_base);
 int hisifb_use_dynamic_degamma(struct hisi_fb_data_type *hisifd, char __iomem *dpp_base);
 void hisifb_update_gm_from_reserved_mem(uint32_t *gm_r, uint32_t *gm_g, uint32_t *gm_b, uint32_t *igm_r, uint32_t *igm_g, uint32_t *igm_b);
@@ -373,7 +327,6 @@ int hisi_effect_lcp_info_set(struct hisi_fb_data_type *hisifd, struct lcp_info *
 int hisi_effect_gmp_info_set(struct hisi_fb_data_type *hisifd, struct lcp_info *lcp_src);
 int hisi_effect_igm_info_set(struct hisi_fb_data_type *hisifd, struct lcp_info *lcp_src);
 int hisi_effect_xcc_info_set(struct hisi_fb_data_type *hisifd, struct lcp_info *lcp_src);
-int hisi_effect_xcc_info_set_kernel(struct hisi_fb_data_type *hisifd, struct dss_display_effect_xcc *lcp_src);
 
 int hisi_effect_gamma_info_set(struct hisi_fb_data_type *hisifd, struct gamma_info *gamma);
 
@@ -388,9 +341,5 @@ void hisi_dss_effect_set_reg(struct hisi_fb_data_type *hisifd);
 int hisi_effect_arsr2p_config(struct arsr2p_info *arsr2p_effect_dst, int ih_inc, int iv_inc);
 int hisi_effect_arsr1p_config(struct hisi_fb_data_type *hisifd, dss_overlay_t *pov_req);
 int hisi_effect_hiace_config(struct hisi_fb_data_type *hisifd);
-
-#if defined(CONFIG_HISI_FB_V501) || defined(CONFIG_HISI_FB_V510) || defined(CONFIG_HISI_FB_V330)
-void hisifb_effect_gmp_lut_workqueue_handler(struct work_struct *work);
-#endif
 
 #endif  //HISI_DISPLAY_EFFECT_H

@@ -30,7 +30,9 @@
 #endif
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0))
 #include "governor_pm_qos.h"
+#endif
 #include <governor.h>
 
 #define DFPQ_BDUTILIZATION		(60)
@@ -147,6 +149,7 @@ show_ddr_chintlv(struct device *dev, struct device_attribute *attr, char *buf)
 
 	/*boston chintlv = (chintlv / 2)  * 128*/
 
+	/*pr_err("%s %d, chintlv %d\n", __func__, __LINE__,chintlv);*/
 
 	mutex_unlock(&devfreq->lock);
 
@@ -274,24 +277,22 @@ static int devfreq_pm_qos_gov_init(struct devfreq *df)
 
 static void devfreq_pm_qos_gov_exit(struct devfreq *df)
 {
-	struct devfreq_pm_qos_notifier_block *pq_nb, *tmp;
+	struct devfreq_pm_qos_notifier_block *pq_nb;
 	struct devfreq_pm_qos_data *data;
-
-	sysfs_remove_files(&df->dev.kobj, governor_pm_qos_attrs);
 
 	mutex_lock(&devfreq_pm_qos_mutex);
 
-	list_for_each_entry_safe(pq_nb, tmp, &devfreq_pm_qos_list, node) {
+	list_for_each_entry(pq_nb, &devfreq_pm_qos_list, node) {
 		if (pq_nb->df == df) {
 			data = pq_nb->df->data;
 			pm_qos_remove_notifier(data->pm_qos_class, &pq_nb->nb);
-			list_del(&pq_nb->node);
-			kfree(pq_nb);
-			break;
+			goto out;
 		}
 	}
 
+out:
 	mutex_unlock(&devfreq_pm_qos_mutex);
+	kfree(pq_nb);
 }
 
 static int devfreq_pm_qos_handler(struct devfreq *devfreq,
@@ -315,7 +316,6 @@ static int devfreq_pm_qos_handler(struct devfreq *devfreq,
 
 struct devfreq_governor devfreq_pm_qos = {
 	.name = "pm_qos",
-	.immutable = 1,
 	.get_target_freq = devfreq_pm_qos_func,
 	.event_handler = devfreq_pm_qos_handler,
 };

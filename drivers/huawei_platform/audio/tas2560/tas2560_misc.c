@@ -229,13 +229,14 @@ static ssize_t tas2560_file_write(struct file *file, const char *buf, size_t cou
 	UNUSED(ppos);
 
 	if(NULL == file||NULL == file->private_data){
-		return -1;
+		ret = -1;
+		goto err;
 	}
 	pTAS2560 = (struct tas2560_priv *)file->private_data;
 
 	mutex_lock(&pTAS2560->file_lock);
 
-	if ((0 == count) || (NULL == buf)) {
+	if(0 == count||(!count&&(NULL == buf))){
 		ret = -1;
 		goto err;
 	}
@@ -513,10 +514,8 @@ static long tas2560_file_compact_ioctl(struct file *file, unsigned int command, 
 static struct file_operations fops =
 {
 	.owner = THIS_MODULE,
-#ifdef TAS2560_DEBUG
 	.read = tas2560_file_read,
 	.write = tas2560_file_write,
-#endif
 	.unlocked_ioctl = tas2560_file_unlocked_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl    = tas2560_file_compact_ioctl,

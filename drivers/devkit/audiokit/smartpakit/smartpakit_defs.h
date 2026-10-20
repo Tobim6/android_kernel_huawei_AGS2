@@ -22,13 +22,11 @@
 #define __SMARTPAKIT_DEFS_H__
 
 #define SMARTPAKIT_NAME_MAX    (64)
-#define SMARTPAKIT_NAME_INVALID "none"
 
 // which platform
 typedef enum smartpakit_soc_platform {
 	SMARTPAKIT_SOC_PLATFORM_HISI = 0, // hisi chip
 	SMARTPAKIT_SOC_PLATFORM_QCOM,     // qcom chip
-	SMARTPAKIT_SOC_PLATFORM_MTK,
 
 	SMARTPAKIT_SOC_PLATFORM_MAX,
 } smartpakit_soc_platform_t;
@@ -79,15 +77,10 @@ typedef enum smartpakit_pa_id {
 
 // which chip provider
 typedef enum smartpakit_chip_vendor {
-	SMARTPAKIT_CHIP_VENDOR_MAXIM = 0,    // max98925
-	SMARTPAKIT_CHIP_VENDOR_NXP,          // tfa9872, tfa9895
-	SMARTPAKIT_CHIP_VENDOR_TI,           // tas2560
-	SMARTPAKIT_CHIP_VENDOR_CS,           // cs
-	SMARTPAKIT_CHIP_VENDOR_OTHER = SMARTPAKIT_CHIP_VENDOR_CS,  //other
-	SMARTPAKIT_CHIP_VENDOR_CUSTOMIZE,    // huawei customize
-	SMARTPAKIT_CHIP_VENDOR_RT,           // richtek
-	SMARTPAKIT_CHIP_VENDOR_AWINIC,       // aw88194
-	SMARTPAKIT_CHIP_VENDOR_FOURSEMI,     // fs1894
+	SMARTPAKIT_CHIP_VENDOR_MAXIM = 0, // max98925
+	SMARTPAKIT_CHIP_VENDOR_NXP,       // tfa9872, tfa9895
+	SMARTPAKIT_CHIP_VENDOR_TI,        // tas2560
+	SMARTPAKIT_CHIP_VENDOR_OTHER,     // other vendor
 
 	SMARTPAKIT_CHIP_VENDOR_MAX,
 } smartpakit_chip_vendor_t;
@@ -98,7 +91,6 @@ typedef struct smartpakit_info {
 	unsigned int  algo_in;
 	unsigned int  out_device;
 	unsigned int  pa_num;
-	char special_name_config[SMARTPAKIT_NAME_MAX];
 
 	// smartpa chip info
 	unsigned int  algo_delay_time;
@@ -122,9 +114,6 @@ typedef struct smartpakit_set_param {
 	unsigned int param_num;
 	unsigned int *params;
 } smartpakit_set_param_t;
-
-#define SMARTPAKIT_IO_PARAMS_NUM_MAX   (8 * 1024)  // ioctl params, 8k unsigned int
-#define SMARTPAKIT_RW_PARAMS_NUM_MAX   (32 * 1024) // rw params(i2c_transfer), 32k bytes
 
 // for system/lib/*.so(32 bits)
 typedef struct smartpakit_set_param_compat {

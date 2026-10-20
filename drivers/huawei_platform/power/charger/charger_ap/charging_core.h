@@ -14,9 +14,7 @@
 #define _CHARGING_CORE
 
 #include <linux/device.h>	/*for struct charge_core_info */
-#ifdef CONFIG_HISI_BATTERY_DATA
 #include <linux/power/hisi/hisi_battery_data.h>	/*for struct charge_core_info */
-#endif
 #include <huawei_platform/power/huawei_charger.h>	/*for struct charge_core_info */
 
 /*************************marco define area***************************/
@@ -49,11 +47,6 @@
 
 #define FIRST_RUN_TRUE               (1)
 #define FIRST_RUN_FALSE              (0)
-
-#define CCAFC_RUN_DEFAULT	0
-#define CCAFC_RUN_FIRST		1
-#define CCAFC_RUN_ALREADY	2
-
 /*************************struct define area***************************/
 enum vdpm_para_info {
 	VDPM_PARA_CAP_MIN = 0,
@@ -68,6 +61,12 @@ enum inductance_para_info {
 	INDUCTANCE_PARA_IIN,
 	INDUCTANCE_PARA_CAP_BACK,
 	INDUCTANCE_PARA_TOTAL,
+};
+
+enum ccafc_run_status_type {
+	CCAFC_RUN_DEFAULT = 0,
+	CCAFC_RUN_FIRST,
+	CCAFC_RUN_ALREADY,
 };
 
 struct charge_temp_data {
@@ -109,12 +108,6 @@ struct charge_inductance_data {
 	int cap_back;
 };
 
-/*charge terminal current is different, based on battery model*/
-enum {
-	CHARGE_ITERM_PARA_BATT_BRAND,
-	CHARGE_ITERM_PARA_ITERM,
-	CHARGE_ITERM_PARA_TOTAL,
-};
 struct charge_core_info {
 	struct device *dev;
 	struct charge_temp_data temp_para[TEMP_PARA_LEVEL];

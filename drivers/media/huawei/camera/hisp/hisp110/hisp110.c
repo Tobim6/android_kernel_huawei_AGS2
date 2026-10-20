@@ -30,6 +30,12 @@
 #include <linux/wakelock.h>
 #include "trace_hisp.h"
 
+
+//add for HiLOGE
+#include <linux/hisi/hilog.h>
+#define HILOG_CAMERA_MODULE_NAME    "Camera"
+#define HILOG_CAMERA_SUBMODULE_NAME    "FW_Interaction"
+
 DEFINE_MUTEX(hisi_rpmsg_service_mutex);
 DEFINE_MUTEX(hisp_wake_lock_mutex);
 
@@ -74,11 +80,7 @@ enum {
  *@end
  */
 struct rpmsg_hisp110_service {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
-	struct rpmsg_device *rpdev;
-#else
 	struct rpmsg_channel *rpdev;
-#endif
 	struct mutex send_lock;
 	struct mutex recv_lock;
 	struct completion *comp;
@@ -213,6 +215,10 @@ void hisp110_set_timestamp(unsigned int *timestampH, unsigned int *timestampL)
 	fw_micro_second =
 	    (micro_second / MICROSECOND_PER_SECOND + s_timeval.tv_sec) * MICROSECOND_PER_SECOND
 		+ ((micro_second % MICROSECOND_PER_SECOND) + s_timeval.tv_usec);
+#if 0
+	do_gettimeofday(&s_timeval);
+	fw_micro_second= s_timeval.tv_sec * MICROSECOND_PER_SECOND + s_timeval.tv_usec;
+#endif
 
 	*timestampH = (u32)(fw_micro_second >>32 & 0xFFFFFFFF);
 	*timestampL = (u32)(fw_micro_second & 0xFFFFFFFF);
@@ -315,17 +321,49 @@ static void hisp110_save_rpmsg_data(void *data, int len)
  *is POWER_REQ, and will send a POWER_RSP to isp
  *after power request done.
  *********************************************/
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
+#if 0
 static void
-hisp110_rpmsg_ept_cb(struct rpmsg_device *rpdev,
-			 void *data, int len, void *priv, u32 src)
+hisp110_power_req(hisp_msg_t *msg, int len)
+{
+	struct rpmsg_hisp110_service *hisi_serv = rpmsg_local.hisi_isp_serv;
+
+	cam_info("Enter %s\n", __func__);
+	if (NULL == hisi_serv){
+		cam_err("func %s: hisi_serv is NULL",__func__);
+		return;
+	}
+	if (NULL == msg){
+		cam_err("func %s: msg is NULL",__func__);
+		return;
+	}
+#if 0
+	hisp_assert(POWER_REQ == msg->api_name);
+	hisp_assert(HISP_SERV_FIRST_RECV != hisi_serv->recv_count);
+
+	switch (msg->u.req_power.power_req_nr) {
+		/*TODO: power up csi/DPHY/sensor according to isp req*/
+	default:
+		cam_info("%s invalid req_power!\n", __func__);
+		break;
+	}
+	msg->api_name = POWER_RSP;
+#endif
+#ifdef FAKE_FW
+	fake_rpmsg_send(hisi_serv->rpdev, (void *)msg, len);
 #else
+	if (0 != rpmsg_send_offchannel(hisi_serv->rpdev, hisi_serv->ept->addr,
+		hisi_serv->dst, (void *)msg, len)){
+		cam_err("func %s failed  \n", __func__);
+		return;
+	}
+#endif
+	cam_info("%s Not implement yet ....\n", __func__);
+}
+#endif
+
 static void
 hisp110_rpmsg_ept_cb(struct rpmsg_channel *rpdev,
 			 void *data, int len, void *priv, u32 src)
-#endif
-
 {
 	struct rpmsg_hisp110_service *hisi_serv = rpmsg_local.hisi_isp_serv;
 	hisp_msg_t *msg = NULL;
@@ -359,7 +397,6 @@ hisp110_rpmsg_ept_cb(struct rpmsg_channel *rpdev,
 
 	msg = (hisp_msg_t *) (data);
 	trace_hisp_rpmsg_ept_cb(msg);
-	hisp_recvx(data);
 	/* save the data and wait for hisp110_recv_rpmsg to get the data*/
 	hisp110_save_rpmsg_data(data, len);
 
@@ -417,10 +454,6 @@ static int hisp110_config(hisp_intf_t *i, void *cfg)
 			cam_notice("%s power off the hisp110.\n", __func__);
 			rc = hisp110_power_off(i);
 		}
-		break;
-	case HISP_CONFIG_PROC_TIMEOUT:
-		cam_info("%s message_id.0x%x",__func__, pcfg->cfgdata[0]);
-		hisp_dump_rpmsg_with_id(pcfg->cfgdata[0]);
 		break;
 	default:
 		break;
@@ -485,13 +518,8 @@ static int hisp110_power_on(hisp_intf_t *i)
 	unsigned long current_jiffies = jiffies;
 
 	struct rpmsg_hisp110_service *hisi_serv = NULL;
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
-	struct rpmsg_channel_info chinfo = {
-		.src = RPMSG_ADDR_ANY,
-	};
-#endif
 	if (NULL == i){
+		HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "func %s: i is NULL",__func__);
 		return -1;
 	}
 	hi = I2HI(i);
@@ -513,6 +541,7 @@ static int hisp110_power_on(hisp_intf_t *i)
 			if (!IS_ERR(hi->dt.pinctrl_default)) {
 				rc = pinctrl_select_state(hi->dt.pinctrl, hi->dt.pinctrl_default);
 				if (0 != rc) {
+					HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "could not set pins to default state.\n");
 					goto FAILED_RET;
 				}
 			}
@@ -520,12 +549,14 @@ static int hisp110_power_on(hisp_intf_t *i)
 
 		rc = hisi_isp_rproc_enable();
 		if (rc != 0) {
+			HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "Failed: hisi_isp_rproc_enable.%d!\n", rc);
 			goto FAILED_RET;
 		}
 		rproc_enabled = true;
 
 		rc  = wait_for_completion_timeout(&channel_sync, msecs_to_jiffies(15000));
 		if (0 == rc ) {
+			HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "Boot failed: wait_for_completion_interruptible_timeout timed out, ret.%d!\n", rc);
 			rc = -ETIME;
 			hisi_isp_boot_stat_dump();
 			goto FAILED_RET;
@@ -542,20 +573,17 @@ static int hisp110_power_on(hisp_intf_t *i)
 
 	hisi_serv = rpmsg_local.hisi_isp_serv;
 	if (!hisi_serv) {
+		HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "failed: hisi_serv does not exist!\n");
 		rc = -ENODEV;
 		goto FAILED_RET;
 	}
 
 	/*assign a new, unique, local address and associate instance with it */
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
-	hisi_serv->ept =
-		rpmsg_create_ept(hisi_serv->rpdev, hisp110_rpmsg_ept_cb, hisi_serv, chinfo);
-#else
 	hisi_serv->ept =
 		rpmsg_create_ept(hisi_serv->rpdev, hisp110_rpmsg_ept_cb, hisi_serv,
 				 RPMSG_ADDR_ANY);
-#endif
 	if (!hisi_serv->ept) {
+		HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "failed: create ept!\n");
 		hisi_serv->state = RPMSG_FAIL;
 		rc = -ENOMEM;
 		goto FAILED_RET;
@@ -604,6 +632,7 @@ static int hisp110_power_off(hisp_intf_t *i)
 	unsigned long current_jiffies = jiffies;
 	struct rpmsg_hisp110_service *hisi_serv = NULL;
 	if (NULL == i){
+            HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "func %s: i is NULL",__func__);
             return -1;
 	}
 	hi = I2HI(i);
@@ -612,17 +641,20 @@ static int hisp110_power_off(hisp_intf_t *i)
 
 	/*check the remote processor boot flow */
 	if (false == remote_processor_up) {
+            HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "failed: rproc boot failure: BOOT_FAILURE!\n");
             rc = -EPERM;
             goto RET;
 	}
 
 	hisi_serv = rpmsg_local.hisi_isp_serv;
 	if (!hisi_serv) {
+            HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "failed: hisi_serv does not exist!\n");
             rc = -ENODEV;
             goto RET;
 	}
 
 	if (RPMSG_FAIL == hisi_serv->state) {
+            HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "failed: hisi_serv->state is RPMSG_FAIL!\n");
             rc = -EFAULT;
             goto RET;
 	}
@@ -630,24 +662,41 @@ static int hisp110_power_off(hisp_intf_t *i)
 	mutex_lock(&hisi_rpmsg_service_mutex);
 
 	if (!hisi_serv->ept) {
+            HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "failed: hisi_serv->ept is NULL!\n");
             rc = -ENODEV;
             goto UNLOCK_RET;
 	}
 	rpmsg_destroy_ept(hisi_serv->ept);
-	hisi_serv->ept = NULL;
 
 	hisi_serv->state = RPMSG_UNCONNECTED;
 	hisi_serv->recv_count = HISP_SERV_FIRST_RECV;
 
 	if (atomic_read((&hi->opened))) {
 
+#if 0
+		rc = rpmsg_reset_device();
+		if (rc != 0) {
+			cam_err("%s() %d failed: rpmsg_reset_device ret is %d!\n", __func__,
+					__LINE__, rc);
+		}
+
+		/*todo: release resources here */
+		/*
+		 *If state == fail, remote processor crashed, so don't send it
+		 *any message.
+		 */
+		hisi_rproc_flush();
+		hisi_isp_rproc_device_disable();
+		//print_rpmsg_vq_msg();
+#else
 		hisi_isp_rproc_disable();
+#endif
 
 		if (!hw_is_fpga_board()) {
 			if (!IS_ERR(hi->dt.pinctrl_idle)) {
 				rc = pinctrl_select_state(hi->dt.pinctrl, hi->dt.pinctrl_idle);
 				if (0 != rc) {
-            //Empty.
+                                HiLOGE(HILOG_CAMERA_MODULE_NAME, HILOG_CAMERA_SUBMODULE_NAME, "could not set pins to default state.");
 				}
 			}
 
@@ -676,11 +725,7 @@ RET:
 	return rc;
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
-static void hisp110_rpmsg_remove(struct rpmsg_device *rpdev)
-#else
 static void hisp110_rpmsg_remove(struct rpmsg_channel *rpdev)
-#endif
 {
 	struct rpmsg_hisp110_service *hisi_serv = dev_get_drvdata(&rpdev->dev);
 
@@ -691,24 +736,21 @@ static void hisp110_rpmsg_remove(struct rpmsg_channel *rpdev)
 		return;
 	}
 
+//	mutex_lock(&hisi_rpmsg_service_mutex);
 	/*unblock any pending thread */
+	//complete(hisi_serv->comp);
 	mutex_destroy(&hisi_serv->send_lock);
 	mutex_destroy(&hisi_serv->recv_lock);
 
 	kfree(hisi_serv);
 	rpmsg_local.hisi_isp_serv = NULL;
+//	mutex_unlock(&hisi_rpmsg_service_mutex);
 	cam_notice("rpmsg hisi driver is removed\n");
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
-static void
-hisp110_rpmsg_driver_cb(struct rpmsg_device *rpdev,
-			void *data, int len, void *priv, u32 src)
-#else
 static void
 hisp110_rpmsg_driver_cb(struct rpmsg_channel *rpdev,
 			void *data, int len, void *priv, u32 src)
-#endif
 {
 	cam_info("%s enter ....\n", __func__);
 	cam_warn("%s() %d uhm, unexpected message!\n", __func__,
@@ -760,32 +802,20 @@ hisp110_send_rpmsg(hisp_intf_t *i, hisp_msg_t *from_user, size_t len)
 			rc = -ENODEV;
 			goto UNLOCK_RET;
 		}
-		hisp_sendin(msg);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
-		rc = rpmsg_send_offchannel(hisi_serv->ept,
-			hisi_serv->ept->addr,
-			hisi_serv->rpdev->dst, (void *)msg,
-			len);
-#else
+
 		rc = rpmsg_send_offchannel(hisi_serv->rpdev,
 					   hisi_serv->ept->addr,
 					   hisi_serv->rpdev->dst, (void *)msg,
 					   len);
-#endif
 		if (rc) {
 			cam_err("%s() %d failed: first rpmsg_send_offchannel ret is %d!\n", __func__,
 				__LINE__, rc);
 		}
 		goto UNLOCK_RET;
 	}
-	hisp_sendin(msg);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
-	rc = rpmsg_send_offchannel(hisi_serv->ept, hisi_serv->ept->addr,
-				   hisi_serv->dst, (void *)msg, len);
-#else
+
 	rc = rpmsg_send_offchannel(hisi_serv->rpdev, hisi_serv->ept->addr,
 				   hisi_serv->dst, (void *)msg, len);
-#endif
 	if (rc) {
 		cam_err("%s() %d failed: rpmsg_send_offchannel ret is %d!\n", __func__,
 			__LINE__, rc);
@@ -882,11 +912,7 @@ hisp110_recv_rpmsg(hisp_intf_t *i, hisp_msg_t *user_addr, size_t len)
 
 	rc = min((unsigned int)len, skb->len);
 	msg = (hisp_msg_t *) (skb->data);
-	hisp_recvdone((void *)msg);
-	if(msg->api_name == RELEASE_CAMERA_RESPONSE)
-	{
-		hisp_rpmsgrefs_dump();
-	}
+
 	cam_debug("%s: api_name(0x%x)\n", __func__, msg->api_name);
 
 	hisp110_handle_msg(msg);
@@ -969,11 +995,8 @@ static ssize_t hisp_ddr_freq_store(struct device *dev,
 }
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0))
-static int32_t hisp110_rpmsg_probe(struct rpmsg_device *rpdev)
-#else
+
 static int32_t hisp110_rpmsg_probe(struct rpmsg_channel *rpdev)
-#endif
 {
 	int32_t ret = 0;
 	struct rpmsg_hisp110_service *hisi_serv = NULL;
@@ -1061,7 +1084,7 @@ hisp110_platform_probe(
 	}
 
 	init_completion(&rpmsg_local.isp_comp);
-	ret = hisp_register(pdev, &s_hisp110.intf, &s_hisp110.notify);
+	ret = hisp_register(&s_hisp110.intf, &s_hisp110.notify);
 	if (0 == ret) {
 		atomic_set(&s_hisp110.opened, 0);
 	} else {
@@ -1071,21 +1094,21 @@ hisp110_platform_probe(
 
 	rpmsg_local.hisi_isp_serv = NULL;
 
-	s_hisp110.pdev = pdev;
 	ret = register_rpmsg_driver(&rpmsg_hisp110_driver);
 	if (0 != ret){
 		cam_err("%s() %d register_rpmsg_driver failed with ret %d!\n", __func__, __LINE__, ret);
-		hisp_unregister(s_hisp110.pdev);
+		hisp_unregister(&s_hisp110.intf);
 		goto error;
 	}
 
+    s_hisp110.pdev = pdev;
 
 #ifdef DEBUG_HISI_CAMERA
 	ret = device_create_file(&pdev->dev, &hisp_ddr_freq_ctrl_attr);
 	if (ret < 0) {
 		cam_err("%s failed to creat hisp ddr freq ctrl attribute.", __func__);
 		unregister_rpmsg_driver(&rpmsg_hisp110_driver);
-		hisp_unregister(s_hisp110.pdev);
+		hisp_unregister(&s_hisp110.intf);
 		goto error;
 	}
 #endif
@@ -1121,7 +1144,7 @@ hisp110_exit_module(void)
 {
 	cam_notice("%s enter\n", __func__);
 	unregister_rpmsg_driver(&rpmsg_hisp110_driver);
-	hisp_unregister(s_hisp110.pdev);
+	hisp_unregister(&s_hisp110.intf);
     platform_driver_unregister(&s_hisp110_driver);
 	wake_lock_destroy(&hisp_power_wakelock);
 }

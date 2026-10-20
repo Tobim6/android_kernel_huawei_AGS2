@@ -201,12 +201,10 @@ int tcpm_typec_role_swap(struct tcpc_device *tcpc_dev)
 	return TCPM_ERROR_UNSUPPORT;
 }
 
-int tcpm_typec_notify_direct_charge(void *client, bool dc)
+int tcpm_typec_notify_direct_charge(struct tcpc_device *tcpc_dev, bool dc)
 {
-	struct tcpc_device *tcpc_dev = (struct tcpc_device *)client;
-
 	TCPC_INFO("%s,%d", __func__, __LINE__);
-	if (tcpc_dev->typec_attach_old == TYPEC_UNATTACHED && tcpc_dev->no_rpsrc_state == 0)
+	if (tcpc_dev->typec_attach_old == TYPEC_UNATTACHED)
 		return TCPM_ERROR_UNATTACHED;
 
 	TCPC_INFO("%s,%d", __func__, __LINE__);
@@ -223,11 +221,11 @@ int tcpm_typec_change_role(
 bool tcpm_inquire_cust_src2_cable_vdo(
         struct tcpc_device *tcpc_dev, uint32_t *vdos, int size)
 {
-	pd_port_t *pd_port;
 	if(!tcpc_dev){
 		return false;
 	}
-	pd_port = &tcpc_dev->pd_port;
+	pd_port_t *pd_port = &tcpc_dev->pd_port;
+
 	if (size < VDO_MAX_SIZE){
 		return false;
 	}
@@ -518,28 +516,6 @@ int tcpm_get_sink_cap(
 	return TCPM_SUCCESS;
 }
 EXPORT_SYMBOL(tcpm_get_sink_cap);
-
-int tcpm_get_local_sink_cap(
-	struct tcpc_device *tcpc_dev, struct local_sink_cap *cap)
-{
-	int i;
-	pd_port_t *pd_port = &tcpc_dev->pd_port;
-	pd_port_power_caps *snk_cap = &pd_port->local_snk_cap;
-	struct dpm_pdo_info_t sink;
-
-	if (!pd_port->pd_prev_connected)
-		return TCPM_ERROR_NO_PD_CONNECTED;
-
-	for(i = 0; i < snk_cap->nr; i++) {
-		dpm_extract_pdo_info(snk_cap->pdos[i], &sink);
-		cap[i].mv = sink.vmin;
-		cap[i].ma = sink.ma;
-		cap[i].uw = sink.uw;
-	}
-
-	return TCPM_SUCCESS;
-}
-EXPORT_SYMBOL(tcpm_get_local_sink_cap);
 
 int tcpm_bist_cm2(struct tcpc_device *tcpc_dev)
 {

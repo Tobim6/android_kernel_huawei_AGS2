@@ -7,14 +7,12 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/rpmsg.h>
-#include <securec.h>
 
 #include "hwsensor.h"
 #include "sensor_commom.h"
 #include "hw_csi.h"
 
 #define I2S(i) container_of((i), sensor_t, intf)
-#define Sensor2Pdev(s) container_of((s).dev, struct platform_device, dev)
 #define POWER_DELAY_0        0//delay 0 ms
 #define POWER_DELAY_1        1//delay 1 ms
 #define POWER_DELAY_6        6//delay 6 ms
@@ -46,7 +44,7 @@ static hwsensor_vtbl_t s_ov12a10hybird_vtbl =
     .csi_disable = ov12a10hybird_csi_disable,
 };
 
-static struct platform_device *s_pdev = NULL;
+static hwsensor_intf_t *s_intf = NULL;
 static sensor_t *s_sensor = NULL;
 
 struct sensor_power_setting hw_ov12a10hybird_power_up_setting[] = {
@@ -395,7 +393,6 @@ int ov12a10hybird_match_id(hwsensor_intf_t* si, void * data)
 {
     sensor_t* sensor = NULL;
     struct sensor_cfg_data *cdata = NULL;
-    int error = 0;
     if (NULL == si) {
         cam_err("%s. si is NULL.", __func__);
         return -EINVAL;
@@ -412,12 +409,9 @@ int ov12a10hybird_match_id(hwsensor_intf_t* si, void * data)
         return -EINVAL;
     }
     
-    error = memset_s(cdata->cfg.name, DEVICE_NAME_SIZE, 0, DEVICE_NAME_SIZE);
-    if (error != EOK) {
-        cam_err("%s. failed to memset_s write_data.", __func__);
-    }
+    memset(cdata->cfg.name, 0, DEVICE_NAME_SIZE);
 
-    strncpy_s(cdata->cfg.name, sizeof(cdata->cfg.name), sensor->board_info->name, DEVICE_NAME_SIZE - 1);
+    strncpy(cdata->cfg.name, sensor->board_info->name, DEVICE_NAME_SIZE - 1);
     cdata->data = sensor->board_info->sensor_index;
 
     return 0;
@@ -558,12 +552,12 @@ ov12a10hybird_platform_probe(
         cam_err("%s hwsensor_register failed rc %d\n", __func__, rc);
         return -ENODEV;
     }
-    s_pdev = pdev;
+    s_intf = intf;
 
     rc = rpmsg_sensor_register(pdev, (void*)sensor);
     if (rc < 0) {
-        hwsensor_unregister(s_pdev);
-        s_pdev = NULL;
+        hwsensor_unregister(intf);
+        s_intf = NULL;
         cam_err("%s rpmsg_sensor_register failed rc %d\n", __func__, rc);
         return -ENODEV;
     }
@@ -588,9 +582,9 @@ ov12a10hybird_exit_module(void)
         rpmsg_sensor_unregister((void*)s_sensor);
         s_sensor = NULL;
     }
-    if (NULL != s_pdev) {
-        hwsensor_unregister(s_pdev);
-        s_pdev = NULL;
+    if (NULL != s_intf) {
+        hwsensor_unregister(s_intf);
+        s_intf = NULL;
     }
     platform_driver_unregister(&s_ov12a10hybird_driver);
 }
