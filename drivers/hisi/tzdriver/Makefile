@@ -43,11 +43,12 @@ ifdef CONFIG_TEE_CFC
   rename-text-section-to := .cfc.text
 endif
 
-ifdef CONFIG_IMAGINATION_D5500_DRM_VCODEC
+# gp_ops.c includes "ion_client.h" (from the D5500_DRM vcodec tree)
+# unconditionally, regardless of whether CONFIG_IMAGINATION_D5500_DRM_VCODEC
+# is enabled -- so this include path/define must not be gated on it either.
 ifeq ($(wildcard drivers/staging/android/ion/ion.h),)
   ccflags-y += -DIMG_KERNEL_ION_HEADER="<linux/ion.h>"
 else
   ccflags-y += -DIMG_KERNEL_ION_HEADER="<$(srctree)/drivers/staging/android/ion/ion.h>"
 endif
-  ccflags-y += -Idrivers/vcodec/imagination/D5500_DRM/imgvideo/platform/include
-endif
+ccflags-y += -Idrivers/vcodec/imagination/D5500_DRM/imgvideo/platform/include
