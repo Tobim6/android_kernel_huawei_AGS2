@@ -490,11 +490,13 @@ static int alloc_operation(TC_NS_DEV_File *dev_file,
 #if ( LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0) && LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0) )
 				ret = ion_secmem_get_phys(drm_ion_client, drm_ion_handle,
 					(phys_addr_t *)(&drm_ion_phys), &drm_ion_size);
+#ifdef CONFIG_IMAGINATION_D5500_DRM_VCODEC
 				if (ret)
 				{
 					ret = img_vdec_get_ion_phys(drm_ion_client, drm_ion_handle,
 						&drm_ion_phys, &drm_ion_size);
 				}
+#endif
 #else
 				ret = ion_phys(drm_ion_client, drm_ion_handle,
 					&drm_ion_phys, &drm_ion_size);
