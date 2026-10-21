@@ -11,8 +11,6 @@
 #define TUI_STATE_RUNNING	2
 #define TUI_STATE_ERROR	3
 
-#define TUI_PID_CLEAR   0
-#define TUI_PID_CONFIG  1
 /* command from secure os */
 #define TUI_CMD_ENABLE		1
 #define TUI_CMD_DISABLE		2
@@ -59,8 +57,7 @@ enum tui_poll_type {
 	TUI_POLL_SEMITRANS,
 	TUI_POLL_CURSOR,
 	TUI_POLL_GETFP,
-	TUI_POLL_NOTCH,			/*for tui to get notch height*/
-	TUI_POLL_MAX			/*Do Not add type behind this one*/
+	TUI_POLL_MAX			/*Do Not add type behine this one*/
 };
 
 /* tui-max should be bigger than TUI_POLL_MAX in tui.h*/
@@ -89,7 +86,6 @@ static const char *const poll_event_type_name[] = {
 	"tui-SEMI",
 	"tui-cursor",
 	"tui-gettp",
-	"tui-notch",
 	"tui-max"
 };
 
@@ -149,11 +145,11 @@ typedef enum Ttf_File_Type ttf_type;
 #ifdef CONFIG_TEE_TUI
 extern int ts_tui_report_input(void *finger_data);
 extern int tui_fp_notify(void);
-int __init init_tui(const struct device *dev);
+int __init init_tui(struct device *dev);
 void tui_exit(void);
-int tui_send_event(int event, unsigned int value);
+int tui_send_event(int event);
 int register_tui_driver(tui_drv_init fun, const char *name,
-					 void *pdata);
+					void *pdata);
 void unregister_tui_driver(const char *name);
 /*
  * TUI has different state that can recieve given types of message,
@@ -163,13 +159,12 @@ void unregister_tui_driver(const char *name);
 int send_tui_msg_config(int type, int val, void *data);
 void tui_poweroff_work_start(void);
 
-void set_tui_caller_info(unsigned int devid, unsigned int pid);
+void set_tui_attach_device(unsigned int id);
 unsigned int tui_attach_device(void);
-int load_tui_font_file(ttf_type type, unsigned int arg);
+int load_tui_font_file(ttf_type type);
 void do_ns_tui_release(void);
-int tui_pid_status(int pid_value);
 #else
-static inline int init_tui(const struct device *dev)
+static inline int init_tui(struct device *dev)
 {
 	return 0;
 }
@@ -179,7 +174,7 @@ static inline void tui_exit(void)
 }
 
 static inline int register_tui_driver(tui_drv_init fun,
-		const char *name, const void *pdata)
+		const char *name, void *pdata)
 {
 	return 0;
 }
@@ -188,12 +183,12 @@ static inline void unregister_tui_driver(const char *name)
 {
 }
 
-static inline int send_tui_msg_config(int type, int val, const void *data)
+static inline int send_tui_msg_config(int type, int val, void *data)
 {
 	return 0;
 }
 
-static inline void set_tui_caller_info(unsigned int devid, unsigned int pid)
+static inline void set_tui_attach_device(unsigned int id)
 {
 }
 
@@ -201,15 +196,8 @@ static inline unsigned int tui_attach_device(void)
 {
 	return 0;
 }
-static inline int tui_pid_status(int pid_value)
-{
-	return 0;
-}
-#ifdef CONFIG_TEE_SMP
-static inline int load_tui_font_file(unsigned int ttf_file_size, unsigned int arg)
-#else
+
 static inline int load_tui_font_file(unsigned int ttf_file_size)
-#endif
 {
 	return 0;
 }

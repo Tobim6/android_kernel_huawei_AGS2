@@ -18,10 +18,6 @@
 #define TIMESTAMP_SAVE_INDEX    16
 #endif
 
-#ifndef ZERO_SIZE_PTR
-#define ZERO_SIZE_PTR ((void *)16)
-#define ZERO_OR_NULL_PTR(x) ((unsigned long)(x) <= (unsigned long)ZERO_SIZE_PTR)
-#endif
 
 typedef struct {
 	__u32 method;
@@ -57,7 +53,6 @@ typedef struct {
 #ifdef SECURITY_AUTH_ENHANCE
 	void* teec_token;
 #endif
-  	__u32 callingPid;
 } TC_NS_ClientContext;
 
 typedef struct {
@@ -77,10 +72,6 @@ struct load_app_ioctl_struct {
 #define	vmalloc_addr_valid(kaddr) \
 	(((void *)(kaddr) >= (void *)VMALLOC_START) && \
 	((void *)(kaddr) < (void *)VMALLOC_END))
-
-#define	modules_addr_valid(kaddr) \
-	(((void *)(kaddr) >= (void *)MODULES_VADDR) && \
-	((void *)(kaddr) < (void *)MODULES_END))
 
 #define TST_CMD_01 (1)
 #define TST_CMD_02 (2)
@@ -124,12 +115,7 @@ struct load_app_ioctl_struct {
 	_IOWR(TC_NS_CLIENT_IOC_MAGIC, 17, TC_NS_Time)
 #define TC_NS_CLIENT_IOCTL_SET_NATIVE_IDENTITY \
 	_IOWR(TC_NS_CLIENT_IOC_MAGIC, 18, int)
-#define TC_NS_CLIENT_IOCTL_LOAD_TTF_FILE_AND_NOTCH_HEIGHT \
+#define TC_NS_CLIENT_IOCTL_LOAD_TTF_FILE \
 	_IOWR(TC_NS_CLIENT_IOC_MAGIC, 19, unsigned int)
-#define TC_NS_CLIENT_IOCTL_LOW_TEMPERATURE_MODE\
-	_IOWR(TC_NS_CLIENT_IOC_MAGIC, 20, unsigned int)
 
-#ifdef CONFIG_HISI_CLANG
-#define TZ_CRYPTO_SHASH_DESCSIZE    128
-#endif
 #endif

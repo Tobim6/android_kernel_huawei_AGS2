@@ -60,6 +60,18 @@
 #define TCHAR char
 #define _T
 
+static int indirectSprintf(char *strDest, const char *format, ...)
+{
+	int ret = 0;
+	va_list arglist;
+
+	va_start(arglist, format);
+	ret = vsprintf(strDest, format, arglist); /*lint !e668*/
+	va_end(arglist);
+
+	return ret;
+}
+
 /*
 fast conversion for %d %i %u
 
@@ -150,6 +162,7 @@ int securec_output_s
 	int padding = 0;
 
 	int textLen;                    /* length of the text*/
+	int bufferSize = 0;               /* size of text.sz */
 
 	int dynWidth =  0, dynPrecision =  0;
 	int noOutput =  0;
@@ -808,10 +821,11 @@ COMMON_INT: {
 					}
 				}
 
+FILL_STRING_BUFFER:
 				/* write text */
 				if (bufferIsWide && (textLen > 0)) {
 					wchar_t *p;
-					int retval = 0;
+					int retval;
 					int count;
 					/* int e = 0;*/
 					char L_buffer[MB_LEN_MAX + 1];

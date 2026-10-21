@@ -47,7 +47,6 @@
 #define HASH_FILE_MAX_SIZE 8192
 #define AGENT_BUFF_SIZE (4*1024)
 #define AGENT_MAX	32
-#define MAX_PATH_SIZE 512
 
 static struct list_head tee_agent_list;
 
@@ -57,158 +56,6 @@ struct __agent_control {
 };
 static struct __agent_control agent_control;
 
-#define TEE_SECE_AGENT_ID   0x53656345 //npu agent id
-#define TEE_FACE_AGENT1_ID   0x46616365 //face agent id
-#define TEE_FACE_AGENT2_ID   0x46616345 //face agent id
-#define SYSTEM_UID 1000
-
-typedef struct ca_info {
-	char path[MAX_PATH_SIZE];
-	uint32_t uid;
-	uint32_t agent_id;
-} CA_INFO;
-CA_INFO allowed_ext_agent_ca[] = {
-	{
-		"/vendor/bin/hiaiserver",
-		1000,
-		TEE_SECE_AGENT_ID,
-	},
-	{
-		"/vendor/bin/hw/vendor.huawei.hardware.biometrics.hwfacerecognize@1.1-service",
-		1000,
-		TEE_FACE_AGENT1_ID,
-	},
-	{
-		"/vendor/bin/hw/vendor.huawei.hardware.biometrics.hwfacerecognize@1.1-service",
-		1000,
-		TEE_FACE_AGENT2_ID,
-	},
-
-    /*just for test in ENG version*/
-};
-
-static int is_allowed_agent_ca(const CA_INFO *ca, bool check_agent_id_flag)
-{
-	uint32_t i;
-	CA_INFO *tmp_ca = allowed_ext_agent_ca;
-	if (ca == NULL) {
-		return -1;
-	}
-
-	if (!check_agent_id_flag) {
-		for(i = 0; i < sizeof(allowed_ext_agent_ca)/sizeof(CA_INFO); i++) {
-			if ((0 == memcmp(ca->path, tmp_ca->path, MAX_PATH_SIZE)) && (ca->uid == tmp_ca->uid))
-			{
-				return 0;
-			}
-			tmp_ca++;
-		}
-	} else {
-		for(i = 0; i < sizeof(allowed_ext_agent_ca)/sizeof(CA_INFO); i++) {
-			if ((0 == memcmp(ca->path, tmp_ca->path, MAX_PATH_SIZE))
-					&& (ca->uid == tmp_ca->uid)
-					&& (ca->agent_id == tmp_ca->agent_id))
-			{
-				return 0;
-			}
-			tmp_ca++;
-		}
-	}
-	tlogd("ca-uid is %u, ca_path is %s, agent id is %x\n", ca->uid, ca->path, ca->agent_id);
-	return -1;
-}
-
-static int get_ca_path_and_uid(struct task_struct *ca_task, CA_INFO *ca)
-{
-	char *path = NULL;
-	const struct cred *cred = NULL;
-	int message_size;
-	int ret = 0;
-	char *tpath = NULL;
-
-	if (NULL == ca_task || NULL == ca) {
-		TCERR("task info is NULL\n");
-		return -EPERM;
-	}
-
-	cred = get_task_cred(ca_task); /*lint !e838 */
-	if (NULL == cred) {
-		TCERR("cred is NULL\n");
-		return -EPERM;
-
-	}
-
-	tpath = kmalloc(MAX_PATH_SIZE, GFP_KERNEL);
-	if (NULL == tpath) {
-		TCERR("tpath kmalloc fail\n");
-		put_cred(cred);
-		return -EPERM;
-	}
-
-	path = get_process_path(ca_task, tpath);
-	if (IS_ERR_OR_NULL(path)) {
-		ret = -ENOMEM;
-		goto end;
-	}
-
-	message_size = snprintf_s(ca->path, MAX_PATH_SIZE - 1,
-			MAX_PATH_SIZE - 1, "%s", path);
-	ca->uid = cred->uid.val;
-	tlogd("ca_task->comm is %s, path is %s, ca uid is %u\n", ca_task->comm, path, cred->uid.val);
-
-	if (message_size > 0)
-		ret = 0;
-	else
-		ret = -1;
-
-end:
-	kfree(tpath);
-	put_cred(cred);
-	tpath = NULL;
-	cred = NULL;
-	return ret;
-}
-
-int check_ext_agent_access(struct task_struct *ca_task)
-{
-	int ret = 0;
-	CA_INFO agent_ca = {"", 0, 0};
-
-	if (NULL == ca_task) {
-		TCERR("ca_task is NULL\n");
-		return -EPERM;
-	}
-
-	ret = get_ca_path_and_uid(ca_task, &agent_ca);
-	if (ret) {
-		tloge("get cp path or uid failed\n");
-		return ret;
-	}
-
-	ret = is_allowed_agent_ca(&agent_ca, 0);
-	return ret;
-}
-
-int check_ext_agent_access_with_agent_id(struct task_struct *ca_task, uint32_t agent_id)
-{
-	int ret = 0;
-	CA_INFO agent_ca = {"", 0, 0};
-
-	if (NULL == ca_task) {
-		TCERR("ca_task is NULL\n");
-		return -EPERM;
-	}
-
-	ret = get_ca_path_and_uid(ca_task, &agent_ca);
-	if (ret) {
-		tloge("get cp path or uid failed\n");
-		return ret;
-	}
-	agent_ca.agent_id = agent_id;
-	ret = is_allowed_agent_ca(&agent_ca, 1);
-	return ret;
-}
-
 int TC_NS_set_nativeCA_hash(unsigned long arg)
 {
 	int ret = 0;
@@ -216,7 +63,7 @@ int TC_NS_set_nativeCA_hash(unsigned long arg)
 	uint8_t *inbuf = (uint8_t *)arg;
 	uint32_t buflen = 0;
 	uint8_t *buftotee = NULL;
-	struct mb_cmd_pack *mb_pack = NULL;
+	struct mb_cmd_pack *mb_pack;
 
 	if (NULL == inbuf)
 		return -1;
@@ -267,12 +114,10 @@ int TC_NS_set_nativeCA_hash(unsigned long arg)
 	smc_cmd.operation_phys = virt_to_phys(&mb_pack->operation);
 	smc_cmd.operation_h_phys = virt_to_phys(&mb_pack->operation) >> 32; /*lint !e572*/
 
-	ret = (int)TC_NS_SMC(&smc_cmd, 0);
+	ret = TC_NS_SMC(&smc_cmd, 0);
 
 	mailbox_free(buftotee);
 	mailbox_free(mb_pack);
-	buftotee = NULL;
-	mb_pack = NULL;
 
 	return ret;
 }
@@ -285,24 +130,18 @@ void TC_NS_send_event_response_all(void)
 	if (TC_NS_send_event_response(AGENT_FS_ID))
 		tloge("failed to send response to AGENT_FS_ID\n");
 	event_data = find_event_control(AGENT_FS_ID);
-	if (event_data) {
+	if (event_data)
 		event_data->agent_alive = 0;
-		put_agent_event(event_data);
-	}
 	if (TC_NS_send_event_response(AGENT_MISC_ID))
 		tloge("failed to send response to AGENT_MISC_ID\n");
 	event_data = find_event_control(AGENT_MISC_ID);
-	if (event_data) {
+	if (event_data)
 		event_data->agent_alive = 0;
-		put_agent_event(event_data);
-	}
 	if (TC_NS_send_event_response(AGENT_SOCKET_ID))
 		tloge("failed to send response to AGENT_SOCKET_ID\n");
 	event_data = find_event_control(AGENT_SOCKET_ID);
-	if (event_data) {
+	if (event_data)
 		event_data->agent_alive = 0;
-		put_agent_event(event_data);
-	}
 
 }
 
@@ -316,7 +155,6 @@ struct __smc_event_data *find_event_control(unsigned int agent_id)
 	list_for_each_entry(event_data, &agent_control.agent_list, head) {/*lint !e64 !e826*/
 		if (event_data->agent_id == agent_id) {
 			tmp_data = event_data;
-			get_agent_event(event_data);
 			break;
 		}
 	}
@@ -324,32 +162,11 @@ struct __smc_event_data *find_event_control(unsigned int agent_id)
 
 	return tmp_data;
 }
-static void free_event_control(unsigned int agent_id)
-{
-	struct __smc_event_data *event_data = NULL;
-	struct __smc_event_data *tmp_event = NULL;
-	unsigned long flags;
-	spin_lock_irqsave(&agent_control.lock, flags);
-	list_for_each_entry_safe(event_data, tmp_event,
-							&agent_control.agent_list, head) {
-		if (event_data->agent_id == agent_id) {
-			list_del(&event_data->head);
-			break;
-		}
-	}
-	spin_unlock_irqrestore(&agent_control.lock, flags);
-	if (event_data != NULL) {
-		/* Release the share memory obtained in TC_NS_register_agent() */
-		put_sharemem_struct(event_data->buffer);
-		put_agent_event(event_data);
-	}
-}
 
 
-int agent_process_work(const TC_NS_SMC_CMD *smc_cmd, unsigned int agent_id)
+int agent_process_work(TC_NS_SMC_CMD *smc_cmd, unsigned int agent_id)
 {
-	struct __smc_event_data *event_data = NULL;
-	int ret = TEEC_SUCCESS;
+	struct __smc_event_data *event_data;
 
 	if (NULL == smc_cmd) {
 		/*TODO: if return, the pending task in S can't be resumed!! */
@@ -362,7 +179,6 @@ int agent_process_work(const TC_NS_SMC_CMD *smc_cmd, unsigned int agent_id)
 	if ( NULL == event_data || 0 == event_data->agent_alive) {
 		/*TODO: if return, the pending task in S can't be resumed!! */
 		tloge("agent %u not exist\n", agent_id);
-		put_agent_event(event_data);
 		return TEEC_ERROR_GENERIC;/*lint !e570*/
 	}
 	tlogd("agent_process_work: returning client command");
@@ -370,24 +186,22 @@ int agent_process_work(const TC_NS_SMC_CMD *smc_cmd, unsigned int agent_id)
 	/* store tui working device for terminate tui
 	 * when this device is closed.
 	 */
-	if (agent_id == TEE_TUI_AGENT_ID){
-		tloge("TEE_TUI_AGENT_ID: pid-%d", current->pid);
-		set_tui_caller_info(smc_cmd->dev_file_id, current->pid);}
+	if (agent_id == TEE_TUI_AGENT_ID)
+		set_tui_attach_device(smc_cmd->dev_file_id);
 
+	/* Keep a copy of the SMC cmd to return to TEE when the work is done */
+	if (memcpy_s(&event_data->cmd, sizeof(TC_NS_SMC_CMD), smc_cmd, sizeof(TC_NS_SMC_CMD))) {
+		tloge("failed to memcpy_s smc_cmd\n");
+		return TEEC_ERROR_GENERIC;
+	}
+	isb();
+	wmb();
 	event_data->ret_flag = 1;
 	/* Wake up the agent that will process the command */
 	tlogd("agent_process_work: wakeup the agent");
 	wake_up(&event_data->wait_event_wq);
 
-
-	tlogd("agent 0x%x request, goto sleep, pe->run=%d\n",
-		agent_id, atomic_read(&event_data->ca_run));
-	/* we need to wait agent work done even if CA receive a signal */
-	wait_event(event_data->ca_pending_wq, atomic_read(&event_data->ca_run));
-	atomic_set(&event_data->ca_run, 0);
-	put_agent_event(event_data);
-
-	return ret;
+	return TEEC_SUCCESS;
 }
 
 /*
@@ -402,12 +216,8 @@ int agent_process_work(const TC_NS_SMC_CMD *smc_cmd, unsigned int agent_id)
  */
 int is_agent_alive(unsigned int agent_id)
 {
-	struct __smc_event_data* event_data = NULL;
-	event_data = find_event_control(agent_id);
-	if (event_data) {
-		put_agent_event(event_data);
+	if (find_event_control(agent_id))
 		return 1;
-	}
 	else
 		return 0;
 }
@@ -415,16 +225,17 @@ int is_agent_alive(unsigned int agent_id)
 int TC_NS_wait_event(unsigned int agent_id)
 {
 	int ret = -EINVAL;
-	struct __smc_event_data *event_data = NULL;
+	struct __smc_event_data *event_data;
 
-	if ((TC_NS_get_uid() != 0) && check_ext_agent_access_with_agent_id(current, agent_id)) {
+	if (TC_NS_get_uid() != 0) {
 		tloge("It is a fake tee agent\n");
 		return -EACCES;
 	}
 
 	event_data = find_event_control(agent_id);
-	tlogi("agent %u waits for command\n", agent_id);
+	tlogd("agent %u waits for command\n", agent_id);
 	if (event_data) {
+		get_agent_event(event_data);
 		/* wait event will return either 0 or -ERESTARTSYS so just
 		 * return it further to the ioctl handler */
 		ret = wait_event_interruptible(event_data->wait_event_wq,/*lint !e774 !e845 !e712 !e40*/
@@ -438,14 +249,14 @@ int TC_NS_wait_event(unsigned int agent_id)
 }
 
 
-int TC_NS_sync_sys_time(const TC_NS_Time *tc_ns_time)
+int TC_NS_sync_sys_time(TC_NS_Time *tc_ns_time)
 {
 	TC_NS_SMC_CMD smc_cmd = { 0 };
 	int ret = 0;
 	TC_NS_Time tmp_tc_ns_time = {0};
 	struct mb_cmd_pack *mb_pack = NULL;
 
-	if (tc_ns_time == NULL) {
+	if (!tc_ns_time) {
 		tloge("tc_ns_time is NULL input buffer\n");
 		return -EINVAL;
 	}
@@ -459,7 +270,7 @@ int TC_NS_sync_sys_time(const TC_NS_Time *tc_ns_time)
 	}
 
 	mb_pack = mailbox_alloc_cmd_pack();
-	if (mb_pack == NULL) {
+	if (!mb_pack) {
 		tloge("alloc mb pack failed\n");
 		return -ENOMEM;
 	}
@@ -471,42 +282,37 @@ int TC_NS_sync_sys_time(const TC_NS_Time *tc_ns_time)
 	smc_cmd.err_origin = (unsigned int)tmp_tc_ns_time.seconds;
 	smc_cmd.ret_val = (unsigned int)tmp_tc_ns_time.millis;
 
-	ret = (int)TC_NS_SMC(&smc_cmd, 0);
+	ret = TC_NS_SMC(&smc_cmd, 0);
 	if (ret)
 		tloge("tee adjust time failed, return error %x\n", ret);
 
 	mailbox_free(mb_pack);
-	mb_pack = NULL;
 
 	return ret;
 }
+
 
 int TC_NS_send_event_response(unsigned int agent_id)
 {
 	struct __smc_event_data *event_data = find_event_control(agent_id);
 	unsigned int ret;
 
-	if (TC_NS_get_uid() != 0 && check_ext_agent_access_with_agent_id(current, agent_id)) {
+	if (TC_NS_get_uid() != 0) {
 		tloge("It is a fake tee agent\n");
-		put_agent_event(event_data);
 		return -1;
 	}
 
 	tlogd("agent %u sends answer back\n", agent_id);
 	if (event_data && event_data->ret_flag) {
+		get_agent_event(event_data);
 		event_data->send_flag = 1;
 		event_data->ret_flag = 0;
 		/* Send the command back to the TA session waiting for it */
-		tlogi("agent 0x%x wakeup ca\n", agent_id);
-		atomic_set(&event_data->ca_run, 1);
-		/* make sure reset working_ca before wakeup CA */
-		wake_up(&event_data->ca_pending_wq);
-		ret = 0;
+		ret = TC_NS_POST_SMC(&event_data->cmd);
 		put_agent_event(event_data);
 
 		return ret;
 	}
-	put_agent_event(event_data);
 	return -EINVAL;
 }
 
@@ -520,7 +326,7 @@ int TC_NS_register_agent(TC_NS_DEV_File *dev_file, unsigned int agent_id,
 	unsigned long flags;
 	struct mb_cmd_pack *mb_pack = NULL;
 
-	if ((TC_NS_get_uid() != 0) && check_ext_agent_access_with_agent_id(current, agent_id)) {
+	if (TC_NS_get_uid() != 0) {
 		tloge("It is a fake tee agent\n");
 		ret = TEEC_ERROR_GENERIC;
 		goto error;
@@ -545,15 +351,13 @@ int TC_NS_register_agent(TC_NS_DEV_File *dev_file, unsigned int agent_id,
 			atomic_set(&event_data->usage, 1);
 			init_waitqueue_head(&(event_data->wait_event_wq));
 			init_waitqueue_head(&(event_data->send_response_wq));
-			init_waitqueue_head(&(event_data->ca_pending_wq));
-			atomic_set(&event_data->ca_run, 0);
 			ret = TEEC_SUCCESS;
 		} else
 			ret = TEEC_ERROR_GENERIC;
 		goto error;
 	}
 
-	if (shared_mem == NULL) {
+	if (!shared_mem) {
 		tloge("shared mem is not exist\n");
 		ret = TEEC_ERROR_GENERIC;
 		goto error;
@@ -563,7 +367,7 @@ int TC_NS_register_agent(TC_NS_DEV_File *dev_file, unsigned int agent_id,
 	get_sharemem_struct(shared_mem);
 
 	mb_pack = mailbox_alloc_cmd_pack();
-	if (mb_pack == NULL) {
+	if (!mb_pack) {
 		tloge("alloc mailbox failed\n");
 		ret = TEEC_ERROR_GENERIC;
 		put_sharemem_struct(shared_mem);
@@ -583,7 +387,7 @@ int TC_NS_register_agent(TC_NS_DEV_File *dev_file, unsigned int agent_id,
 	smc_cmd.operation_h_phys = virt_to_phys(&mb_pack->operation) >> 32; /*lint !e572*/
 	smc_cmd.agent_id = agent_id;
 
-	ret = (int)TC_NS_SMC(&smc_cmd, 0);
+	ret = TC_NS_SMC(&smc_cmd, 0);
 
 	if (ret == TEEC_SUCCESS) {
 		event_data =
@@ -603,8 +407,6 @@ int TC_NS_register_agent(TC_NS_DEV_File *dev_file, unsigned int agent_id,
 		init_waitqueue_head(&(event_data->wait_event_wq));
 		init_waitqueue_head(&(event_data->send_response_wq));
 		INIT_LIST_HEAD(&event_data->head);
-		init_waitqueue_head(&(event_data->ca_pending_wq));
-		atomic_set(&event_data->ca_run, 0);
 
 		spin_lock_irqsave(&agent_control.lock, flags);
 		list_add_tail(&event_data->head, &agent_control.agent_list);
@@ -616,10 +418,8 @@ int TC_NS_register_agent(TC_NS_DEV_File *dev_file, unsigned int agent_id,
 	}
 
 error:
-	if (mb_pack) {
+	if (mb_pack)
 		mailbox_free(mb_pack);
-		mb_pack = NULL;
-	}
 	return ret; /*lint !e429 */
 }
 
@@ -627,11 +427,15 @@ error:
 int TC_NS_unregister_agent(unsigned int agent_id)
 {
 	struct __smc_event_data *event_data = NULL;
+	struct __smc_event_data *tmp_event = NULL;
+
 	int ret = 0;
+	int find_flag = 0;
+	unsigned long flags;
 	TC_NS_SMC_CMD smc_cmd = { 0 };
 	struct mb_cmd_pack *mb_pack = NULL;
 
-	if ((TC_NS_get_uid() != 0) && (TC_NS_get_uid() != SYSTEM_UID)) {
+	if (TC_NS_get_uid() != 0) {
 		tloge("It is a fake tee agent\n");
 		return TEEC_ERROR_GENERIC;
 	}
@@ -641,18 +445,30 @@ int TC_NS_unregister_agent(unsigned int agent_id)
 		tloge("system agent is not allowed to unregister  agent_id=0x%x\n", agent_id);
 		return TEEC_ERROR_GENERIC;
 	}
-	mb_pack = mailbox_alloc_cmd_pack();
-	if (mb_pack == NULL) {
-		tloge("alloc mailbox failed\n");
-		return TEEC_ERROR_GENERIC;
+
+	spin_lock_irqsave(&agent_control.lock, flags);
+	list_for_each_entry_safe(event_data, tmp_event,
+							&agent_control.agent_list, head) {
+		if (event_data->agent_id == agent_id) {
+			find_flag = 1;
+			list_del(&event_data->head);
+			break;
+		}
 	}
-	event_data = find_event_control(agent_id);
-	if (event_data == NULL) {
-		mailbox_free(mb_pack);
+	spin_unlock_irqrestore(&agent_control.lock, flags);
+
+	if (!find_flag) {
 		tloge("agent is not found\n");
 		return TEEC_ERROR_GENERIC;
 	}
 
+	mb_pack = mailbox_alloc_cmd_pack();
+	if (!mb_pack) {
+		tloge("alloc mailbox failed\n");
+		return TEEC_ERROR_GENERIC;
+	}
+
+	get_agent_event(event_data);
 	mb_pack->operation.paramTypes = TEE_PARAM_TYPE_VALUE_INPUT | (TEE_PARAM_TYPE_VALUE_INPUT << 4);
 	mb_pack->operation.params[0].value.a = virt_to_phys(event_data->buffer->kernel_addr);
 	mb_pack->operation.params[0].value.b = virt_to_phys(event_data->buffer->kernel_addr) >> 32; /*lint !e572*/
@@ -668,26 +484,26 @@ int TC_NS_unregister_agent(unsigned int agent_id)
 
 	mutex_lock(&event_data->work_lock);
 	tlogd("Unregistering agent %u\n", agent_id);
-	ret = (int)TC_NS_SMC(&smc_cmd, 0);
+	ret = TC_NS_SMC(&smc_cmd, 0);
 	mutex_unlock(&event_data->work_lock);
-	if (ret == TEEC_SUCCESS) {
-    		free_event_control(agent_id);
-	}
+	/* Release the share memory obtained in TC_NS_register_agent() */
+	put_sharemem_struct(event_data->buffer);
 	put_agent_event(event_data);
 
+	put_agent_event(event_data); /* paired with register_agent */
 	mailbox_free(mb_pack);
-	mb_pack = NULL;
+
 	return ret;
 }
 
-bool TC_NS_is_system_agent_client(const TC_NS_DEV_File *dev_file)
+bool TC_NS_is_system_agent_client(TC_NS_DEV_File *dev_file)
 {
 	struct __smc_event_data *event_data = NULL;
 	struct __smc_event_data *tmp = NULL;
 	bool system_agent = false;
 	unsigned long flags;
 
-	if (dev_file == NULL)
+	if (!dev_file)
 		return system_agent;
 
 	spin_lock_irqsave(&agent_control.lock, flags);
@@ -703,13 +519,12 @@ bool TC_NS_is_system_agent_client(const TC_NS_DEV_File *dev_file)
 	return system_agent;
 }
 
-int TC_NS_unregister_agent_client(const TC_NS_DEV_File *dev_file)
+int TC_NS_unregister_agent_client(TC_NS_DEV_File *dev_file)
 {
 	struct __smc_event_data *event_data = NULL;
 	struct __smc_event_data	*tmp = NULL;
 	unsigned int agent_id[AGENT_MAX] = {0};
 	unsigned int i = 0;
-	unsigned int ret = 0;
 	unsigned long flags;
 
 	spin_lock_irqsave(&agent_control.lock, flags);
@@ -722,15 +537,11 @@ int TC_NS_unregister_agent_client(const TC_NS_DEV_File *dev_file)
 	spin_unlock_irqrestore(&agent_control.lock, flags);
 
 	for (i = 0; i < AGENT_MAX; i++) {
-		if (agent_id[i]) {
-			if(TC_NS_unregister_agent(agent_id[i])) {
-				TCERR("TC_NS_unregister_agent[%d] failed\n",agent_id[i]);
-				ret |= 1;
-			}
-		}
+		if (agent_id[i])
+			TC_NS_unregister_agent(agent_id[i]);
 	}
 
-	return ret;
+	return TEEC_SUCCESS;
 }
 static int def_tee_agent_work(void *instance)
 {
@@ -814,7 +625,6 @@ out:
 	if (!IS_ERR_OR_NULL(shared_mem)) {
 		tc_mem_free(shared_mem); /*lint !e668 */
 		agent_instance->agent_buffer = NULL;
-		shared_mem = NULL;
 	}
 
 	return ret;

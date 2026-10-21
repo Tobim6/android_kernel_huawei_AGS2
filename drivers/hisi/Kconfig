@@ -52,5 +52,4 @@ source "drivers/hisi/dieid/Kconfig"
 
 endif #HISILICON_PLATFORM
 
-source "drivers/hisi/secs_power_ctrl/Kconfig"
 endmenu
