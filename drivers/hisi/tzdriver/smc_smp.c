@@ -1443,17 +1443,9 @@ static int get_session_root_key(void)
 	crc = crc32(0, (void *)g_session_root_key,
 		    sizeof(struct session_crypto_info));
 	if (crc != tee_crc) {
-		/*
-		 * This device's EMUI8 TEEOS never writes a CRC-matching
-		 * session root key here -- confirmed via AGS2DBG tracing,
-		 * this check fails on every single boot, immediately after
-		 * smc_set_cmd_buffer() itself succeeds. This is a newer
-		 * driver-side integrity feature EMUI8's older TEEOS build
-		 * doesn't implement/support, not evidence of real tampering
-		 * on this specific firmware. Warn and proceed with whatever
-		 * TEEOS actually sent rather than failing init over it.
-		 */
-		tloge("AGS2DBG: session root key CRC mismatch (tee_crc=%x crc=%x), proceeding anyway -- EMUI8 TEEOS doesn't support this check\n", tee_crc, crc);
+		tloge("Session root key has been modified.\n");
+		ret = -EFAULT;
+		goto free_mem;
 	}
 
 	if (memset_s((void *)(cmd_data->in), sizeof(cmd_data->in),
