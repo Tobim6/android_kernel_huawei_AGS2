@@ -1486,25 +1486,18 @@ int smc_init_data(struct device *class_dev)
 	cmd_phys = virt_to_phys(cmd_data);
 
 	/* Send the allocated buffer to TrustedCore for init */
-	tloge("AGS2DBG: calling smc_set_cmd_buffer\n");
 	if (smc_set_cmd_buffer()) {
-		tloge("AGS2DBG: smc_set_cmd_buffer FAILED\n");
 		ret = -EINVAL;
 		goto free_mem;
 	}
-	tloge("AGS2DBG: smc_set_cmd_buffer OK, calling smc_init_secondary_cpus (stubbed)\n");
 	if (smc_init_secondary_cpus()) {
-		tloge("AGS2DBG: smc_init_secondary_cpus FAILED\n");
 		ret = -EINVAL;
 		goto free_mem;
 	}
-	tloge("AGS2DBG: smc_init_secondary_cpus OK, calling get_session_root_key\n");
 	if (get_session_root_key()) {
-		tloge("AGS2DBG: get_session_root_key FAILED\n");
 		ret = -EFAULT;
 		goto free_mem;
 	}
-	tloge("AGS2DBG: get_session_root_key OK, creating siq_thread\n");
 	smc_get_cfc_info();
 
 	siq_thread = kthread_create(siq_thread_fn, NULL, "siqthread/%d", 0);
@@ -1512,11 +1505,9 @@ int smc_init_data(struct device *class_dev)
 	if (unlikely(IS_ERR(siq_thread))) {
 		dev_err(class_dev, "couldn't create siqthread %ld\n",
 			PTR_ERR(siq_thread));
-		tloge("AGS2DBG: siq_thread create FAILED, ret=%ld\n", PTR_ERR(siq_thread));
 		ret = (int)PTR_ERR(siq_thread);
 		goto free_mem;
 	}
-	tloge("AGS2DBG: siq_thread created OK\n");
 
 	/*
 	 * TEE Dump will disable IRQ/FIQ for about 500 ms, it's not
@@ -1534,11 +1525,9 @@ int smc_init_data(struct device *class_dev)
 	if (IS_ERR(ipi_helper_thread)) {
 		dev_err(class_dev, "couldn't create ipi_helper_threads %ld\n",
 			PTR_ERR(ipi_helper_thread));
-		tloge("AGS2DBG: ipi_helper_thread create FAILED, ret=%ld\n", PTR_ERR(ipi_helper_thread));
 		ret = (int)PTR_ERR(ipi_helper_thread);
 		goto free_siq_worker;
 	}
-	tloge("AGS2DBG: ipi_helper_thread created OK, smc_init_data complete, SUCCESS\n");
 
 	wake_up_process(ipi_helper_thread);
 	wake_up_process(siq_thread);
