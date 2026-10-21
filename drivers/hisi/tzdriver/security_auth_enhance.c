@@ -25,6 +25,10 @@ static bool is_token_empty(uint8_t *token, uint32_t token_len)
 {
 	uint32_t i;
 
+	if (token == NULL){
+		tloge("bad parameters, token is null.\n");
+		return true;
+	}
 	for (i = 0; i < token_len; i++) {
 		if (*(token + i))
 			return false;
@@ -39,7 +43,7 @@ static int32_t scrambling_timestamp(void *in, void *out,
 {
 	uint32_t i;
 
-	if (!in || !out || !key) {
+	if (in == NULL || out == NULL || key == NULL) {
 		tloge("bad parameters, input_data is null.\n");
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
@@ -64,7 +68,7 @@ static int32_t descrambling_timestamp(uint8_t *in_token_buf,
 		struct session_secure_info *secure_info, uint8_t flag) {
 	uint64_t timestamp = 0;
 
-	if ((!in_token_buf) || (!secure_info)) {
+	if ((in_token_buf == NULL) || (secure_info == NULL)) {
 		tloge("invalid params!\n");
 		return -EINVAL;
 	}
@@ -108,10 +112,17 @@ int32_t update_timestamp(TC_NS_SMC_CMD *cmd)
 	uint8_t *token_buffer = NULL;
 	phys_addr_t phy_addr;
 	bool global;
+	bool filterFlag;
+	bool needCheckFlag;
 
-	if (!cmd) {
+	if (cmd == NULL) {
 		tloge("cmd is NULL, error!");
 		return TEEC_ERROR_BAD_PARAMETERS;
+	}
+	/*if cmd is agent ,not check uuid. and sometime uuid canot access it */
+	filterFlag = (0 != cmd->agent_id) || (TEEC_PENDING2_AGENT == cmd->ret_val);
+	if (filterFlag) {
+		return TEEC_SUCCESS;
 	}
 
 	phy_addr = (phys_addr_t)(cmd->uuid_h_phys) << 32 | (cmd->uuid_phys);
@@ -119,13 +130,13 @@ int32_t update_timestamp(TC_NS_SMC_CMD *cmd)
 		return TEEC_ERROR_BAD_PARAMETERS;
 
 	uuid = phys_to_virt(phy_addr);
-	if (!uuid) {
+	if (uuid == NULL) {
 		tloge("uuid is NULL, error!\n");
 		return TEEC_ERROR_GENERIC;
 	}
 	global = (UUID_PREFIX_MEANS_GLOBAL == uuid[0]) ? true : false;
-
-	if (!global && 0 == cmd->agent_id && TEEC_PENDING2_AGENT != cmd->ret_val) {
+	needCheckFlag = (!global) && (0 == cmd->agent_id) && (TEEC_PENDING2_AGENT != cmd->ret_val);
+	if (needCheckFlag) {
 		token_buffer = phys_to_virt((phys_addr_t)(cmd->token_h_phys) << 32
 				| (cmd->token_phys));
 		if (!token_buffer || is_token_empty(token_buffer, TOKEN_BUFFER_LEN)) {
@@ -160,7 +171,7 @@ int32_t sync_timestamp(TC_NS_SMC_CMD *cmd, uint8_t *token, unsigned char *uuid, 
 {
 	TC_NS_Session *session = NULL;
 
-	if (!cmd || !token || !uuid) {
+	if (cmd == NULL || token == NULL || uuid == NULL) {
 		tloge("parameters is NULL, error!\n");
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
@@ -199,7 +210,7 @@ int32_t sync_timestamp(TC_NS_SMC_CMD *cmd, uint8_t *token, unsigned char *uuid, 
 static void scrambling_operation(TC_NS_SMC_CMD *cmd,
 	uint32_t scrambler)
 {
-	if (!cmd)
+	if (cmd == NULL)
 		return;
 
 	if (0 != cmd->operation_phys || 0 != cmd->operation_h_phys) {
@@ -216,7 +227,7 @@ static int32_t verify_cmdbuff(TC_NS_SMC_CMD *cmd, uint32_t scrambler)
 	uint32_t crc = 0;
 	uint32_t chksum = 0;
 
-	if (!cmd) {
+	if (cmd == NULL) {
 		tloge("cmd is NULL, error!\n");
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
@@ -252,9 +263,13 @@ int32_t update_chksum(TC_NS_SMC_CMD *cmd)
 	uint32_t crc = 0;
 	bool global = false;
 
-	if (!cmd) {
+	if (cmd == NULL) {
 		tloge("cmd is NULL, error!\n");
 		return TEEC_ERROR_BAD_PARAMETERS;
+	}
+	/*if cmd is agent ,not check uuid. and sometime uuid canot access it */
+	if (0 != cmd->agent_id || TEEC_PENDING2_AGENT == cmd->ret_val) {
+		return TEEC_SUCCESS;
 	}
 
 	cmd->chksum = 0;
@@ -299,7 +314,7 @@ int32_t verify_chksum(TC_NS_SMC_CMD *cmd)
 	bool global = false;
 	bool chk_flag = false;
 
-	if (!cmd) {
+	if (cmd == NULL) {
 		tloge("cmd is NULL, error!\n");
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}

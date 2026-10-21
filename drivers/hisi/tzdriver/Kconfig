@@ -28,19 +28,32 @@ config TEE_TUI
 	help
 	  Trusted user interface diver
 
-config TEE_TUI_HI3650
-	tristate "Trusted user interface driver for 3650"
+config TEE_TUI_ION
+	tristate "Trusted user interface driver for ION"
 	default n
 	depends on TZDRIVER
 	help
 	  Trusted user interface diver
 
-config TEE_TUI_KIRIN970
-	tristate "Trusted user interface driver for kirin970"
+config TEE_TUI_ION_ADD
+	tristate "Trusted user interface driver for add ION memory"
 	default n
 	depends on TZDRIVER
 	help
 	  Trusted user interface diver
+config TEE_TUI_FP
+	tristate "Trusted user interface driver for FP"
+	default n
+	depends on TZDRIVER
+	help
+	  Trusted user interface diver
+
+config TEE_CPU_MIGRATION
+	tristate "TEE cpu core migration"
+	default n
+	depends on TZDRIVER
+	help
+	  TEE cpu core migration
 
 config HISI_SPI_SMC
 	bool "hisi spi smc"
@@ -82,6 +95,12 @@ config TZDRIVER_CODE_ALIGN_SHIFT
 	  There are two DMSS. In Hi3660, we need align tzdriver in
 	  512kB physical memory boundry. In Hi3670 the limitation
 	  reduced to 64kB.
+
+config HISI_SECBOOT_IMG
+    bool "tzdriver split secboot img into modem and ap"
+    default n
+    help
+      Macro defined for splitting modem and ap img
 
 source drivers/hisi/tzdriver/libhwsecurec/Kconfig
 

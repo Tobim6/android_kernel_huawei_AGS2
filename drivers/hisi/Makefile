@@ -49,3 +49,4 @@ obj-$(CONFIG_HISI_GETSPINLOCK_TEST) += test_spinlock/
 ifeq ($(TARGET_VERSION_MODE),factory)
 obj-$(CONFIG_HISI_DIEID) += dieid/
 endif
+obj-$(CONFIG_HISI_SECS_CTRL) += secs_power_ctrl/
