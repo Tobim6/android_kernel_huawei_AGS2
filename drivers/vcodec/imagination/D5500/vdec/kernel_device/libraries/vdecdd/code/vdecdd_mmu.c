@@ -771,6 +771,13 @@ static IMG_RESULT mmu_Malloc(
     {
         return ui32Result;
     }
+    {
+        static int ags2_map_cnt = 0;
+        if (ags2_map_cnt++ < 80)
+            printk(KERN_ERR "AGS2dbg StreamMap heap=%d size=0x%x devVirt=0x%08x end=0x%08x\n",
+                   (int)eHeapId, (unsigned)ui32Size, (unsigned)psDdBufInfo->ui32DevVirt,
+                   (unsigned)(psDdBufInfo->ui32DevVirt + ui32Size));
+    }
 
     ///* Get the CPU linear address. */
     //ui32Result = TALMMU_CpuMemMap(psDdBufInfo->hMemory, &psDdBufInfo->pvCpuVirt);
@@ -1174,6 +1181,13 @@ IMG_RESULT  MMU_StreamMapExt(
     if (ui32Result != IMG_SUCCESS)
     {
         return ui32Result;
+    }
+    {
+        static int ags2_map_cnt = 0;
+        if (ags2_map_cnt++ < 80)
+            printk(KERN_ERR "AGS2dbg StreamMap heap=%d size=0x%x devVirt=0x%08x end=0x%08x\n",
+                   (int)eHeapId, (unsigned)ui32Size, (unsigned)psDdBufInfo->ui32DevVirt,
+                   (unsigned)(psDdBufInfo->ui32DevVirt + ui32Size));
     }
 
 #ifndef IMG_KERNEL_MODULE
