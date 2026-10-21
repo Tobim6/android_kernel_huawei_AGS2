@@ -1386,6 +1386,12 @@ static void smc_work_set_cmd_buffer(struct work_struct *work)
 	smc_work_no_wait(TC_NS_CMD_TYPE_SECURE_CONFIG);
 }
 
+static void smc_work_init_secondary_cpus(struct work_struct *work)
+{
+	(void)work;
+	smc_work_no_wait(TC_NS_CMD_TYPE_NS_TO_SECURE);
+}
+
 static int smc_set_cmd_buffer(void)
 {
 	struct work_struct work;
@@ -1401,14 +1407,21 @@ static int smc_set_cmd_buffer(void)
 
 static int smc_init_secondary_cpus(void)
 {
-	/*
-	 * Stubbed out: this device's EMUI8 ATF/TEEOS never answers the SMC
-	 * sent from a secondary CPU here, so flush_work() below would hang
-	 * forever (confirmed via an RCU stall trace naming this exact work
-	 * function, hanging boot entirely before any userspace starts).
-	 * CPU0's own init via smc_set_cmd_buffer() already succeeds and is
-	 * sufficient; skip the per-secondary-CPU step rather than hang.
-	 */
+	int i = 0;
+	struct work_struct work;
+
+	INIT_WORK_ONSTACK(&work, smc_work_init_secondary_cpus);
+	/* Run work on all secondary cpus */
+	get_online_cpus();
+	for_each_online_cpu(i) {
+		if (i != 0) {
+			schedule_work_on(i, &work);
+			flush_work(&work);
+			tlogd("init secondary cpu %d done\n", i);
+		}
+	}
+	put_online_cpus();
+
 	return 0;
 }
 
