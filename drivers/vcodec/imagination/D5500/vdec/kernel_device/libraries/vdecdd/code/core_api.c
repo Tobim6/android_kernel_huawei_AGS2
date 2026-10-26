@@ -45,6 +45,8 @@
  *
  *****************************************************************************/
 
+#include <linux/stddef.h>
+#include <linux/kernel.h>
 #include "vdec_api.h"
 #include "core_api.h"
 #include "rman_api.h"
@@ -4208,6 +4210,19 @@ static IMG_RESULT core_StreamMapBuf(
         IMG_ASSERT(IMG_FALSE);
     }
 
+    {
+        static int ags2_bi_cnt = 0;
+        if (ags2_bi_cnt++ < 14)
+        {
+            unsigned int * pw = (unsigned int *)psBufInfo;
+            printk(KERN_ERR "AGS2dbg BufInfo type=%d sizeof=%u off(BufSize)=%u off(ExtImportId)=%u off(pvCpuLinearAddr)=%u BufSize=0x%x ExtImportId=%u words: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
+                   (int)eBufType, (unsigned)sizeof(*psBufInfo),
+                   (unsigned)offsetof(VDEC_sBufInfo, ui32BufSize), (unsigned)offsetof(VDEC_sBufInfo, ui32ExtImportId),
+                   (unsigned)offsetof(VDEC_sBufInfo, pvCpuLinearAddr),
+                   (unsigned)psBufInfo->ui32BufSize, (unsigned)psBufInfo->ui32ExtImportId,
+                   pw[0],pw[1],pw[2],pw[3],pw[4],pw[5],pw[6],pw[7],pw[8],pw[9],pw[10],pw[11],pw[12],pw[13],pw[14],pw[15],pw[16],pw[17],pw[18],pw[19]);
+        }
+    }
     /* Ensure the address of the buffer is at least page aligned. */
     IMG_ASSERT(((IMG_UINTPTR)psBufInfo->pvCpuLinearAddr & (DEV_MMU_PAGE_SIZE-1)) == 0);
 

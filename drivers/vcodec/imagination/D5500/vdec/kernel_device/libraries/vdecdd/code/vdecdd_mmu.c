@@ -773,7 +773,7 @@ static IMG_RESULT mmu_Malloc(
     }
     {
         static int ags2_map_cnt = 0;
-        if (ags2_map_cnt++ < 80)
+        if (ags2_map_cnt++ < 700)
             printk(KERN_ERR "AGS2dbg StreamMap heap=%d size=0x%x devVirt=0x%08x end=0x%08x\n",
                    (int)eHeapId, (unsigned)ui32Size, (unsigned)psDdBufInfo->ui32DevVirt,
                    (unsigned)(psDdBufInfo->ui32DevVirt + ui32Size));
@@ -1184,7 +1184,7 @@ IMG_RESULT  MMU_StreamMapExt(
     }
     {
         static int ags2_map_cnt = 0;
-        if (ags2_map_cnt++ < 80)
+        if (ags2_map_cnt++ < 700)
             printk(KERN_ERR "AGS2dbg StreamMap heap=%d size=0x%x devVirt=0x%08x end=0x%08x\n",
                    (int)eHeapId, (unsigned)ui32Size, (unsigned)psDdBufInfo->ui32DevVirt,
                    (unsigned)(psDdBufInfo->ui32DevVirt + ui32Size));
