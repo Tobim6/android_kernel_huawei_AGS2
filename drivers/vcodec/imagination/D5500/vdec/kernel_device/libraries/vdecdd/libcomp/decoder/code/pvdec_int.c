@@ -411,21 +411,6 @@ static IMG_RESULT pvdec_CheckMMUOutstandingRequests (
     {
         REPORT(REPORT_MODULE_VXDIO, REPORT_WARNING,
                "Check MMU outstanding requests error!");
-        /* AGS2 debug: dump MMU state to see why requests never drain */
-        {
-            IMG_UINT32 ui32S0 = REGIO_READ_REGISTER(psPvdecContext, IMG_VIDEO_BUS4_MMU, MMU_STATUS0);
-            IMG_UINT32 ui32S1 = REGIO_READ_REGISTER(psPvdecContext, IMG_VIDEO_BUS4_MMU, MMU_STATUS1);
-            IMG_UINT32 ui32C0 = REGIO_READ_REGISTER(psPvdecContext, IMG_VIDEO_BUS4_MMU, MMU_CONTROL0);
-            IMG_UINT32 ui32C1 = REGIO_READ_REGISTER(psPvdecContext, IMG_VIDEO_BUS4_MMU, MMU_CONTROL1);
-            IMG_UINT32 ui32Db = REGIO_READ_REGISTER(psPvdecContext, IMG_VIDEO_BUS4_MMU, MMU_DIR_BASE_ADDR);
-            IMG_UINT32 ui32Rq = REGIO_READ_REGISTER(psPvdecContext, IMG_VIDEO_BUS4_MMU, MMU_MEM_REQ);
-            IMG_UINT32 ui32Eo = REGIO_READ_REGISTER(psPvdecContext, IMG_VIDEO_BUS4_MMU, MMU_MEM_EXT_OUTSTANDING);
-            IMG_UINT32 ui32Cf0 = REGIO_READ_REGISTER(psPvdecContext, IMG_VIDEO_BUS4_MMU, MMU_CONFIG0);
-            IMG_UINT32 ui32Cf1 = REGIO_READ_REGISTER(psPvdecContext, IMG_VIDEO_BUS4_MMU, MMU_CONFIG1);
-            REPORT(REPORT_MODULE_VXDIO, REPORT_WARNING,
-                   "AGS2dbg MMU: STATUS0=%08x STATUS1=%08x CTRL0=%08x CTRL1=%08x DIRBASE=%08x MEMREQ=%08x EXTOUT=%08x CFG0=%08x CFG1=%08x",
-                   ui32S0, ui32S1, ui32C0, ui32C1, ui32Db, ui32Rq, ui32Eo, ui32Cf0, ui32Cf1);
-        }
         return IMG_ERROR_FATAL;
     }
 

@@ -679,14 +679,6 @@ static IMG_RESULT talmmu_MakePageTableEntryValid(
             goto ErrorExit;
         }
 #else
-        if ((paAddr & 0xFFFFFFFF00000000ull) != 0)
-        {
-            static int ags2_dbg_cnt = 0;
-            if (ags2_dbg_cnt++ < 12)
-                printk(KERN_ERR "AGS2dbg PTE overflow: mmutype=%d paCpu=0x%llx paAfterShift=0x%llx pageNo=%u ptNo=%u idx=%u\n",
-                       (int)psDevMemTemplate->sDevMemInfo.eMMUType, (unsigned long long)paCpuPhysAddr,
-                       (unsigned long long)paAddr, (unsigned)ui32PageNo, (unsigned)ui32PageTableNo, (unsigned)ui32IndexInPageTable);
-        }
         IMG_ASSERT((paAddr & 0xFFFFFFFF00000000ull) == 0);
         psDevMemHeap->pasPageTable[ui32PageTableNo]->pui32PageTable[ui32IndexInPageTable] = (IMG_UINT32)paAddr;
 #endif

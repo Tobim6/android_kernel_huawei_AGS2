@@ -287,14 +287,6 @@ static IMG_RESULT ImportPages(
 		{
 			int offset;
 			dma_addr_t chunkBase = sg_phys(psScattLsAux);
-			{
-				static int ags2_ion_cnt = 0;
-				if (ags2_ion_cnt++ < 24)
-					printk(KERN_ERR "AGS2dbg ION import fd=%d size=%u chunk[%u] sg_phys=0x%llx dma=0x%llx len=%u pfn=0x%lx page=%p\n",
-					       (int)buff_fd, (unsigned)ui32Size, pg_i, (unsigned long long)chunkBase,
-					       (unsigned long long)sg_dma_address(psScattLsAux), (unsigned)psScattLsAux->length,
-					       (unsigned long)page_to_pfn(sg_page(psScattLsAux)), sg_page(psScattLsAux));
-			}
 
 			for (offset = 0; offset < psScattLsAux->length; offset += PAGE_SIZE, ++pg_i)
 			{

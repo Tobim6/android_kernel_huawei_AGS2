@@ -45,8 +45,6 @@
  *
  *****************************************************************************/
 
-#include <linux/stddef.h>
-#include <linux/kernel.h>
 #include "vdec_api.h"
 #include "core_api.h"
 #include "rman_api.h"
@@ -880,21 +878,6 @@ static IMG_RESULT core_SendEvent(
             if (psDecPictInfo)
             {
                 psCallBackInfo->sDecPictInfo = *psDecPictInfo;
-                {
-                    static int ags2_pi_cnt = 0;
-                    if (ags2_pi_cnt++ < 3)
-                    {
-                        unsigned int * pw = (unsigned int *)psDecPictInfo;
-                        int k;
-                        printk(KERN_ERR "AGS2dbg PictInfo sizeof=%u off(sOutputConfig)=%u off(sRendInfo)=%u off(sDispInfo)=%u off(TimeStamp)=%u in-cb=%u\n",
-                               (unsigned)sizeof(*psDecPictInfo), (unsigned)offsetof(VDEC_sDecPictInfo, sOutputConfig),
-                               (unsigned)offsetof(VDEC_sDecPictInfo, sRendInfo), (unsigned)offsetof(VDEC_sDecPictInfo, sDispInfo),
-                               (unsigned)offsetof(VDEC_sDecPictInfo, ui32TimeStamp), (unsigned)offsetof(VDECDD_sCallBackInfo, sDecPictInfo));
-                        for (k = 0; k < 120; k += 8)
-                            printk(KERN_ERR "AGS2dbg PictInfo[%03x]: %08x %08x %08x %08x %08x %08x %08x %08x\n", k*4,
-                                   pw[k],pw[k+1],pw[k+2],pw[k+3],pw[k+4],pw[k+5],pw[k+6],pw[k+7]);
-                    }
-                }
             }
         }
         break;
@@ -4225,19 +4208,6 @@ static IMG_RESULT core_StreamMapBuf(
         IMG_ASSERT(IMG_FALSE);
     }
 
-    {
-        static int ags2_bi_cnt = 0;
-        if (ags2_bi_cnt++ < 14)
-        {
-            unsigned int * pw = (unsigned int *)psBufInfo;
-            printk(KERN_ERR "AGS2dbg BufInfo type=%d sizeof=%u off(BufSize)=%u off(ExtImportId)=%u off(pvCpuLinearAddr)=%u BufSize=0x%x ExtImportId=%u words: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
-                   (int)eBufType, (unsigned)sizeof(*psBufInfo),
-                   (unsigned)offsetof(VDEC_sBufInfo, ui32BufSize), (unsigned)offsetof(VDEC_sBufInfo, ui32ExtImportId),
-                   (unsigned)offsetof(VDEC_sBufInfo, pvCpuLinearAddr),
-                   (unsigned)psBufInfo->ui32BufSize, (unsigned)psBufInfo->ui32ExtImportId,
-                   pw[0],pw[1],pw[2],pw[3],pw[4],pw[5],pw[6],pw[7],pw[8],pw[9],pw[10],pw[11],pw[12],pw[13],pw[14],pw[15],pw[16],pw[17],pw[18],pw[19]);
-        }
-    }
     /* Ensure the address of the buffer is at least page aligned. */
     IMG_ASSERT(((IMG_UINTPTR)psBufInfo->pvCpuLinearAddr & (DEV_MMU_PAGE_SIZE-1)) == 0);
 

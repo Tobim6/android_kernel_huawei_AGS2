@@ -690,12 +690,6 @@ typedef struct
 
     VDEC_sPictBufConfig sPictBufConfig; /*!< Picture buffer configuration (only used by for images)             */
 
-    /* AGS2: the shipped userland (libomx_vxd) has an extra 32-bit word here (it stores the OMX colour
-       format at this offset) between sPictBufConfig and ui32BufSize. The open-source drop lacked it, so
-       the kernel read that word as the buffer size (0xFFFFFFFF for bitstream buffers, a tiny number for
-       pictures) and mapped every buffer one page long. Total size stays 96 bytes (it takes the padding). */
-    IMG_UINT32  ui32UserExtra;
-
     /* *** NOTE: The following are fields used internally within VDEC... */
 
     IMG_UINT32  ui32BufSize;            /*!< The size of the buffer (in bytes).  */
