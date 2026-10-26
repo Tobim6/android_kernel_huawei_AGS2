@@ -880,6 +880,21 @@ static IMG_RESULT core_SendEvent(
             if (psDecPictInfo)
             {
                 psCallBackInfo->sDecPictInfo = *psDecPictInfo;
+                {
+                    static int ags2_pi_cnt = 0;
+                    if (ags2_pi_cnt++ < 3)
+                    {
+                        unsigned int * pw = (unsigned int *)psDecPictInfo;
+                        int k;
+                        printk(KERN_ERR "AGS2dbg PictInfo sizeof=%u off(sOutputConfig)=%u off(sRendInfo)=%u off(sDispInfo)=%u off(TimeStamp)=%u in-cb=%u\n",
+                               (unsigned)sizeof(*psDecPictInfo), (unsigned)offsetof(VDEC_sDecPictInfo, sOutputConfig),
+                               (unsigned)offsetof(VDEC_sDecPictInfo, sRendInfo), (unsigned)offsetof(VDEC_sDecPictInfo, sDispInfo),
+                               (unsigned)offsetof(VDEC_sDecPictInfo, ui32TimeStamp), (unsigned)offsetof(VDECDD_sCallBackInfo, sDecPictInfo));
+                        for (k = 0; k < 120; k += 8)
+                            printk(KERN_ERR "AGS2dbg PictInfo[%03x]: %08x %08x %08x %08x %08x %08x %08x %08x\n", k*4,
+                                   pw[k],pw[k+1],pw[k+2],pw[k+3],pw[k+4],pw[k+5],pw[k+6],pw[k+7]);
+                    }
+                }
             }
         }
         break;
