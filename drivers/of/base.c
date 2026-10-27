@@ -195,9 +195,94 @@ int __of_attach_node_sysfs(struct device_node *np)
 	return 0;
 }
 
+/*
+ * AGS2: the device tree comes from the bootloader's "dts" partition (not buildable here) and lists the stock partitions cust, preas,
+ * preavs, product and version as early-mount partitions (firmware/android/fstab and the vbmeta "parts" lists). The AGS2 install zip
+ * repartitions the eMMC without them and init then stops in first-stage mount ("partition(s) not found after polling timeout").
+ * Fix the tree userspace sees: init skips an fstab entry whose status is not "ok", and the vbmeta part lists are trimmed. Done before
+ * the nodes are attached to sysfs, so /proc/device-tree shows the corrected values.
+ */
+static const char * const ags2_dropped_parts[] = { "cust", "preas", "preavs", "product", "version" };
+
+static bool __init ags2_part_dropped(const char *name)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(ags2_dropped_parts); i++)
+		if (!strcmp(name, ags2_dropped_parts[i]))
+			return true;
+	return false;
+}
+
+static void __init ags2_trim_parts(struct device_node *vb)
+{
+	struct property *p = of_find_property(vb, "parts", NULL);
+	char in[256], out[256], *cur, *tok;
+
+	if (!p || !p->value || p->length < 2 || p->length > sizeof(in))
+		return;
+	memcpy(in, p->value, p->length);
+	in[sizeof(in) - 1] = 0;
+	out[0] = 0;
+	cur = in;
+	while ((tok = strsep(&cur, ",")) != NULL) {
+		if (!*tok || ags2_part_dropped(tok))
+			continue;
+		if (out[0])
+			strlcat(out, ",", sizeof(out));
+		strlcat(out, tok, sizeof(out));
+	}
+	if (strlen(out) + 1 < (size_t)p->length) {
+		memcpy(p->value, out, strlen(out) + 1);
+		p->length = strlen(out) + 1;
+		pr_info("ags2: %s/parts = %s\n", vb->name, out);
+	}
+}
+
+static void __init ags2_dt_fixup(void)
+{
+	struct device_node *android, *fstab, *np;
+
+	android = of_find_node_by_path("/firmware/android");
+	if (!android)
+		return;
+	fstab = of_get_child_by_name(android, "fstab");
+	if (fstab) {
+		for_each_child_of_node(fstab, np) {
+			struct property *st;
+
+			if (!ags2_part_dropped(np->name))
+				continue;
+			st = of_find_property(np, "status", NULL);
+			if (st && st->value && st->length >= 3) {
+				memset(st->value, 0, st->length);
+				memcpy(st->value, "no", 3);
+			} else if (!st) {
+				st = kzalloc(sizeof(*st), GFP_KERNEL);
+				if (!st)
+					continue;
+				st->name = kstrdup("status", GFP_KERNEL);
+				st->value = kstrdup("no", GFP_KERNEL);
+				st->length = 3;
+				if (!st->name || !st->value || of_add_property(np, st))
+					continue;
+			}
+			pr_info("ags2: fstab/%s disabled (partition removed by the install zip)\n", np->name);
+		}
+		of_node_put(fstab);
+	}
+	for_each_child_of_node(android, np) {
+		if (!strncmp(np->name, "vbmeta", 6))
+			ags2_trim_parts(np);
+	}
+	of_node_put(android);
+}
+
 void __init of_core_init(void)
 {
 	struct device_node *np;
+
+	ags2_dt_fixup();
 
 	/* Create the kset, and register existing nodes */
 	mutex_lock(&of_mutex);
