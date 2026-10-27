@@ -94,6 +94,10 @@ static void hi6555c_power_codec(struct snd_soc_codec *codec, int on);
 
 static int classd_voltage = CLASSD_4500mV_VOL;
 static bool HSLR_GAIN_RECONFIGURE_FLAG = false;
+/* HSL/HSR analog gain (ANA_RW17/18 bits 1..4) programmed by userspace before the headset PA powers up; the power-up
+ * sequence overwrites those registers twice (0x21, then the default gain), so it is captured at the first step. */
+static unsigned int hs_user_gain_l;
+static unsigned int hs_user_gain_r;
 #define HAC_ENABLE                   1
 #define HS_ENABLE                    1
 #define HS_DISABLE                   0
@@ -1800,14 +1804,16 @@ static int hi6555c_smt_hslr_pd_outdrv_power_mode_event(struct snd_soc_dapm_widge
 		/* The power-up sequence rewrites the whole register with a fixed analog gain (12, or 14 with
 		 * "hslr_gain_reconfigue"). That throws away the HSL/HSR gain userspace (the audio HAL's mixer config) has
 		 * already programmed, so a louder-than-default speaker setting could never survive stream start. Keep a
-		 * higher gain that is already in the register; the HAL resets it to the default on every route change. */
+		 * higher gain captured before the first power-up step (hs_user_gain_*); the HAL resets it to the default on every route change. */
 		unsigned int def = HSLR_GAIN_RECONFIGURE_FLAG ? 0x5C : 0x58;
 		unsigned int gmask = 0xF << HI6555C_SMT_HSL_GAIN_BIT_START;
-		unsigned int gl = hi6555c_reg_read(g_codec, HI6555C_SMT_CODEC_ANA_RW17_ADDR) & gmask;
-		unsigned int gr = hi6555c_reg_read(g_codec, HI6555C_SMT_CODEC_ANA_RW18_ADDR) & gmask;
+		unsigned int gl = hs_user_gain_l;
+		unsigned int gr = hs_user_gain_r;
 
 		hi6555c_reg_write(g_codec, HI6555C_SMT_CODEC_ANA_RW17_ADDR, gl > (def & gmask) ? ((def & ~gmask) | gl) : def);
 		hi6555c_reg_write(g_codec, HI6555C_SMT_CODEC_ANA_RW18_ADDR, gr > (def & gmask) ? ((def & ~gmask) | gr) : def);
+		hs_user_gain_l = 0;
+		hs_user_gain_r = 0;
 	}
 		hi6555c_clr_reg_bits(HI6555C_SMT_CODEC_ANA_RW03_ADDR,
 				(0x01 << HI6555C_SMT_HSR_PD_BIT_START)|(0x01 << HI6555C_SMT_HSL_PD_BIT_START));
@@ -2273,6 +2279,8 @@ static int hi6555c_hs_preprocess_power_mode_event(struct snd_soc_dapm_widget *w,
 {
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		hs_user_gain_l = hi6555c_reg_read(g_codec, HI6555C_SMT_CODEC_ANA_RW17_ADDR) & (0xF << HI6555C_SMT_HSL_GAIN_BIT_START);
+		hs_user_gain_r = hi6555c_reg_read(g_codec, HI6555C_SMT_CODEC_ANA_RW18_ADDR) & (0xF << HI6555C_SMT_HSR_GAIN_BIT_START);
 		hi6555c_set_reg_bits(HI6555C_SMT_CODEC_ANA_RW21_ADDR,
 				((1<<HI6555C_SMT_RST_N_R_BIT_START)|(1<<HI6555C_SMT_RST_N_L_BIT_START))|(1<<HI6555C_SMT_PDD_EN_BIT_START));
 		hi6555c_reg_write(g_codec, HI6555C_SMT_CODEC_ANA_RW17_ADDR, 0x21);
