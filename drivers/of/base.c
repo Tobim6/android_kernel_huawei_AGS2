@@ -233,9 +233,14 @@ static void __init ags2_trim_parts(struct device_node *vb)
 		strlcat(out, tok, sizeof(out));
 	}
 	if (strlen(out) + 1 < (size_t)p->length) {
-		memcpy(p->value, out, strlen(out) + 1);
-		p->length = strlen(out) + 1;
-		pr_info("ags2: %s/parts = %s\n", vb->name, out);
+		/* the original value lives in the flattened blob, which arm64 maps read-only: swap in a new buffer */
+		char *nv = kstrdup(out, GFP_KERNEL);
+
+		if (!nv)
+			return;
+		p->value = nv;
+		p->length = strlen(nv) + 1;
+		pr_info("ags2: %s/parts = %s\n", vb->name, nv);
 	}
 }
 
@@ -254,10 +259,14 @@ static void __init ags2_dt_fixup(void)
 			if (!ags2_part_dropped(np->name))
 				continue;
 			st = of_find_property(np, "status", NULL);
-			if (st && st->value && st->length >= 3) {
-				memset(st->value, 0, st->length);
-				memcpy(st->value, "no", 3);
-			} else if (!st) {
+			if (st) {
+				char *nv = kstrdup("no", GFP_KERNEL);	/* the old value is in the read-only blob: never write to it */
+
+				if (!nv)
+					continue;
+				st->value = nv;
+				st->length = 3;
+			} else {
 				st = kzalloc(sizeof(*st), GFP_KERNEL);
 				if (!st)
 					continue;
