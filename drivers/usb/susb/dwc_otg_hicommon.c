@@ -1470,6 +1470,45 @@ enum otg_dev_event_type event_dequeue(struct hiusb_event_queue *event_queue)
 	return event;
 }
 
+/* dual-role class glue (drivers/huawei_platform/usb/otg_dual_role): DUAL_ROLE_PROP_MODE_UFP = 0, _DFP = 1, _NONE = 2 */
+extern void otg_dual_role_report(unsigned int mode) __weak;
+
+static unsigned int otg_status_to_dual_role_mode(const struct otg_dev *p)
+{
+	switch (p->status) {
+	case OTG_DEV_DEVICE:
+		return 0;
+	case OTG_DEV_HOST:
+		return 1;
+	default:
+		return 2;
+	}
+}
+
+unsigned int hisi_usb_otg_dual_role_mode(void)
+{
+	return otg_dev_p ? otg_status_to_dual_role_mode(otg_dev_p) : 2;
+}
+
+/*
+ * A role change asked for through the dual-role class (Settings > "USB controlled by"): queue what the cable would have caused.
+ * host: drop a device connection first (the state machine only goes OFF -> HOST), then "ID fall"; device: "ID rise" ends host mode and the
+ * next VBUS/charger event makes the port a device again.
+ */
+int hisi_usb_otg_dual_role_set(unsigned int mode)
+{
+	if (!otg_dev_p)
+		return -ENODEV;
+	if (mode == 1) {			/* DUAL_ROLE_PROP_MODE_DFP */
+		if (otg_dev_p->status == OTG_DEV_DEVICE)
+			hisi_usb_otg_event(CHARGER_DISCONNECT_EVENT);
+		return hisi_usb_otg_event(ID_FALL_EVENT);
+	}
+	if (mode == 0)				/* DUAL_ROLE_PROP_MODE_UFP */
+		return hisi_usb_otg_event(ID_RISE_EVENT);
+	return -EINVAL;
+}
+
 static void handle_event(struct otg_dev *p, enum otg_dev_event_type event)
 {
 	int ret = 0;
@@ -1600,6 +1639,8 @@ static void event_work(struct work_struct *work)
 		spin_unlock_irqrestore(&(p->event_lock), flags);
 
 		handle_event(p, event);
+		if (otg_dual_role_report)
+			otg_dual_role_report(otg_status_to_dual_role_mode(p));
 	}
 	event_queue_clear_overlay(&p->event_queue);
 

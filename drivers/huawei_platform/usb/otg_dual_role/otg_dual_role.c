@@ -14,6 +14,26 @@ struct otg_dual_role_data {
     int dual_state;
 };
 
+/*
+ * The hisi OTG state machine (drivers/usb/susb/dwc_otg_hicommon.c) is the only thing that knows whether the port is a device, a host or off.
+ * It reports that here (otg_dual_role_report), so that the port status userspace reads (and the Android USB HAL / Settings build on) follows
+ * the real state instead of staying at "none".
+ */
+extern unsigned int hisi_usb_otg_dual_role_mode(void) __weak;
+extern int hisi_usb_otg_dual_role_set(unsigned int mode) __weak;
+static struct otg_dual_role_data *g_otg_dual_data;
+
+void otg_dual_role_report(unsigned int mode)
+{
+    struct otg_dual_role_data *d = g_otg_dual_data;
+
+    if (!d || !d->dual_role_ins || d->dual_state == mode)
+        return;
+    d->dual_state = mode;
+    dual_role_instance_changed(d->dual_role_ins);
+    pr_info("%s: port is now %u\n", __func__, mode);
+}
+
 static enum dual_role_property otg_dual_role_props[] = {
     DUAL_ROLE_PROP_MODE,
     DUAL_ROLE_PROP_PR,
@@ -84,8 +104,16 @@ static int otg_dual_role_set_prop(struct dual_role_phy_instance *dual_role,
         return -EINVAL;
     }
 
-    dual_data->dual_state = *val;
-    dual_role_instance_changed(dual_role);
+    /* switch the controller for real; the state machine reports the outcome through otg_dual_role_report() */
+    if (hisi_usb_otg_dual_role_set) {
+        int rc = hisi_usb_otg_dual_role_set(*val);
+
+        if (rc)
+            return rc;
+    } else {
+        dual_data->dual_state = *val;
+        dual_role_instance_changed(dual_role);
+    }
 
     pr_info("%s: set prop %d as %d success\n", __func__, prop, *val);
 
@@ -130,8 +158,9 @@ __func__);
 
     dual_data->dev = &(pdev->dev);
     dual_data->dual_role_ins = dual_role_ins;
-    dual_data->dual_state = DUAL_ROLE_PROP_MODE_NONE;
+    dual_data->dual_state = hisi_usb_otg_dual_role_mode ? hisi_usb_otg_dual_role_mode() : DUAL_ROLE_PROP_MODE_NONE;
     dual_role_ins->drv_data = dual_data;
+    g_otg_dual_data = dual_data;
 
     dev_set_drvdata(&(pdev->dev), dual_data);
 
