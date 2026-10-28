@@ -5014,3 +5014,9 @@ CONFIG_OID_REGISTRY=y
 # CONFIG_SG_SPLIT is not set
 CONFIG_ARCH_HAS_SG_CHAIN=y
 CONFIG_WBT=y
+
+# BakaSU (KernelSU downstream), manual hook mode (4.4 non-GKI)
+CONFIG_KSU=y
+CONFIG_KSU_MANUAL_HOOK=y
+# CONFIG_KSU_TRACEPOINT_HOOK is not set
+# CONFIG_KSU_SUSFS is not set
