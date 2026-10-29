@@ -45,6 +45,14 @@ config INIT_ENV_ARG_LIMIT
 	  variables passed to init from the kernel command line.
 
 
+config CMDLINE_STRIP_SELINUX_PERMISSIVE
+	bool "Hide androidboot.selinux=permissive from /proc/cmdline"
+	help
+	  The bootloader of some Huawei devices appends
+	  androidboot.selinux=permissive to the command line it passes on.
+	  Say Y to remove it from the command line userspace sees, so that
+	  Android's init starts SELinux in enforcing mode.
+
 config CROSS_COMPILE
 	string "Cross-compiler tool prefix"
 	help

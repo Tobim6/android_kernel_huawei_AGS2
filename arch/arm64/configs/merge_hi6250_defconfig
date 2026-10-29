@@ -5022,3 +5022,4 @@ CONFIG_KSU_MANUAL_HOOK=y
 # CONFIG_KSU_SUSFS is not set
 # BakaSU adb root on a statically linked adbd (Android 9): escape the adb shell in the kernel
 CONFIG_KSU_ADB_ROOT_SHELL_ESCAPE=y
+CONFIG_CMDLINE_STRIP_SELINUX_PERMISSIVE=y

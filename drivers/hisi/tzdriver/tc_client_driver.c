@@ -261,6 +261,17 @@ static char system_ca_hash[SHA256_DIGEST_LENTH] = {0x6b, 0x78, 0x95, 0x68,
 					    0x8a, 0xd9, 0x1b, 0x02,
 					    0xbf, 0x69, 0xeb, 0x49,
 					   };
+/* hash code for /vendor/bin/system_teecd0: lets the daemon live on the vendor partition (SELinux/Treble keeps
+ * the HALs that talk to it and the daemon itself in the same partition's domains). */
+static char system_ca_hash_vendor[SHA256_DIGEST_LENTH] = {0xcf, 0x79, 0x11, 0x8f,
+					    0x35, 0xbe, 0xdf, 0x5b,
+					    0x61, 0xdd, 0x07, 0x21,
+					    0x44, 0xee, 0xc0, 0xf1,
+					    0xc4, 0x93, 0x38, 0xb3,
+					    0xf2, 0x3a, 0x05, 0x31,
+					    0xb6, 0x2d, 0xa3, 0x8b,
+					    0x3d, 0x6b, 0xc7, 0x4a
+					   };
 /*lint -restore */
 
 #define SYSTEM_SERVER "system_server"
@@ -450,7 +461,8 @@ static int check_teecd_access(struct task_struct *ca_task, int *type)
 				if (memcmp(digest, ca_hash, SHA256_DIGEST_LENTH) == 0) {
 					local_type = TEECD_CONNECT;
 					ret = 1;
-				} else if (memcmp(digest, system_ca_hash, SHA256_DIGEST_LENTH) == 0){
+				} else if (memcmp(digest, system_ca_hash, SHA256_DIGEST_LENTH) == 0 ||
+					   memcmp(digest, system_ca_hash_vendor, SHA256_DIGEST_LENTH) == 0) {
 					local_type = SYSTEM_TEECD_CONNECT;
 					ret = 1;
 				} else {

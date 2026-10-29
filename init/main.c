@@ -369,6 +369,28 @@ static inline void smp_prepare_cpus(unsigned int maxcpus) { }
  * parsing is performed in place, and we should allow a component to
  * store reference of name/value for future reference.
  */
+#ifdef CONFIG_CMDLINE_STRIP_SELINUX_PERMISSIVE
+/*
+ * The Huawei bootloader appends androidboot.selinux=permissive to every kernel command line. Android's init honours it
+ * on userdebug builds, so hide it from /proc/cmdline: SELinux then comes up enforcing (setenforce still works at runtime).
+ */
+static void __init strip_selinux_permissive(char *cmdline)
+{
+	static const char tok[] = "androidboot.selinux=permissive";
+	char *p;
+
+	while ((p = strstr(cmdline, tok)) != NULL) {
+		char *end = p + sizeof(tok) - 1;
+
+		if (*end == ' ')
+			end++;
+		memmove(p, end, strlen(end) + 1);
+	}
+}
+#else
+static inline void strip_selinux_permissive(char *cmdline) { }
+#endif
+
 static void __init setup_command_line(char *command_line)
 {
 	saved_command_line =
@@ -377,6 +399,7 @@ static void __init setup_command_line(char *command_line)
 		memblock_virt_alloc(strlen(boot_command_line) + 1, 0);
 	static_command_line = memblock_virt_alloc(strlen(command_line) + 1, 0);
 	strcpy(saved_command_line, boot_command_line);
+	strip_selinux_permissive(saved_command_line);
 	strcpy(static_command_line, command_line);
 }
 
